@@ -93,7 +93,7 @@ const Layout = () => {
               </div>
               <div className="flex-1">
                 <p className="font-medium text-sm">{user?.name}</p>
-                <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+                <p className="text-xs text-gray-500 capitalize">{user?.role?.role_name}</p>
               </div>
             </div>
             <div className="flex gap-2">

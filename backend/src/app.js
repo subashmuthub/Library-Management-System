@@ -68,10 +68,16 @@ app.get('/health', (req, res) => {
 });
 
 // API version 1 routes
+app.use('/api/v1/test', require('./routes/test.routes'));
 app.use('/api/v1/auth', require('./routes/auth.routes'));
 app.use('/api/v1/users', require('./routes/user.routes'));
+app.use('/api/v1/user-management', require('./routes/user-management.routes'));
+app.use('/api/v1/dashboard', require('./routes/library-dashboard.routes'));
 app.use('/api/v1/entry', require('./routes/entry.routes'));
-app.use('/api/v1/books', require('./routes/book.routes'));
+app.use('/api/v1/books', require('./routes/books.routes'));
+app.use('/api/v1/transactions', require('./routes/transaction.routes'));
+app.use('/api/v1/fines', require('./routes/fine.routes'));
+app.use('/api/v1/reservations', require('./routes/reservation.routes'));
 app.use('/api/v1/rfid', require('./routes/rfid.routes'));
 app.use('/api/v1/readers', require('./routes/reader.routes'));
 app.use('/api/v1/shelves', require('./routes/shelf.routes'));

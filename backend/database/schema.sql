@@ -18,26 +18,67 @@ CREATE DATABASE smart_library CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE smart_library;
 
 -- ============================================================================
+-- TABLE: user_roles
+-- Defines user role types and permissions
+-- ============================================================================
+CREATE TABLE user_roles (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    role_name VARCHAR(50) UNIQUE NOT NULL,
+    description TEXT NOT NULL,
+    permissions JSON NULL COMMENT 'Role-specific permissions',
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB COMMENT='User roles and permissions';
+
+-- ============================================================================
 -- TABLE: users
 -- Stores all system users (students, librarians, admins)
 -- ============================================================================
 CREATE TABLE users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
+    password VARCHAR(255) NOT NULL,
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
-    role ENUM('student', 'librarian', 'admin') NOT NULL DEFAULT 'student',
+    role_id INT NOT NULL DEFAULT 3,
     student_id VARCHAR(50) UNIQUE NULL,
     phone VARCHAR(20) NULL,
-    is_active BOOLEAN DEFAULT TRUE,
+    address TEXT NULL,
+    status ENUM('active', 'inactive', 'suspended') NOT NULL DEFAULT 'active',
+    force_password_change BOOLEAN DEFAULT FALSE,
+    password_changed_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
+    FOREIGN KEY (role_id) REFERENCES user_roles(id),
     INDEX idx_email (email),
     INDEX idx_student_id (student_id),
-    INDEX idx_role (role)
+    INDEX idx_role (role_id),
+    INDEX idx_status (status)
 ) ENGINE=InnoDB COMMENT='System users with role-based access';
+
+-- ============================================================================
+-- TABLE: user_activity_log
+-- Tracks user activity and administrative actions
+-- ============================================================================
+CREATE TABLE user_activity_log (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    action VARCHAR(100) NOT NULL COMMENT 'Type of action performed',
+    details TEXT NULL COMMENT 'Additional details about the action',
+    ip_address VARCHAR(45) NULL COMMENT 'IP address of the action',
+    user_agent VARCHAR(500) NULL COMMENT 'User agent string',
+    created_by INT NULL COMMENT 'User who performed the action (for admin actions)',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    
+    INDEX idx_user_activity (user_id, created_at DESC),
+    INDEX idx_action (action),
+    INDEX idx_created_at (created_at)
+) ENGINE=InnoDB COMMENT='User activity and administrative action log';
 
 -- ============================================================================
 -- TABLE: entry_logs
@@ -351,9 +392,389 @@ END //
 DELIMITER ;
 
 -- ============================================================================
--- SAMPLE CONFIGURATION DATA
+-- TABLE: book_transactions
+-- Tracks book checkouts and returns with dates
 -- ============================================================================
--- This will be populated by seed.sql
+CREATE TABLE book_transactions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    book_id INT NOT NULL,
+    transaction_type ENUM('checkout', 'return', 'renew') NOT NULL,
+    checkout_date DATE NOT NULL,
+    due_date DATE NOT NULL,
+    return_date DATE NULL,
+    renewed_count INT DEFAULT 0 COMMENT 'Number of times renewed',
+    status ENUM('active', 'returned', 'overdue', 'lost') DEFAULT 'active',
+    issued_by INT NULL COMMENT 'Librarian who issued the book',
+    returned_to INT NULL COMMENT 'Librarian who processed return',
+    notes TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
+    FOREIGN KEY (issued_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (returned_to) REFERENCES users(id) ON DELETE SET NULL,
+    
+    INDEX idx_user_status (user_id, status),
+    INDEX idx_book_status (book_id, status),
+    INDEX idx_due_date (due_date),
+    INDEX idx_checkout_date (checkout_date)
+) ENGINE=InnoDB COMMENT='Book checkout and return transactions';
+
+-- ============================================================================
+-- TABLE: fines
+-- Manages overdue fines and payments
+-- ============================================================================
+CREATE TABLE fines (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    transaction_id INT NOT NULL COMMENT 'Related book transaction',
+    fine_type ENUM('overdue', 'damage', 'lost_book', 'other') DEFAULT 'overdue',
+    amount DECIMAL(10, 2) NOT NULL,
+    days_overdue INT DEFAULT 0,
+    fine_rate DECIMAL(5, 2) DEFAULT 1.00 COMMENT 'Fine per day',
+    status ENUM('pending', 'paid', 'waived', 'partial') DEFAULT 'pending',
+    amount_paid DECIMAL(10, 2) DEFAULT 0.00,
+    payment_date DATE NULL,
+    payment_method ENUM('cash', 'card', 'online', 'waived') NULL,
+    processed_by INT NULL COMMENT 'Librarian who processed payment',
+    notes TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (transaction_id) REFERENCES book_transactions(id) ON DELETE CASCADE,
+    FOREIGN KEY (processed_by) REFERENCES users(id) ON DELETE SET NULL,
+    
+    INDEX idx_user_status (user_id, status),
+    INDEX idx_transaction_id (transaction_id),
+    INDEX idx_status (status)
+) ENGINE=InnoDB COMMENT='Library fines and payments';
+
+-- ============================================================================
+-- TABLE: reservations
+-- Book reservation queue system
+-- ============================================================================
+CREATE TABLE reservations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    book_id INT NOT NULL,
+    reservation_date DATE NOT NULL,
+    expiry_date DATE NOT NULL COMMENT 'Reservation expires after 7 days when book becomes available',
+    status ENUM('active', 'fulfilled', 'cancelled', 'expired') DEFAULT 'active',
+    queue_position INT DEFAULT 1 COMMENT 'Position in reservation queue',
+    notified_date DATE NULL COMMENT 'Date when user was notified book is available',
+    fulfilled_date DATE NULL,
+    cancelled_by INT NULL COMMENT 'User or librarian who cancelled',
+    notes TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
+    FOREIGN KEY (cancelled_by) REFERENCES users(id) ON DELETE SET NULL,
+    
+    INDEX idx_user_status (user_id, status),
+    INDEX idx_book_status (book_id, status),
+    INDEX idx_queue_position (book_id, queue_position),
+    INDEX idx_reservation_date (reservation_date)
+) ENGINE=InnoDB COMMENT='Book reservation system';
+
+-- ============================================================================
+-- TABLE: book_categories
+-- Normalized book categories for better organization
+-- ============================================================================
+CREATE TABLE book_categories (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL,
+    description TEXT NULL,
+    parent_category_id INT NULL COMMENT 'For hierarchical categories',
+    dewey_decimal VARCHAR(10) NULL COMMENT 'Dewey Decimal Classification',
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (parent_category_id) REFERENCES book_categories(id) ON DELETE SET NULL,
+    INDEX idx_name (name),
+    INDEX idx_parent (parent_category_id)
+) ENGINE=InnoDB COMMENT='Book category hierarchy';
+
+-- ============================================================================
+-- TABLE: library_settings
+-- System configuration and rules
+-- ============================================================================
+CREATE TABLE library_settings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    setting_key VARCHAR(100) UNIQUE NOT NULL,
+    setting_value TEXT NOT NULL,
+    description TEXT NULL,
+    category ENUM('general', 'fines', 'circulation', 'notifications') DEFAULT 'general',
+    data_type ENUM('string', 'number', 'boolean', 'json') DEFAULT 'string',
+    updated_by INT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_category (category)
+) ENGINE=InnoDB COMMENT='Library system settings and configuration';
+
+-- ============================================================================
+-- VIEWS FOR LIBRARY MANAGEMENT
+-- ============================================================================
+
+-- Active checkouts with user and book details
+CREATE VIEW active_checkouts AS
+SELECT 
+    bt.id as transaction_id,
+    bt.user_id,
+    CONCAT(u.first_name, ' ', u.last_name) as user_name,
+    u.email,
+    u.student_id,
+    bt.book_id,
+    b.title,
+    b.author,
+    b.isbn,
+    bt.checkout_date,
+    bt.due_date,
+    bt.renewed_count,
+    CASE 
+        WHEN bt.due_date < CURDATE() THEN 'overdue'
+        WHEN bt.due_date = CURDATE() THEN 'due_today'
+        ELSE 'active'
+    END as checkout_status,
+    DATEDIFF(CURDATE(), bt.due_date) as days_overdue
+FROM book_transactions bt
+JOIN users u ON bt.user_id = u.id
+JOIN books b ON bt.book_id = b.id
+WHERE bt.status = 'active';
+
+-- Overdue books with fine calculations
+CREATE VIEW overdue_books AS
+SELECT 
+    ac.*,
+    GREATEST(ac.days_overdue * 1.00, 0) as calculated_fine
+FROM active_checkouts ac
+WHERE ac.checkout_status = 'overdue';
+
+-- Available books (not currently checked out)
+CREATE VIEW available_books AS
+SELECT 
+    b.*,
+    cbl.shelf_code,
+    cbl.zone,
+    cbl.section,
+    cbl.last_scanned,
+    CASE 
+        WHEN r.id IS NOT NULL THEN 'reserved'
+        ELSE 'available'
+    END as availability_status,
+    COUNT(r.id) as reservation_count
+FROM books b
+LEFT JOIN current_book_locations cbl ON b.id = cbl.book_id
+LEFT JOIN book_transactions bt ON b.id = bt.book_id AND bt.status = 'active'
+LEFT JOIN reservations r ON b.id = r.book_id AND r.status = 'active'
+WHERE bt.id IS NULL AND b.is_available = TRUE
+GROUP BY b.id;
+
+-- User library statistics
+CREATE VIEW user_library_stats AS
+SELECT 
+    u.id as user_id,
+    u.first_name,
+    u.last_name,
+    u.email,
+    u.student_id,
+    COUNT(DISTINCT CASE WHEN bt.status = 'active' THEN bt.id END) as active_checkouts,
+    COUNT(DISTINCT CASE WHEN bt.status = 'returned' THEN bt.id END) as returned_books,
+    COUNT(DISTINCT CASE WHEN f.status = 'pending' THEN f.id END) as pending_fines,
+    COALESCE(SUM(CASE WHEN f.status = 'pending' THEN f.amount END), 0) as total_fine_amount,
+    COUNT(DISTINCT CASE WHEN r.status = 'active' THEN r.id END) as active_reservations
+FROM users u
+LEFT JOIN book_transactions bt ON u.id = bt.user_id
+LEFT JOIN fines f ON u.id = f.user_id
+LEFT JOIN reservations r ON u.id = r.user_id
+WHERE u.role = 'student'
+GROUP BY u.id;
+
+-- ============================================================================
+-- STORED PROCEDURES FOR LIBRARY OPERATIONS
+-- ============================================================================
+
+-- Check out a book
+DELIMITER //
+CREATE PROCEDURE checkout_book(
+    IN p_user_id INT,
+    IN p_book_id INT,
+    IN p_issued_by INT,
+    IN p_loan_days INT DEFAULT 14,
+    OUT p_success BOOLEAN,
+    OUT p_message VARCHAR(255)
+)
+BEGIN
+    DECLARE v_is_available BOOLEAN DEFAULT FALSE;
+    DECLARE v_user_checkout_count INT DEFAULT 0;
+    DECLARE v_max_checkouts INT DEFAULT 5;
+    DECLARE v_has_overdue BOOLEAN DEFAULT FALSE;
+    
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SET p_success = FALSE;
+        SET p_message = 'Database error occurred';
+    END;
+    
+    START TRANSACTION;
+    
+    -- Check if book is available
+    SELECT COUNT(*) = 0 INTO v_is_available
+    FROM book_transactions 
+    WHERE book_id = p_book_id AND status = 'active';
+    
+    IF NOT v_is_available THEN
+        SET p_success = FALSE;
+        SET p_message = 'Book is currently checked out';
+        ROLLBACK;
+    ELSE
+        -- Check user's current checkout count
+        SELECT COUNT(*) INTO v_user_checkout_count
+        FROM book_transactions 
+        WHERE user_id = p_user_id AND status = 'active';
+        
+        -- Check for overdue books
+        SELECT COUNT(*) > 0 INTO v_has_overdue
+        FROM book_transactions
+        WHERE user_id = p_user_id AND status = 'active' AND due_date < CURDATE();
+        
+        IF v_user_checkout_count >= v_max_checkouts THEN
+            SET p_success = FALSE;
+            SET p_message = 'Maximum checkout limit reached';
+            ROLLBACK;
+        ELSEIF v_has_overdue THEN
+            SET p_success = FALSE;
+            SET p_message = 'Cannot checkout: You have overdue books';
+            ROLLBACK;
+        ELSE
+            -- Create checkout transaction
+            INSERT INTO book_transactions (
+                user_id, book_id, transaction_type, checkout_date, due_date, issued_by
+            ) VALUES (
+                p_user_id, p_book_id, 'checkout', CURDATE(), DATE_ADD(CURDATE(), INTERVAL p_loan_days DAY), p_issued_by
+            );
+            
+            -- Update book availability
+            UPDATE books SET is_available = FALSE WHERE id = p_book_id;
+            
+            SET p_success = TRUE;
+            SET p_message = 'Book checked out successfully';
+            COMMIT;
+        END IF;
+    END IF;
+END //
+DELIMITER ;
+
+-- Return a book
+DELIMITER //
+CREATE PROCEDURE return_book(
+    IN p_transaction_id INT,
+    IN p_returned_to INT,
+    OUT p_success BOOLEAN,
+    OUT p_message VARCHAR(255),
+    OUT p_fine_amount DECIMAL(10,2)
+)
+BEGIN
+    DECLARE v_book_id INT;
+    DECLARE v_user_id INT;
+    DECLARE v_due_date DATE;
+    DECLARE v_days_overdue INT DEFAULT 0;
+    DECLARE v_fine_rate DECIMAL(5,2) DEFAULT 1.00;
+    
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SET p_success = FALSE;
+        SET p_message = 'Database error occurred';
+    END;
+    
+    START TRANSACTION;
+    
+    -- Get transaction details
+    SELECT book_id, user_id, due_date 
+    INTO v_book_id, v_user_id, v_due_date
+    FROM book_transactions 
+    WHERE id = p_transaction_id AND status = 'active';
+    
+    IF v_book_id IS NULL THEN
+        SET p_success = FALSE;
+        SET p_message = 'Invalid transaction or book already returned';
+        ROLLBACK;
+    ELSE
+        -- Calculate overdue days and fine
+        SET v_days_overdue = GREATEST(DATEDIFF(CURDATE(), v_due_date), 0);
+        SET p_fine_amount = v_days_overdue * v_fine_rate;
+        
+        -- Update transaction
+        UPDATE book_transactions 
+        SET status = 'returned', return_date = CURDATE(), returned_to = p_returned_to
+        WHERE id = p_transaction_id;
+        
+        -- Update book availability
+        UPDATE books SET is_available = TRUE WHERE id = v_book_id;
+        
+        -- Create fine if overdue
+        IF p_fine_amount > 0 THEN
+            INSERT INTO fines (
+                user_id, transaction_id, fine_type, amount, days_overdue, fine_rate
+            ) VALUES (
+                v_user_id, p_transaction_id, 'overdue', p_fine_amount, v_days_overdue, v_fine_rate
+            );
+        END IF;
+        
+        SET p_success = TRUE;
+        SET p_message = CONCAT('Book returned successfully', 
+            CASE WHEN p_fine_amount > 0 THEN CONCAT('. Fine: $', p_fine_amount) ELSE '' END
+        );
+        COMMIT;
+    END IF;
+END //
+DELIMITER ;
+
+-- ============================================================================
+-- INSERT DEFAULT USER ROLES
+-- ============================================================================
+INSERT INTO user_roles (id, role_name, description, permissions) VALUES
+(1, 'admin', 'System administrator with full access', '{"users": ["create", "read", "update", "delete"], "books": ["create", "read", "update", "delete"], "transactions": ["create", "read", "update", "delete"], "fines": ["create", "read", "update", "delete"], "reservations": ["create", "read", "update", "delete"], "reports": ["read"], "settings": ["read", "update"]}'),
+(2, 'librarian', 'Library staff with administrative access', '{"users": ["read", "update"], "books": ["create", "read", "update"], "transactions": ["create", "read", "update"], "fines": ["read", "update"], "reservations": ["read", "update"], "reports": ["read"]}'),
+(3, 'student', 'Student user with basic access', '{"books": ["read"], "transactions": ["read"], "reservations": ["create", "read", "update"]}');
+
+-- ============================================================================
+-- INSERT DEFAULT LIBRARY SETTINGS
+-- ============================================================================
+INSERT INTO library_settings (setting_key, setting_value, description, category, data_type) VALUES
+('max_checkout_limit', '5', 'Maximum number of books a user can checkout', 'circulation', 'number'),
+('default_loan_period', '14', 'Default loan period in days', 'circulation', 'number'),
+('max_renewal_count', '2', 'Maximum number of times a book can be renewed', 'circulation', 'number'),
+('daily_fine_rate', '1.00', 'Fine amount per day for overdue books', 'fines', 'number'),
+('max_fine_amount', '50.00', 'Maximum fine amount per book', 'fines', 'number'),
+('reservation_hold_days', '7', 'Number of days to hold a reserved book', 'circulation', 'number');
+
+-- ============================================================================
+-- INSERT DEFAULT BOOK CATEGORIES
+-- ============================================================================
+INSERT INTO book_categories (name, description, dewey_decimal) VALUES
+('Fiction', 'Novels, stories, and literary works', '800-899'),
+('Science Fiction', 'Science fiction and fantasy literature', '813.0876'),
+('Mystery & Thriller', 'Mystery, detective, and thriller novels', '813.087'),
+('Romance', 'Romance novels and love stories', '813.085'),
+('Historical Fiction', 'Historical novels and period fiction', '813.081'),
+('Non-Fiction', 'Factual books and reference materials', '000-799'),
+('Biography', 'Biographies and autobiographies', '920-929'),
+('History', 'Historical texts and documentation', '900-999'),
+('Science', 'Scientific texts and research', '500-599'),
+('Technology', 'Computer science and technology', '004-006'),
+('Mathematics', 'Mathematical texts and reference', '510-519'),
+('Business', 'Business and economic texts', '330-339'),
+('Self-Help', 'Personal development and self-improvement', '158'),
+('Reference', 'Dictionaries, encyclopedias, and reference', '000-099'),
+('Children', 'Children\'s books and young adult literature', 'J');
 
 -- ============================================================================
 -- END OF SCHEMA

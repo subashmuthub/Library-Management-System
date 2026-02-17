@@ -14,20 +14,20 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- USERS
 -- Password for all users: "password123" (hashed with bcrypt)
 -- ============================================================================
-INSERT INTO users (email, password_hash, first_name, last_name, role, student_id, phone) VALUES
+INSERT INTO users (email, password, first_name, last_name, role_id, student_id, phone, status) VALUES
 -- Admins
-('admin@library.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'Alice', 'Admin', 'admin', NULL, '555-0001'),
+('admin@library.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'Alice', 'Admin', 1, NULL, '555-0001', 'active'),
 
--- Librarians
-('librarian1@library.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'Bob', 'Librarian', 'librarian', NULL, '555-0002'),
-('librarian2@library.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'Carol', 'Books', 'librarian', NULL, '555-0003'),
+-- Librarians 
+('librarian1@library.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'Bob', 'Librarian', 2, NULL, '555-0002', 'active'),
+('librarian2@library.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'Carol', 'Books', 2, NULL, '555-0003', 'active'),
 
 -- Students
-('student1@university.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'David', 'Student', 'student', 'STU001', '555-1001'),
-('student2@university.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'Emma', 'Scholar', 'student', 'STU002', '555-1002'),
-('student3@university.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'Frank', 'Reader', 'student', 'STU003', '555-1003'),
-('student4@university.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'Grace', 'Learner', 'student', 'STU004', '555-1004'),
-('student5@university.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'Henry', 'Bookworm', 'student', 'STU005', '555-1005');
+('student1@university.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'David', 'Student', 3, 'STU001', '555-1001', 'active'),
+('student2@university.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'Emma', 'Scholar', 3, 'STU002', '555-1002', 'active'),
+('student3@university.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'Frank', 'Reader', 3, 'STU003', '555-1003', 'active'),
+('student4@university.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'Grace', 'Learner', 3, 'STU004', '555-1004', 'active'),
+('student5@university.edu', '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu', 'Henry', 'Bookworm', 3, 'STU005', '555-1005', 'active');
 
 -- ============================================================================
 -- SHELVES
