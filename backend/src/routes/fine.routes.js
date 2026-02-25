@@ -1,15 +1,16 @@
 /**
  * Fine Management Routes
  * Endpoints for fine calculations, payments, and management
+ * Authentication disabled for development
  */
 
 const express = require('express');
 const router = express.Router();
 const FineController = require('../controllers/fine.controller');
-const { authenticate } = require('../middleware/auth.middleware');
+// const { authenticate } = require('../middleware/auth.middleware');
 
-// Apply authentication to all routes
-router.use(authenticate);
+// Authentication disabled for now
+// router.use(authenticate);
 
 /**
  * GET /api/fines

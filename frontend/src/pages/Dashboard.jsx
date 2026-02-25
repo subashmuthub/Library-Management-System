@@ -10,6 +10,7 @@ const Dashboard = () => {
     occupancy: 0,
     recentEntries: [],
     recentBooks: [],
+    totalBooks: 0,
   });
   const [loading, setLoading] = useState(true);
 
@@ -20,15 +21,16 @@ const Dashboard = () => {
   const loadDashboardData = async () => {
     try {
       const [occupancyData, historyData, booksData] = await Promise.all([
-        entryService.getCurrentOccupancy(),
-        entryService.getMyHistory(),
-        bookService.searchBooks({ limit: 5 }),
+        entryService.getCurrentOccupancy().catch(() => ({ current_occupancy: 0 })),
+        entryService.getMyHistory().catch(() => ({ entries: [] })),
+        bookService.getAllBooks({ limit: 5 }).catch(() => ({ data: { books: [] } })),
       ]);
 
       setStats({
         occupancy: occupancyData.current_occupancy || 0,
         recentEntries: historyData.entries?.slice(0, 5) || [],
-        recentBooks: booksData.books || [],
+        recentBooks: booksData.data?.books || booksData.books || [],
+        totalBooks: booksData.data?.pagination?.totalBooks || 0,
       });
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
@@ -82,7 +84,7 @@ const Dashboard = () => {
         <StatCard
           icon={BookOpen}
           label="Books in Library"
-          value="10,000+"
+          value={stats.totalBooks.toLocaleString()}
           color="bg-green-500"
         />
         <StatCard
@@ -94,7 +96,7 @@ const Dashboard = () => {
         <StatCard
           icon={TrendingUp}
           label="Active Today"
-          value={Math.floor(stats.occupancy * 1.5)}
+          value={stats.occupancy}
           color="bg-orange-500"
         />
       </div>

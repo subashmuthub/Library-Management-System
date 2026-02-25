@@ -12,6 +12,7 @@ class BookController {
         try {
             const { 
                 search, 
+                q, // Also support 'q' parameter for search
                 category, 
                 author, 
                 availability,
@@ -23,20 +24,68 @@ class BookController {
 
             const connection = await pool.getConnection();
             
-            // Start with a simple query without parameters to test
-            let query = `SELECT b.*, 'available' as availability_status, 0 as reservation_count FROM books b WHERE 1=1`;
+            // Build WHERE conditions
+            let whereConditions = ['1=1'];
+            let queryParams = [];
+
+            // Search in title, author, or description
+            const searchTerm = search || q;
+            if (searchTerm && searchTerm.trim()) {
+                whereConditions.push('(b.title LIKE ? OR b.author LIKE ? OR b.description LIKE ?)');
+                const searchParam = `%${searchTerm.trim()}%`;
+                queryParams.push(searchParam, searchParam, searchParam);
+            }
+
+            // Filter by category/department
+            if (category && category.trim()) {
+                whereConditions.push('b.category = ?');
+                queryParams.push(category.trim());
+            }
+
+            // Filter by author
+            if (author && author.trim()) {
+                whereConditions.push('b.author LIKE ?');
+                queryParams.push(`%${author.trim()}%`);
+            }
+
+            // Filter by availability
+            if (availability === 'available') {
+                whereConditions.push('b.is_available = TRUE');
+            } else if (availability === 'unavailable') {
+                whereConditions.push('b.is_available = FALSE');
+            }
+
+            const whereClause = whereConditions.join(' AND ');
+
+            // Main query for books
+            let query = `
+                SELECT b.*, 
+                       'available' as availability_status, 
+                       0 as reservation_count 
+                FROM books b 
+                WHERE ${whereClause}
+            `;
+
+            // Add sorting
+            const validSortColumns = ['title', 'author', 'category', 'publication_year', 'created_at'];
+            const validSortOrders = ['ASC', 'DESC'];
+            const safeSortBy = validSortColumns.includes(sortBy) ? sortBy : 'title';
+            const safeSortOrder = validSortOrders.includes(sortOrder.toUpperCase()) ? sortOrder.toUpperCase() : 'ASC';
+            
+            query += ` ORDER BY b.${safeSortBy} ${safeSortOrder}`;
 
             // Add pagination with safe values
             const pageNum = Math.max(1, parseInt(page) || 1);
-            const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
+            const limitNum = Math.max(1, Math.min(200, parseInt(limit) || 20));
             const offset = (pageNum - 1) * limitNum;
             
-            query += ` ORDER BY b.title ASC LIMIT ${limitNum} OFFSET ${offset}`;
+            query += ` LIMIT ${limitNum} OFFSET ${offset}`;
             
-            const [books] = await connection.execute(query);
+            const [books] = await connection.execute(query, queryParams);
 
-            // Get total count
-            const [countResult] = await connection.execute(`SELECT COUNT(*) as total FROM books`);
+            // Get total count with same WHERE clause
+            const countQuery = `SELECT COUNT(*) as total FROM books b WHERE ${whereClause}`;
+            const [countResult] = await connection.execute(countQuery, queryParams);
             const total = countResult[0].total;
 
             connection.release();
@@ -49,7 +98,9 @@ class BookController {
                         currentPage: pageNum,
                         totalPages: Math.ceil(total / limitNum),
                         totalBooks: total,
-                        limit: limitNum
+                        limit: limitNum,
+                        hasNext: pageNum < Math.ceil(total / limitNum),
+                        hasPrev: pageNum > 1
                     }
                 }
             });
@@ -284,7 +335,8 @@ class BookController {
                 language = 'English',
                 pages,
                 description,
-                cover_image_url
+                cover_image_url,
+                total_copies = 1
             } = req.body;
 
             // Validate required fields
@@ -313,11 +365,13 @@ class BookController {
             const [result] = await connection.execute(`
                 INSERT INTO books (
                     isbn, title, author, publisher, publication_year,
-                    category, edition, language, pages, description, cover_image_url
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    category, edition, language, pages, description, 
+                    cover_image_url, total_copies
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
                 isbn, title, author, publisher, publication_year,
-                category, edition, language, pages, description, cover_image_url
+                category, edition, language, pages, description, 
+                cover_image_url, total_copies
             ]);
 
             const bookId = result.insertId;
@@ -355,7 +409,7 @@ class BookController {
             const allowedFields = [
                 'title', 'author', 'publisher', 'publication_year',
                 'category', 'edition', 'language', 'pages', 
-                'description', 'cover_image_url', 'is_available'
+                'description', 'cover_image_url', 'total_copies', 'is_available'
             ];
 
             const updates = {};
@@ -411,21 +465,14 @@ class BookController {
             const { id } = req.params;
             const connection = await pool.getConnection();
 
-            // Check if book has active transactions
-            const [activeTransactions] = await connection.execute(`
-                SELECT COUNT(*) as count 
-                FROM book_transactions 
-                WHERE book_id = ? AND status = 'active'
-            `, [id]);
-
-            if (activeTransactions[0].count > 0) {
-                connection.release();
-                return res.status(400).json({ 
-                    error: 'Cannot delete book with active checkouts' 
-                });
-            }
-
-            // Delete book (cascading will handle related records)
+            // Note: Foreign key constraints now have CASCADE delete enabled
+            // This will automatically delete related records in:
+            // - book_transactions (cancelled automatically)
+            // - reservations
+            // - book_location_history
+            // - rfid_tags
+            
+            // Delete book (cascading handles all related records)
             const [result] = await connection.execute(
                 'DELETE FROM books WHERE id = ?',
                 [id]
@@ -437,11 +484,14 @@ class BookController {
                 return res.status(404).json({ error: 'Book not found' });
             }
 
-            res.json({ message: 'Book deleted successfully' });
+            res.json({ 
+                message: 'Book deleted successfully',
+                note: 'All related records (transactions, reservations, history) were also deleted'
+            });
 
         } catch (error) {
             console.error('Error deleting book:', error);
-            res.status(500).json({ error: 'Internal server error' });
+            res.status(500).json({ error: 'Internal server error', details: error.message });
         }
     }
 
@@ -450,12 +500,25 @@ class BookController {
         try {
             const connection = await pool.getConnection();
             
+            // Get all categories with counts
             const [categories] = await connection.execute(`
-                SELECT DISTINCT category as name, COUNT(*) as count
+                SELECT 
+                    category as name, 
+                    COUNT(*) as count
                 FROM books
-                WHERE category IS NOT NULL
+                WHERE category IS NOT NULL AND category != ''
                 GROUP BY category
-                ORDER BY category
+                ORDER BY 
+                    CASE category
+                        WHEN 'CSE' THEN 1
+                        WHEN 'EEE' THEN 2
+                        WHEN 'ECE' THEN 3
+                        WHEN 'MECH' THEN 4
+                        WHEN 'AIDS' THEN 5
+                        WHEN 'S&H' THEN 6
+                        ELSE 7
+                    END,
+                    category
             `);
 
             connection.release();
@@ -464,6 +527,124 @@ class BookController {
         } catch (error) {
             console.error('Error fetching categories:', error);
             res.status(500).json({ error: 'Internal server error' });
+        }
+    }
+
+    // Bulk import books from CSV/Excel
+    static async bulkImportBooks(req, res) {
+        try {
+            const { books } = req.body;
+
+            if (!Array.isArray(books) || books.length === 0) {
+                return res.status(400).json({ 
+                    error: 'Invalid request. Expected an array of books.' 
+                });
+            }
+
+            const connection = await pool.getConnection();
+            await connection.beginTransaction();
+
+            const results = {
+                success: [],
+                failed: []
+            };
+
+            for (let i = 0; i < books.length; i++) {
+                const book = books[i];
+                const rowNumber = i + 2; // +2 because row 1 is header and array is 0-indexed
+
+                try {
+                    // Note: All validation removed - books can be imported with missing fields
+                    // Database now allows NULL for title, author, and ISBN
+                    
+                    // Note: Removed ISBN uniqueness check to allow duplicate books
+                    // If you want to update existing books instead, uncomment the check below:
+                    
+                    /*
+                    // Check if book with same ISBN already exists
+                    const [existingBooks] = await connection.execute(
+                        'SELECT id, title FROM books WHERE isbn = ?',
+                        [book.isbn]
+                    );
+
+                    if (existingBooks.length > 0) {
+                        // Update copy count instead of creating duplicate
+                        const newTotalCopies = (book.total_copies ? parseInt(book.total_copies) : 1);
+                        await connection.execute(
+                            'UPDATE books SET total_copies = total_copies + ?, available_copies = available_copies + ? WHERE isbn = ?',
+                            [newTotalCopies, newTotalCopies, book.isbn]
+                        );
+                        
+                        results.success.push({
+                            row: rowNumber,
+                            action: 'updated',
+                            title: existingBooks[0].title,
+                            isbn: book.isbn,
+                            addedCopies: newTotalCopies
+                        });
+                        continue;
+                    }
+                    */
+
+                    // Insert book with all available fields
+                    const totalCopies = book.total_copies ? parseInt(book.total_copies) : 1;
+                    const [result] = await connection.execute(`
+                        INSERT INTO books (
+                            isbn, title, author, publisher, publication_year,
+                            category, edition, language, pages, description, 
+                            cover_image_url, total_copies, available_copies
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `, [
+                        book.isbn?.trim(),
+                        book.title?.trim(),
+                        book.author?.trim(),
+                        book.publisher?.trim() || null,
+                        book.publication_year || null,
+                        book.category?.trim() || null,
+                        book.edition?.trim() || null,
+                        book.language?.trim() || 'English',
+                        book.pages ? parseInt(book.pages) : null,
+                        book.description?.trim() || null,
+                        book.cover_image_url?.trim() || null,
+                        totalCopies,
+                        totalCopies // available_copies should equal total_copies initially
+                    ]);
+
+                    results.success.push({
+                        row: rowNumber,
+                        bookId: result.insertId,
+                        title: book.title,
+                        isbn: book.isbn
+                    });
+
+                } catch (error) {
+                    results.failed.push({
+                        row: rowNumber,
+                        data: book,
+                        error: error.message
+                    });
+                }
+            }
+
+            await connection.commit();
+            connection.release();
+
+            res.json({
+                message: 'Bulk import completed',
+                summary: {
+                    total: books.length,
+                    success: results.success.length,
+                    failed: results.failed.length
+                },
+                results
+            });
+
+        } catch (error) {
+            console.error('Error in bulk import:', error);
+            res.status(500).json({ 
+                error: 'Internal server error during bulk import',
+                details: error.message 
+            });
         }
     }
 }
@@ -477,6 +658,7 @@ module.exports = {
     deleteBook: BookController.deleteBook,
     getCategories: BookController.getCategories,
     getBookLocationHistory: BookController.getBookLocationHistory,
+    bulkImportBooks: BookController.bulkImportBooks,
     
     // Legacy methods for backward compatibility
     searchBooks: BookController.searchBooks

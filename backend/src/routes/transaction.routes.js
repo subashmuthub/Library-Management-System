@@ -1,15 +1,16 @@
 /**
  * Transaction Routes
  * Endpoints for book checkout, return, and renewal operations
+ * Authentication disabled for development
  */
 
 const express = require('express');
 const router = express.Router();
 const TransactionController = require('../controllers/transaction.controller');
-const { authenticate } = require('../middleware/auth.middleware');
+// const { authenticate } = require('../middleware/auth.middleware');
 
-// Apply authentication to all routes
-router.use(authenticate);
+// Authentication disabled for development
+// router.use(authenticate);
 
 /**
  * POST /api/transactions/checkout

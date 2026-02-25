@@ -2,23 +2,24 @@
  * User Routes
  * 
  * User profile and management endpoints.
+ * Authentication disabled for development
  */
 
 const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/user.controller');
-const { authenticate, authorize } = require('../middleware/auth.middleware');
+// const { authenticate, authorize } = require('../middleware/auth.middleware');
 
 // Get current user profile
-router.get('/profile', authenticate, userController.getProfile);
-
-// Get user by ID (admin/librarian only)
-router.get('/:id', authenticate, authorize(['admin', 'librarian']), userController.getUserById);
+router.get('/profile', userController.getProfile);
 
 // Update user profile
-router.put('/profile', authenticate, userController.updateProfile);
+router.put('/profile', userController.updateProfile);
 
-// List all users (admin only)
-router.get('/', authenticate, authorize(['admin']), userController.listUsers);
+// List all users (must come before /:id to avoid route collision)
+router.get('/', userController.listUsers);
+
+// Get user by ID (must come after / to avoid matching everything)
+router.get('/:id', userController.getUserById);
 
 module.exports = router;

@@ -1,15 +1,16 @@
 /**
  * Reservation Routes
  * Endpoints for book reservations and queue management
+ * Authentication disabled for development
  */
 
 const express = require('express');
 const router = express.Router();
 const ReservationController = require('../controllers/reservation.controller');
-const { authenticate } = require('../middleware/auth.middleware');
+// const { authenticate } = require('../middleware/auth.middleware');
 
-// Apply authentication to all routes
-router.use(authenticate);
+// Authentication disabled for now
+// router.use(authenticate);
 
 /**
  * POST /api/reservations

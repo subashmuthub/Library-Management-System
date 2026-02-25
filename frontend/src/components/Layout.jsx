@@ -11,7 +11,12 @@ import {
   LogOut,
   Menu,
   X,
-  Settings
+  Settings,
+  RefreshCw,
+  DollarSign,
+  Bookmark,
+  Users,
+  TestTube
 } from 'lucide-react';
 
 const Layout = () => {
@@ -29,9 +34,14 @@ const Layout = () => {
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/books', label: 'Books', icon: BookOpen },
+    { path: '/transactions', label: 'Transactions', icon: RefreshCw },
+    { path: '/fines', label: 'Fines', icon: DollarSign },
+    { path: '/reservations', label: 'Reservations', icon: Bookmark },
+    { path: '/users', label: 'Users', icon: Users },
     { path: '/entry', label: 'Entry Log', icon: LogIn },
     { path: '/rfid', label: 'RFID Scanner', icon: Scan },
     { path: '/navigation', label: 'Navigation', icon: NavigationIcon },
+    { path: '/api-test', label: 'API Test', icon: TestTube },
   ];
 
   return (

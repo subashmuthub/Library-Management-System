@@ -10,11 +10,16 @@ class ReservationController {
     // Reserve a book
     static async reserveBook(req, res) {
         try {
-            const { book_id } = req.body;
-            const userId = req.user?.id;
+            const { book_id, user_id } = req.body;
+            // For development without auth: accept userId from body or from auth
+            const userId = req.user?.id || user_id;
 
             if (!book_id) {
                 return res.status(400).json({ error: 'Book ID is required' });
+            }
+            
+            if (!userId) {
+                return res.status(400).json({ error: 'User ID is required (include user_id in request body for testing)' });
             }
 
             const connection = await pool.getConnection();
@@ -221,7 +226,23 @@ class ReservationController {
         try {
             const { status, book_id, page = 1, limit = 20 } = req.query;
             
-            const connection = await pool.getConnection();
+            // Parse and validate pagination parameters
+            const parsedPage = Math.max(1, parseInt(page) || 1);
+            const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 20));
+
+            // Check if table has any data first
+            const [countCheck] = await pool.query('SELECT COUNT(*) as total FROM reservations');
+            if (countCheck[0].total === 0) {
+                return res.json({
+                    reservations: [],
+                    pagination: {
+                        page: parsedPage,
+                        limit: parsedLimit,
+                        total: 0,
+                        totalPages: 0
+                    }
+                });
+            }
 
             let query = `
                 SELECT 
@@ -258,11 +279,11 @@ class ReservationController {
                 r.created_at ASC`;
 
             // Add pagination
-            const offset = (parseInt(page) - 1) * parseInt(limit);
+            const offset = (parsedPage - 1) * parsedLimit;
             query += ` LIMIT ? OFFSET ?`;
-            params.push(parseInt(limit), offset);
+            params.push(parsedLimit, offset);
 
-            const [reservations] = await connection.execute(query, params);
+            const [reservations] = await pool.query(query, params);
 
             // Get total count
             let countQuery = `SELECT COUNT(*) as total FROM reservations r WHERE 1=1`;
@@ -276,17 +297,15 @@ class ReservationController {
                 countParams.push(book_id);
             }
 
-            const [countResult] = await connection.execute(countQuery, countParams);
-
-            connection.release();
+            const [countResult] = await pool.query(countQuery, countParams);
 
             res.json({
                 reservations,
                 pagination: {
-                    page: parseInt(page),
-                    limit: parseInt(limit),
+                    page: parsedPage,
+                    limit: parsedLimit,
                     total: countResult[0].total,
-                    totalPages: Math.ceil(countResult[0].total / parseInt(limit))
+                    totalPages: Math.ceil(countResult[0].total / parsedLimit)
                 }
             });
 

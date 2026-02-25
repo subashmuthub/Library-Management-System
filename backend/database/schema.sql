@@ -122,7 +122,7 @@ CREATE TABLE entry_logs (
 -- ============================================================================
 CREATE TABLE books (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    isbn VARCHAR(13) UNIQUE NOT NULL,
+    isbn VARCHAR(20) UNIQUE NOT NULL,
     title VARCHAR(500) NOT NULL,
     author VARCHAR(255) NOT NULL,
     publisher VARCHAR(255) NULL,
@@ -133,6 +133,7 @@ CREATE TABLE books (
     pages INT NULL,
     description TEXT NULL,
     cover_image_url VARCHAR(500) NULL,
+    total_copies INT DEFAULT 1 COMMENT 'Total number of copies available',
     is_available BOOLEAN DEFAULT TRUE COMMENT 'FALSE if book is checked out',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

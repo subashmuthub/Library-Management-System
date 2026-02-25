@@ -38,9 +38,9 @@ const register = async (req, res, next) => {
 
     // Insert new user
     const result = await query(
-      `INSERT INTO users (email, password_hash, first_name, last_name, role, student_id, phone)
+      `INSERT INTO users (email, password, first_name, last_name, role_id, student_id, phone)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [email, passwordHash, firstName, lastName, role, student_id, phone]
+      [email, passwordHash, firstName, lastName, role || 3, student_id, phone]
     );
 
     // Generate session token
@@ -84,8 +84,11 @@ const login = async (req, res, next) => {
 
     // Find user
     const users = await query(
-      `SELECT id, email, password_hash, first_name, last_name, role, student_id, is_active
-       FROM users WHERE email = ?`,
+      `SELECT u.id, u.email, u.password, u.first_name, u.last_name, 
+              u.role_id, r.role_name, u.student_id, u.status
+       FROM users u
+       JOIN user_roles r ON u.role_id = r.id
+       WHERE u.email = ?`,
       [email]
     );
 
@@ -97,17 +100,22 @@ const login = async (req, res, next) => {
     }
 
     const user = users[0];
+    
+    console.log('Login attempt:', { email, passwordLength: password.length });
+    console.log('User found:', { email: user.email, status: user.status, hasPassword: !!user.password });
 
     // Check if account is active
-    if (!user.is_active) {
+    if (user.status !== 'active') {
       return res.status(403).json({
         error: 'Authentication Error',
-        message: 'Account is inactive'
+        message: 'Account is inactive or suspended'
       });
     }
 
     // Verify password
-    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    console.log('Comparing passwords...');
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    console.log('Password valid:', isValidPassword);
 
     if (!isValidPassword) {
       return res.status(401).json({
@@ -121,7 +129,8 @@ const login = async (req, res, next) => {
       {
         id: user.id,
         email: user.email,
-        role: user.role
+        role: user.role_name,
+        role_id: user.role_id
       },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
@@ -142,7 +151,10 @@ const login = async (req, res, next) => {
         id: user.id,
         name: `${user.first_name} ${user.last_name}`,
         email: user.email,
-        role: user.role,
+        role: {
+          id: user.role_id,
+          role_name: user.role_name
+        },
         student_id: user.student_id
       }
     });

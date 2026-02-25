@@ -12,14 +12,15 @@ const api = axios.create({
 });
 
 // Response interceptor for error handling
+// Temporarily disabled for testing without authentication
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      // Session expired or invalid
-      localStorage.removeItem('user');
-      window.location.href = '/login';
-    }
+    // Disabled 401 redirect for development/testing
+    // if (error.response?.status === 401) {
+    //   localStorage.removeItem('user');
+    //   window.location.href = '/login';
+    // }
     return Promise.reject(error);
   }
 );

@@ -17,14 +17,19 @@ const BookDetails = () => {
   }, [id]);
 
   const loadBookDetails = async () => {
+    if (!id || id === 'undefined') {
+      console.error('Invalid book ID:', id);
+      return;
+    }
+    
     setLoading(true);
     try {
       const [bookData, historyData] = await Promise.all([
         bookService.getBookById(id),
         bookService.getBookLocationHistory(id),
       ]);
-      setBook(bookData.book);
-      setLocationHistory(historyData.history || []);
+      setBook(bookData.book || bookData.data);
+      setLocationHistory(historyData.history || historyData.data || []);
     } catch (error) {
       console.error('Failed to load book details:', error);
     } finally {

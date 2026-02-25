@@ -1,0 +1,8 @@
+title,author,isbn,category,publisher,publication_year,total_copies,edition,language,pages,description,cover_image_url
+Book With All Fields,John Doe,1234567890,Fiction,Publisher A,2024,5,1st,English,300,Complete book data,
+Book Missing Author,,9876543210,Science,Publisher B,2023,3,2nd,English,250,Author field is empty,
+Book Missing Title,Jane Smith,,History,Publisher C,2022,2,1st,English,400,Title field is empty,
+Book Missing ISBN,Bob Wilson,5555555555,Technology,Publisher D,2021,4,3rd,English,350,ISBN field is empty,
+Book With Only Title,,,,,,,,,,,
+,Author Only,123456789,,,,,,,,
+Book Minimal Data,,,,,,,,,,,

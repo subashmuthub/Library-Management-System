@@ -11,114 +11,36 @@ class UserManagementController {
     // Get all users with library statistics
     static async getAllUsers(req, res) {
         try {
-            const { 
-                role, status, search, page = 1, limit = 20,
-                sort_by = 'created_at', sort_order = 'DESC'
-            } = req.query;
-            
-            const connection = await pool.getConnection();
-
-            let query = `
+            // Simplified query without complex parameters
+            const query = `
                 SELECT 
-                    u.*,
-                    r.role_name,
-                    COUNT(DISTINCT bt_active.id) as active_checkouts,
-                    COUNT(DISTINCT bt_total.id) as total_checkouts,
-                    COUNT(DISTINCT res.id) as active_reservations,
-                    COUNT(DISTINCT f.id) as pending_fines,
-                    COALESCE(SUM(CASE WHEN f.status = 'pending' THEN f.amount - f.amount_paid END), 0) as outstanding_fines
+                    u.id,
+                    u.email,
+                    u.first_name,
+                    u.last_name,
+                    u.role_id,
+                    u.student_id,
+                    u.phone,
+                    u.status,
+                    u.created_at,
+                    u.updated_at,
+                    r.role_name
                 FROM users u
                 LEFT JOIN user_roles r ON u.role_id = r.id
-                LEFT JOIN book_transactions bt_active ON u.id = bt_active.user_id 
-                    AND bt_active.return_date IS NULL
-                LEFT JOIN book_transactions bt_total ON u.id = bt_total.user_id
-                LEFT JOIN reservations res ON u.id = res.user_id 
-                    AND res.status IN ('active', 'ready')
-                LEFT JOIN fines f ON u.id = f.user_id 
-                    AND f.status = 'pending'
-                WHERE 1=1
+                ORDER BY u.created_at DESC
+                LIMIT 20
             `;
 
-            let params = [];
-
-            // Add filters
-            if (role) {
-                query += ` AND r.role_name = ?`;
-                params.push(role);
-            }
-
-            if (status) {
-                query += ` AND u.status = ?`;
-                params.push(status);
-            }
-
-            if (search) {
-                query += ` AND (
-                    CONCAT(u.first_name, ' ', u.last_name) LIKE ? OR
-                    u.email LIKE ? OR
-                    u.student_id LIKE ? OR
-                    u.phone LIKE ?
-                )`;
-                const searchPattern = `%${search}%`;
-                params.push(searchPattern, searchPattern, searchPattern, searchPattern);
-            }
-
-            query += ` GROUP BY u.id`;
-
-            // Add sorting
-            const validSortFields = ['created_at', 'first_name', 'last_name', 'email', 'student_id'];
-            const sortField = validSortFields.includes(sort_by) ? sort_by : 'created_at';
-            const sortDirection = sort_order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-            query += ` ORDER BY u.${sortField} ${sortDirection}`;
-
-            // Add pagination
-            const offset = (parseInt(page) - 1) * parseInt(limit);
-            query += ` LIMIT ? OFFSET ?`;
-            params.push(parseInt(limit), offset);
-
-            const [users] = await connection.execute(query, params);
-
-            // Get total count for pagination
-            let countQuery = `
-                SELECT COUNT(DISTINCT u.id) as total
-                FROM users u
-                LEFT JOIN user_roles r ON u.role_id = r.id
-                WHERE 1=1
-            `;
-            let countParams = [];
-
-            if (role) {
-                countQuery += ` AND r.role_name = ?`;
-                countParams.push(role);
-            }
-
-            if (status) {
-                countQuery += ` AND u.status = ?`;
-                countParams.push(status);
-            }
-
-            if (search) {
-                countQuery += ` AND (
-                    CONCAT(u.first_name, ' ', u.last_name) LIKE ? OR
-                    u.email LIKE ? OR
-                    u.student_id LIKE ? OR
-                    u.phone LIKE ?
-                )`;
-                const searchPattern = `%${search}%`;
-                countParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
-            }
-
-            const [countResult] = await connection.execute(countQuery, countParams);
-
-            connection.release();
+            const [users] = await pool.execute(query);
 
             res.json({
+                success: true,
                 users,
                 pagination: {
-                    page: parseInt(page),
-                    limit: parseInt(limit),
-                    total: countResult[0].total,
-                    totalPages: Math.ceil(countResult[0].total / parseInt(limit))
+                    total: users.length,
+                    page: 1,
+                    limit: 20,
+                    totalPages: 1
                 }
             });
 

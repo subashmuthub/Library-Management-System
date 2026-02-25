@@ -11,7 +11,24 @@ class FineController {
     static async getPendingFines(req, res) {
         try {
             const { page = 1, limit = 50, userId } = req.query;
-            const connection = await pool.getConnection();
+            
+            // Parse and validate pagination parameters
+            const parsedPage = Math.max(1, parseInt(page) || 1);
+            const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 50));
+
+            // Check if table has any data first
+            const [countCheck] = await pool.query('SELECT COUNT(*) as total FROM fines');
+            if (countCheck[0].total === 0) {
+                return res.json({
+                    fines: [],
+                    pagination: {
+                        page: parsedPage,
+                        limit: parsedLimit,
+                        total: 0,
+                        totalPages: 0
+                    }
+                });
+            }
 
             let query = `
                 SELECT 
@@ -43,11 +60,11 @@ class FineController {
             query += ` ORDER BY f.created_at DESC`;
 
             // Add pagination
-            const offset = (parseInt(page) - 1) * parseInt(limit);
+            const offset = (parsedPage - 1) * parsedLimit;
             query += ` LIMIT ? OFFSET ?`;
-            params.push(parseInt(limit), offset);
+            params.push(parsedLimit, offset);
 
-            const [fines] = await connection.execute(query, params);
+            const [fines] = await pool.query(query, params);
 
             // Get total count
             let countQuery = `
@@ -62,17 +79,15 @@ class FineController {
                 countParams.push(userId);
             }
 
-            const [countResult] = await connection.execute(countQuery, countParams);
-
-            connection.release();
+            const [countResult] = await pool.query(countQuery, countParams);
 
             res.json({
                 fines,
                 pagination: {
-                    page: parseInt(page),
-                    limit: parseInt(limit),
+                    page: parsedPage,
+                    limit: parsedLimit,
                     total: countResult[0].total,
-                    totalPages: Math.ceil(countResult[0].total / parseInt(limit))
+                    totalPages: Math.ceil(countResult[0].total / parsedLimit)
                 }
             });
 
@@ -88,7 +103,7 @@ class FineController {
             const { id } = req.params;
             const connection = await pool.getConnection();
 
-            const [fines] = await connection.execute(`
+            const [fines] = await connection.query(`
                 SELECT 
                     f.*,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
@@ -134,7 +149,7 @@ class FineController {
                 payment_reference,
                 notes 
             } = req.body;
-            const librarianId = req.user?.id;
+            const librarianId = req.user?.id || null;
 
             if (!['cash', 'card', 'online'].includes(payment_method)) {
                 return res.status(400).json({ 
@@ -145,7 +160,7 @@ class FineController {
             const connection = await pool.getConnection();
 
             // Get current fine details
-            const [fines] = await connection.execute(`
+            const [fines] = await connection.query(`
                 SELECT f.*, CONCAT(u.first_name, ' ', u.last_name) as user_name
                 FROM fines f
                 JOIN users u ON f.user_id = u.id
@@ -160,8 +175,10 @@ class FineController {
             }
 
             const currentFine = fines[0];
-            const amountToPay = parseFloat(amount_paid) || currentFine.amount;
-            const remainingAmount = currentFine.amount - currentFine.amount_paid - amountToPay;
+            const amountToPay = parseFloat(amount_paid) || parseFloat(currentFine.amount);
+            const totalAmount = parseFloat(currentFine.amount);
+            const alreadyPaid = parseFloat(currentFine.amount_paid);
+            const remainingAmount = totalAmount - alreadyPaid - amountToPay;
 
             // Determine new status
             let newStatus;
@@ -172,7 +189,7 @@ class FineController {
             }
 
             // Update fine record
-            await connection.execute(`
+            await connection.query(`
                 UPDATE fines SET
                     amount_paid = amount_paid + ?,
                     status = ?,
@@ -187,7 +204,7 @@ class FineController {
             ]);
 
             // Get updated fine details
-            const [updatedFine] = await connection.execute(`
+            const [updatedFine] = await connection.query(`
                 SELECT 
                     f.*,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
@@ -225,7 +242,7 @@ class FineController {
         try {
             const { id } = req.params;
             const { reason } = req.body;
-            const librarianId = req.user?.id;
+            const librarianId = req.user?.id || null;
 
             if (!reason || reason.trim().length < 5) {
                 return res.status(400).json({ 
@@ -236,7 +253,7 @@ class FineController {
             const connection = await pool.getConnection();
 
             // Check if fine exists and is pending
-            const [fines] = await connection.execute(`
+            const [fines] = await connection.query(`
                 SELECT f.*, CONCAT(u.first_name, ' ', u.last_name) as user_name
                 FROM fines f
                 JOIN users u ON f.user_id = u.id
@@ -251,7 +268,7 @@ class FineController {
             }
 
             // Update fine as waived
-            await connection.execute(`
+            await connection.query(`
                 UPDATE fines SET
                     status = 'waived',
                     payment_date = CURDATE(),
@@ -262,7 +279,7 @@ class FineController {
             `, [librarianId, reason, id]);
 
             // Get updated fine details
-            const [updatedFine] = await connection.execute(`
+            const [updatedFine] = await connection.query(`
                 SELECT 
                     f.*,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
@@ -299,7 +316,7 @@ class FineController {
             const connection = await pool.getConnection();
 
             // Get transaction details
-            const [transactions] = await connection.execute(`
+            const [transactions] = await connection.query(`
                 SELECT 
                     bt.*,
                     b.title,
@@ -333,7 +350,7 @@ class FineController {
             }
 
             // Check if fine already exists
-            const [existingFines] = await connection.execute(`
+            const [existingFines] = await connection.query(`
                 SELECT * FROM fines WHERE transaction_id = ?
             `, [transactionId]);
 
@@ -364,7 +381,7 @@ class FineController {
             const connection = await pool.getConnection();
 
             // Get fine summary
-            const [summary] = await connection.execute(`
+            const [summary] = await connection.query(`
                 SELECT 
                     COUNT(*) as total_fines,
                     COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_fines,
@@ -378,7 +395,7 @@ class FineController {
             `, [userId]);
 
             // Get recent fine history
-            const [recentFines] = await connection.execute(`
+            const [recentFines] = await connection.query(`
                 SELECT 
                     f.*,
                     b.title,
@@ -415,7 +432,7 @@ class FineController {
             const connection = await pool.getConnection();
 
             // Overall statistics
-            const [overallStats] = await connection.execute(`
+            const [overallStats] = await connection.query(`
                 SELECT 
                     COUNT(*) as total_fines,
                     COALESCE(SUM(CASE WHEN status = 'pending' THEN amount END), 0) as pending_amount,
@@ -429,7 +446,7 @@ class FineController {
             `, [parseInt(period)]);
 
             // Daily fine collection over period
-            const [dailyStats] = await connection.execute(`
+            const [dailyStats] = await connection.query(`
                 SELECT 
                     DATE(payment_date) as payment_date,
                     COUNT(*) as fines_processed,
@@ -443,7 +460,7 @@ class FineController {
             `, [parseInt(period)]);
 
             // Top users with highest outstanding fines
-            const [topFineUsers] = await connection.execute(`
+            const [topFineUsers] = await connection.query(`
                 SELECT 
                     u.id,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
@@ -485,7 +502,7 @@ class FineController {
                 description,
                 reason
             } = req.body;
-            const librarianId = req.user?.id;
+            const librarianId = req.user?.id || null;
 
             if (!user_id || !amount || amount <= 0) {
                 return res.status(400).json({
@@ -503,7 +520,7 @@ class FineController {
             const connection = await pool.getConnection();
 
             // Verify user exists
-            const [users] = await connection.execute(
+            const [users] = await connection.query(
                 'SELECT id, first_name, last_name FROM users WHERE id = ?',
                 [user_id]
             );
@@ -514,7 +531,7 @@ class FineController {
             }
 
             // Create fine record
-            const [result] = await connection.execute(`
+            const [result] = await connection.query(`
                 INSERT INTO fines (
                     user_id, transaction_id, fine_type, amount, 
                     days_overdue, fine_rate, status, processed_by, notes
@@ -526,7 +543,7 @@ class FineController {
             ]);
 
             // Get created fine details
-            const [newFine] = await connection.execute(`
+            const [newFine] = await connection.query(`
                 SELECT 
                     f.*,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,

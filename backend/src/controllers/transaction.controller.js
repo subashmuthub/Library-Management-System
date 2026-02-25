@@ -10,56 +10,113 @@ class TransactionController {
     // Checkout a book
     static async checkoutBook(req, res) {
         try {
-            const { bookId } = req.params;
-            const { userId, loanDays = 14 } = req.body;
-            const librarianId = req.user?.id; // Assuming auth middleware sets req.user
+            // Accept bookId from either params or body
+            const bookId = req.params.bookId || req.body.bookId || req.body.book_id;
+            const userId = req.body.userId || req.body.user_id;
+            const loanDays = req.body.loanDays || req.body.loan_days || 14;
+            // For development without auth: librarian can be null or from body
+            const librarianId = req.user?.id || req.body.librarianId || null;
+            
+            if (!bookId) {
+                return res.status(400).json({ error: 'Book ID is required' });
+            }
+            
+            if (!userId) {
+                return res.status(400).json({ error: 'User ID is required' });
+            }
 
             const connection = await pool.getConnection();
             
             try {
-                // Use stored procedure for checkout validation
                 await connection.beginTransaction();
 
-                const [result] = await connection.execute(`
-                    CALL checkout_book(?, ?, ?, ?, @success, @message)
-                `, [userId, bookId, librarianId, loanDays]);
+                // Check if book is available
+                const [activeCheckouts] = await connection.execute(
+                    'SELECT COUNT(*) as count FROM book_transactions WHERE book_id = ? AND status = ?',
+                    [bookId, 'active']
+                );
 
-                const [output] = await connection.execute('SELECT @success as success, @message as message');
-                const { success, message } = output[0];
-
-                if (success) {
-                    await connection.commit();
-                    
-                    // Get transaction details
-                    const [transaction] = await connection.execute(`
-                        SELECT 
-                            bt.*,
-                            CONCAT(u.first_name, ' ', u.last_name) as user_name,
-                            b.title,
-                            b.author
-                        FROM book_transactions bt
-                        JOIN users u ON bt.user_id = u.id
-                        JOIN books b ON bt.book_id = b.id
-                        WHERE bt.user_id = ? AND bt.book_id = ? AND bt.return_date IS NULL
-                        ORDER BY bt.created_at DESC
-                        LIMIT 1
-                    `, [userId, bookId]);
-
-                    res.json({
-                        success: true,
-                        message,
-                        transaction: transaction[0]
-                    });
-                } else {
+                if (activeCheckouts[0].count > 0) {
                     await connection.rollback();
-                    res.status(400).json({
+                    connection.release();
+                    return res.status(400).json({
                         success: false,
-                        message
+                        message: 'Book is currently checked out'
                     });
                 }
 
+                // Check user's current checkout count
+                const [userCheckouts] = await connection.execute(
+                    'SELECT COUNT(*) as count FROM book_transactions WHERE user_id = ? AND status = ?',
+                    [userId, 'active']
+                );
+
+                if (userCheckouts[0].count >= 5) {
+                    await connection.rollback();
+                    connection.release();
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Maximum checkout limit (5) reached'
+                    });
+                }
+
+                // Check for overdue books
+                const [overdueBooks] = await connection.execute(
+                    'SELECT COUNT(*) as count FROM book_transactions WHERE user_id = ? AND status = ? AND due_date < CURDATE()',
+                    [userId, 'active']
+                );
+
+                if (overdueBooks[0].count > 0) {
+                    await connection.rollback();
+                    connection.release();
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Cannot checkout: user has overdue books'
+                    });
+                }
+
+                // Create checkout transaction
+                const checkoutDate = new Date();
+                const dueDate = new Date();
+                dueDate.setDate(dueDate.getDate() + parseInt(loanDays));
+
+                const [result] = await connection.execute(`
+                    INSERT INTO book_transactions (
+                        user_id, 
+                        book_id, 
+                        checked_out_by,
+                        checkout_date,
+                        due_date,
+                        status
+                    ) VALUES (?, ?, ?, ?, ?, 'active')
+                `, [userId, bookId, librarianId, checkoutDate, dueDate]);
+
+                await connection.commit();
+
+                // Get transaction details
+                const [transaction] = await connection.execute(`
+                    SELECT 
+                        bt.*,
+                        CONCAT(u.first_name, ' ', u.last_name) as user_name,
+                        b.title,
+                        b.author
+                    FROM book_transactions bt
+                    JOIN users u ON bt.user_id = u.id
+                    JOIN books b ON bt.book_id = b.id
+                    WHERE bt.id = ?
+                `, [result.insertId]);
+
+                connection.release();
+
+                res.json({
+                    success: true,
+                    message: 'Book checked out successfully',
+                    transaction: transaction[0]
+                });
+
             } catch (error) {
                 await connection.rollback();
+                connection.release();
                 throw error;
             }
 
@@ -73,57 +130,97 @@ class TransactionController {
     static async returnBook(req, res) {
         try {
             const { transactionId } = req.params;
-            const librarianId = req.user?.id;
+            const { condition = 'good', notes = '' } = req.body;
+            const librarianId = req.user?.id || req.body.returned_by || null;
 
             const connection = await pool.getConnection();
 
             try {
                 await connection.beginTransaction();
 
-                const [result] = await connection.execute(`
-                    CALL return_book(?, ?, @success, @message, @fine_amount)
-                `, [transactionId, librarianId]);
-
-                const [output] = await connection.execute(
-                    'SELECT @success as success, @message as message, @fine_amount as fine_amount'
+                // Get transaction details
+                const [transactions] = await connection.execute(
+                    'SELECT * FROM book_transactions WHERE id = ? AND status = ?',
+                    [transactionId, 'active']
                 );
-                const { success, message, fine_amount } = output[0];
 
-                if (success) {
-                    await connection.commit();
-
-                    // Get updated transaction details
-                    const [transaction] = await connection.execute(`
-                        SELECT 
-                            bt.*,
-                            CONCAT(u.first_name, ' ', u.last_name) as user_name,
-                            b.title,
-                            b.author,
-                            f.id as fine_id,
-                            f.amount as fine_amount
-                        FROM book_transactions bt
-                        JOIN users u ON bt.user_id = u.id
-                        JOIN books b ON bt.book_id = b.id
-                        LEFT JOIN fines f ON bt.id = f.transaction_id AND f.status = 'pending'
-                        WHERE bt.id = ?
-                    `, [transactionId]);
-
-                    res.json({
-                        success: true,
-                        message,
-                        transaction: transaction[0],
-                        fine_amount: parseFloat(fine_amount) || 0
-                    });
-                } else {
+                if (transactions.length === 0) {
                     await connection.rollback();
-                    res.status(400).json({
+                    connection.release();
+                    return res.status(404).json({
                         success: false,
-                        message
+                        message: 'Active transaction not found'
                     });
                 }
 
+                const transaction = transactions[0];
+                const returnDate = new Date();
+                const dueDate = new Date(transaction.due_date);
+                
+                // Calculate fine if overdue
+                const daysOverdue = Math.max(0, Math.floor((returnDate - dueDate) / (1000 * 60 * 60 * 24)));
+                const finePerDay = 1.00; // $1 per day
+                const fineAmount = daysOverdue * finePerDay;
+
+                // Update transaction
+                await connection.execute(`
+                    UPDATE book_transactions
+                    SET 
+                        return_date = ?,
+                        returned_by = ?,
+                        return_condition = ?,
+                        notes = ?,
+                        status = 'returned'
+                    WHERE id = ?
+                `, [returnDate, librarianId, condition, notes, transactionId]);
+
+                let fineId = null;
+
+                // Create fine record if overdue
+                if (daysOverdue > 0) {
+                    const [fineResult] = await connection.execute(`
+                        INSERT INTO fines (
+                            user_id,
+                            transaction_id,
+                            amount,
+                            days_overdue,
+                            status
+                        ) VALUES (?, ?, ?, ?, 'pending')
+                    `, [transaction.user_id, transactionId, fineAmount, daysOverdue]);
+                    
+                    fineId = fineResult.insertId;
+                }
+
+                await connection.commit();
+
+                // Get updated transaction details
+                const [updatedTransaction] = await connection.execute(`
+                    SELECT 
+                        bt.*,
+                        CONCAT(u.first_name, ' ', u.last_name) as user_name,
+                        b.title,
+                        b.author,
+                        f.id as fine_id,
+                        f.amount as fine_amount
+                    FROM book_transactions bt
+                    JOIN users u ON bt.user_id = u.id
+                    JOIN books b ON bt.book_id = b.id
+                    LEFT JOIN fines f ON bt.id = f.transaction_id AND f.status = 'pending'
+                    WHERE bt.id = ?
+                `, [transactionId]);
+
+                connection.release();
+
+                res.json({
+                    success: true,
+                    message: 'Book returned successfully',
+                    transaction: updatedTransaction[0],
+                    fine_amount: fineAmount
+                });
+
             } catch (error) {
                 await connection.rollback();
+                connection.release();
                 throw error;
             }
 
@@ -514,7 +611,23 @@ class TransactionController {
                 date_from, date_to, sort_by = 'checkout_date', sort_order = 'DESC' 
             } = req.query;
             
-            const connection = await pool.getConnection();
+            // Parse and validate pagination parameters
+            const parsedPage = Math.max(1, parseInt(page) || 1);
+            const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 20));
+
+            // Check if table has any data first
+            const [countCheck] = await pool.query('SELECT COUNT(*) as total FROM book_transactions');
+            if (countCheck[0].total === 0) {
+                return res.json({
+                    transactions: [],
+                    pagination: {
+                        page: parsedPage,
+                        limit: parsedLimit,
+                        total: 0,
+                        totalPages: 0
+                    }
+                });
+            }
 
             let query = `
                 SELECT 
@@ -586,11 +699,11 @@ class TransactionController {
             }
 
             // Add pagination
-            const offset = (parseInt(page) - 1) * parseInt(limit);
+            const offset = (parsedPage - 1) * parsedLimit;
             query += ` LIMIT ? OFFSET ?`;
-            params.push(parseInt(limit), offset);
+            params.push(parsedLimit, offset);
 
-            const [transactions] = await connection.execute(query, params);
+            const [transactions] = await pool.query(query, params);
 
             // Get total count
             let countQuery = `
@@ -630,17 +743,15 @@ class TransactionController {
                 countParams.push(date_to);
             }
 
-            const [countResult] = await connection.execute(countQuery, countParams);
-
-            connection.release();
+            const [countResult] = await pool.query(countQuery, countParams);
 
             res.json({
                 transactions,
                 pagination: {
-                    page: parseInt(page),
-                    limit: parseInt(limit),
+                    page: parsedPage,
+                    limit: parsedLimit,
                     total: countResult[0].total,
-                    totalPages: Math.ceil(countResult[0].total / parseInt(limit))
+                    totalPages: Math.ceil(countResult[0].total / parsedLimit)
                 }
             });
 
