@@ -261,9 +261,10 @@ class TransactionController {
 
             const currentTransaction = transaction[0];
 
-            // Check renewal limits
+            // Check renewal limits (handle both renewed_count and renewal_count)
             const maxRenewals = 2; // From library settings
-            if (currentTransaction.renewed_count >= maxRenewals) {
+            const renewedCount = currentTransaction.renewed_count || currentTransaction.renewal_count || 0;
+            if (renewedCount >= maxRenewals) {
                 connection.release();
                 return res.status(400).json({
                     error: `Maximum renewal limit (${maxRenewals}) reached`
@@ -288,18 +289,73 @@ class TransactionController {
             const newDueDate = new Date();
             newDueDate.setDate(newDueDate.getDate() + renewDays);
 
-            await connection.execute(`
-                UPDATE book_transactions 
-                SET due_date = ?, renewed_count = renewed_count + 1, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            `, [newDueDate.toISOString().split('T')[0], transactionId]);
+            // Update due date (try different column name variations)
+            let updateSuccess = false;
+            const updateErrors = [];
+            
+            // Try renewed_count first
+            try {
+                await connection.execute(`
+                    UPDATE book_transactions 
+                    SET due_date = ?, renewed_count = renewed_count + 1, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                `, [newDueDate.toISOString().split('T')[0], transactionId]);
+                updateSuccess = true;
+            } catch (err) {
+                updateErrors.push(err.code);
+                // Try renewal_count
+                try {
+                    await connection.execute(`
+                        UPDATE book_transactions 
+                        SET due_date = ?, renewal_count = renewal_count + 1, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    `, [newDueDate.toISOString().split('T')[0], transactionId]);
+                    updateSuccess = true;
+                } catch (err2) {
+                    updateErrors.push(err2.code);
+                    // Just update due_date without renewal count
+                    await connection.execute(`
+                        UPDATE book_transactions 
+                        SET due_date = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    `, [newDueDate.toISOString().split('T')[0], transactionId]);
+                    updateSuccess = true;
+                }
+            }
 
-            // Create renewal record
-            await connection.execute(`
-                INSERT INTO book_transactions (
-                    user_id, book_id, transaction_type, checkout_date, due_date, checked_out_by
-                ) VALUES (?, ?, 'renew', CURDATE(), ?, ?)
-            `, [currentTransaction.user_id, currentTransaction.book_id, newDueDate.toISOString().split('T')[0], librarianId]);
+            // Create renewal record (handle both checked_out_by and issued_by column names)
+            try {
+                // Try with checked_out_by first (from add-library-tables.js)
+                await connection.execute(`
+                    INSERT INTO book_transactions (
+                        user_id, book_id, transaction_type, checkout_date, due_date, checked_out_by
+                    ) VALUES (?, ?, 'renew', CURDATE(), ?, ?)
+                `, [currentTransaction.user_id, currentTransaction.book_id, newDueDate.toISOString().split('T')[0], librarianId]);
+            } catch (err) {
+                if (err.code === 'ER_BAD_FIELD_ERROR') {
+                    // Try with issued_by (from schema.sql)
+                    try {
+                        await connection.execute(`
+                            INSERT INTO book_transactions (
+                                user_id, book_id, transaction_type, checkout_date, due_date, issued_by
+                            ) VALUES (?, ?, 'renew', CURDATE(), ?, ?)
+                        `, [currentTransaction.user_id, currentTransaction.book_id, newDueDate.toISOString().split('T')[0], librarianId]);
+                    } catch (err2) {
+                        if (err2.code === 'ER_BAD_FIELD_ERROR') {
+                            // Neither column exists, insert without it
+                            await connection.execute(`
+                                INSERT INTO book_transactions (
+                                    user_id, book_id, transaction_type, checkout_date, due_date
+                                ) VALUES (?, ?, 'renew', CURDATE(), ?)
+                            `, [currentTransaction.user_id, currentTransaction.book_id, newDueDate.toISOString().split('T')[0]]);
+                        } else {
+                            throw err2;
+                        }
+                    }
+                } else {
+                    throw err;
+                }
+            }
 
             // Get updated transaction
             const [updatedTransaction] = await connection.execute(`

@@ -187,7 +187,16 @@ const logEntry = async (req, res, next) => {
  */
 const getMyHistory = async (req, res, next) => {
   try {
-    const userId = req.user.id;
+    // Handle cases where authentication is disabled
+    const userId = req.user?.id || req.query.user_id || null;
+    
+    if (!userId) {
+      return res.status(401).json({ 
+        error: 'Authentication required',
+        message: 'User ID not found. Please login or provide user_id parameter for development.'
+      });
+    }
+    
     const limit = parseInt(req.query.limit) || 50;
     const offset = parseInt(req.query.offset) || 0;
 
