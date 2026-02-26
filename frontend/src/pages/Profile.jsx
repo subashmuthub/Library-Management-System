@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts';
 import { authService } from '../services';
 import { User, Mail, CreditCard, Shield, CheckCircle, AlertCircle } from 'lucide-react';
@@ -7,11 +7,44 @@ const Profile = () => {
   const { user, updateUser } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({
-    name: user?.name || '',
+    first_name: user?.first_name || '',
+    last_name: user?.last_name || '',
     email: user?.email || '',
+    student_id: user?.student_id || '',
   });
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [stats, setStats] = useState({ borrowed: 0, visits: 0 });
+
+  // Load user stats on mount
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        if (user?.id) {
+          // Get borrowed books count
+          const transactionsRes = await fetch(`http://localhost:3001/api/transactions?user_id=${user.id}&status=active`);
+          if (transactionsRes.ok) {
+            const transData = await transactionsRes.json();
+            const borrowed = transData.transactions?.length || 0;
+            
+            // Get entry logs count
+            const entriesRes = await fetch(`http://localhost:3001/api/entry/user/${user.id}`);
+            let visits = 0;
+            if (entriesRes.ok) {
+              const entryData = await entriesRes.json();
+              visits = entryData.entries?.length || entryData.total || 0;
+            }
+            
+            setStats({ borrowed, visits });
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load stats:', error);
+        // Keep default 0/0 on error
+      }
+    };
+    loadStats();
+  }, [user]);
 
   const handleChange = (e) => {
     setFormData({
@@ -26,7 +59,12 @@ const Profile = () => {
     setResult(null);
 
     try {
-      const response = await authService.updateProfile(formData);
+      // Include userId for backend (development mode)
+      const updateData = {
+        ...formData,
+        userId: user?.id
+      };
+      const response = await authService.updateProfile(updateData);
       updateUser(response.user);
       setResult({ success: true, message: 'Profile updated successfully!' });
       setIsEditing(false);
@@ -42,8 +80,10 @@ const Profile = () => {
 
   const handleCancel = () => {
     setFormData({
-      name: user?.name || '',
+      first_name: user?.first_name || '',
+      last_name: user?.last_name || '',
       email: user?.email || '',
+      student_id: user?.student_id || '',
     });
     setIsEditing(false);
     setResult(null);
@@ -91,19 +131,34 @@ const Profile = () => {
 
         {isEditing ? (
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <User size={16} className="inline mr-1" />
-                Full Name
-              </label>
-              <input
-                type="text"
-                name="name"
-                className="input"
-                value={formData.name}
-                onChange={handleChange}
-                required
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <User size={16} className="inline mr-1" />
+                  First Name
+                </label>
+                <input
+                  type="text"
+                  name="first_name"
+                  className="input"
+                  value={formData.first_name}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Last Name
+                </label>
+                <input
+                  type="text"
+                  name="last_name"
+                  className="input"
+                  value={formData.last_name}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
             </div>
 
             <div>
@@ -118,6 +173,21 @@ const Profile = () => {
                 value={formData.email}
                 onChange={handleChange}
                 required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <CreditCard size={16} className="inline mr-1" />
+                Student ID
+              </label>
+              <input
+                type="text"
+                name="student_id"
+                className="input"
+                value={formData.student_id}
+                onChange={handleChange}
+                placeholder="Optional"
               />
             </div>
 
@@ -172,11 +242,11 @@ const Profile = () => {
         <h2 className="text-xl font-bold mb-4">Account Statistics</h2>
         <div className="grid grid-cols-2 gap-4">
           <div className="text-center p-4 bg-primary-50 rounded-lg">
-            <p className="text-3xl font-bold text-primary-600">0</p>
+            <p className="text-3xl font-bold text-primary-600">{stats.borrowed}</p>
             <p className="text-sm text-gray-600 mt-1">Books Borrowed</p>
           </div>
           <div className="text-center p-4 bg-green-50 rounded-lg">
-            <p className="text-3xl font-bold text-green-600">0</p>
+            <p className="text-3xl font-bold text-green-600">{stats.visits}</p>
             <p className="text-sm text-gray-600 mt-1">Library Visits</p>
           </div>
         </div>

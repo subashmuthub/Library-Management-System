@@ -1,11 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { fineService } from '../services';
-import { DollarSign, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
+import { DollarSign, CheckCircle, XCircle, Clock, AlertCircle, Receipt, Download } from 'lucide-react';
+import PaymentModal from '../components/PaymentModal';
 
 const Fines = () => {
   const [fines, setFines] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('pending'); // pending, paid, waived, all
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedFine, setSelectedFine] = useState(null);
+  const [paymentHistory, setPaymentHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
   const [stats, setStats] = useState({
     total_pending: 0,
     total_paid: 0,
@@ -16,6 +21,7 @@ const Fines = () => {
   useEffect(() => {
     loadFines();
     loadStats();
+    loadPaymentHistory();
   }, [filter]);
 
   const loadFines = async () => {
@@ -46,21 +52,40 @@ const Fines = () => {
     }
   };
 
-  const handlePayFine = async (fineId, amount) => {
-    if (confirm(`Confirm payment of $${amount}?`)) {
-      try {
-        await fineService.payFine(fineId, {
-          amount_paid: parseFloat(amount),
-          payment_method: 'cash',
-          notes: 'Paid via web interface'
-        });
-        alert('Fine paid successfully!');
-        loadFines();
-        loadStats();
-      } catch (error) {
-        alert(`Payment failed: ${error.response?.data?.error || error.message}`);
+  const loadPaymentHistory = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:3001/api/v1/fines/payments/history?limit=50', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      const data = await response.json();
+      console.log('Payment history response:', data);
+      if (data.success) {
+        setPaymentHistory(data.receipts || data.data || []);
+      } else if (data.receipts) {
+        setPaymentHistory(data.receipts);
       }
+    } catch (error) {
+      console.error('Failed to load payment history:', error);
+      setPaymentHistory([]);
     }
+  };
+
+  const handlePayFine = (fine) => {
+    setSelectedFine(fine);
+    setShowPaymentModal(true);
+  };
+
+  const handlePaymentSuccess = (paymentData) => {
+    setShowPaymentModal(false);
+    setSelectedFine(null);
+    loadFines();
+    loadStats();
+    loadPaymentHistory();
+    alert('Payment successful! Receipt generated.');
   };
 
   const handleWaiveFine = async (fineId) => {
@@ -150,7 +175,7 @@ const Fines = () => {
 
       {/* Filters */}
       <div className="card">
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {['pending', 'paid', 'waived', 'all'].map(f => (
             <button
               key={f}
@@ -164,6 +189,17 @@ const Fines = () => {
               {f.charAt(0).toUpperCase() + f.slice(1)}
             </button>
           ))}
+          <button
+            onClick={() => setShowHistory(!showHistory)}
+            className={`px-4 py-2 rounded font-medium ml-auto ${
+              showHistory
+                ? 'bg-purple-500 text-white' 
+                : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+            }`}
+          >
+            <Receipt className="inline-block mr-2" size={18} />
+            Payment History
+          </button>
         </div>
       </div>
 
@@ -202,10 +238,10 @@ const Fines = () => {
                         {fine.status === 'pending' && (
                           <>
                             <button
-                              onClick={() => handlePayFine(fine.id, fine.amount)}
-                              className="text-green-600 hover:text-green-700 font-medium"
+                              onClick={() => handlePayFine(fine)}
+                              className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 font-medium"
                             >
-                              Pay
+                              Pay Now
                             </button>
                             <button
                               onClick={() => handleWaiveFine(fine.id)}
@@ -214,6 +250,9 @@ const Fines = () => {
                               Waive
                             </button>
                           </>
+                        )}
+                        {fine.status === 'paid' && (
+                          <span className="text-green-600 text-xs">✓ Paid</span>
                         )}
                       </div>
                     </td>
@@ -229,6 +268,109 @@ const Fines = () => {
           </div>
         )}
       </div>
+
+      {/* Payment History Section */}
+      {showHistory && (
+        <div className="card">
+          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+            <Receipt size={24} />
+            Payment History
+          </h2>
+          
+          {paymentHistory.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Receipt ID</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Book</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Method</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {paymentHistory.map(receipt => (
+                    <tr key={receipt.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm font-mono text-blue-600">{receipt.receipt_id}</td>
+                      <td className="px-4 py-3 text-sm">{receipt.user_name}</td>
+                      <td className="px-4 py-3 text-sm">{receipt.book_title || 'N/A'}</td>
+                      <td className="px-4 py-3 text-sm font-semibold text-green-600">${receipt.amount}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className="px-2 py-1 rounded text-xs bg-purple-100 text-purple-700">
+                          {receipt.payment_gateway || receipt.payment_method}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm">{new Date(receipt.payment_date).toLocaleDateString()}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <button
+                          onClick={() => {
+                            const data = receipt.receipt_data || receipt;
+                            const receiptText = `
+LIBRARY FINE PAYMENT RECEIPT
+=============================
+
+Receipt ID: ${data.receipt_id || receipt.receipt_id}
+Date: ${new Date(receipt.payment_date).toLocaleString()}
+
+Fine ID: #${receipt.fine_id}
+Transaction: #${receipt.transaction_id}
+User: ${receipt.user_name}
+Book: ${receipt.book_title || 'N/A'}
+
+Amount Paid: $${receipt.amount}
+Payment Method: ${receipt.payment_gateway || receipt.payment_method}
+Reference: ${receipt.payment_reference || 'N/A'}
+
+Status: Success
+
+Thank you for your payment!
+=============================
+                            `.trim();
+                            
+                            const blob = new Blob([receiptText], { type: 'text/plain' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `receipt_${receipt.receipt_id}.txt`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                          }}
+                          className="text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
+                        >
+                          <Download size={16} />
+                          Download
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <Receipt size={48} className="mx-auto mb-2 text-gray-400" />
+              <p className="text-gray-500">No payment history found</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Payment Modal */}
+      {showPaymentModal && selectedFine && (
+        <PaymentModal
+          fine={selectedFine}
+          onClose={() => {
+            setShowPaymentModal(false);
+            setSelectedFine(null);
+          }}
+          onPaymentSuccess={handlePaymentSuccess}
+        />
+      )}
     </div>
   );
 };
