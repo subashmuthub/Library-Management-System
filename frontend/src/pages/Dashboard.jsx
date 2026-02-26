@@ -16,13 +16,13 @@ const Dashboard = () => {
 
   useEffect(() => {
     loadDashboardData();
-  }, []);
+  }, [user]);
 
   const loadDashboardData = async () => {
     try {
       const [occupancyData, historyData, booksData] = await Promise.all([
         entryService.getCurrentOccupancy().catch(() => ({ current_occupancy: 0 })),
-        entryService.getMyHistory().catch(() => ({ entries: [] })),
+        entryService.getMyHistory(user?.id).catch(() => ({ entries: [] })),
         bookService.getAllBooks({ limit: 5 }).catch(() => ({ data: { books: [] } })),
       ]);
 
@@ -111,11 +111,11 @@ const Dashboard = () => {
           {stats.recentEntries.length > 0 ? (
             <div className="space-y-3">
               {stats.recentEntries.map((entry, index) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div key={entry.id || index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div>
-                    <p className="font-medium capitalize">{entry.action}</p>
+                    <p className="font-medium capitalize">{entry.entry_type || 'Activity'}</p>
                     <p className="text-sm text-gray-600">
-                      Confidence: {entry.confidence_score}%
+                      {entry.confidence_score ? `Confidence: ${entry.confidence_score}%` : entry.auto_logged ? 'Auto-logged' : 'Manual'}
                     </p>
                   </div>
                   <div className="text-right">

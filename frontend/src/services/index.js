@@ -35,8 +35,9 @@ export const entryService = {
     return response.data;
   },
 
-  getMyHistory: async () => {
-    const response = await api.get('/entry/history');
+  getMyHistory: async (userId) => {
+    const params = userId ? { user_id: userId } : {};
+    const response = await api.get('/entry/history', { params });
     return response.data;
   },
 

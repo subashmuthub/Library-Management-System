@@ -221,13 +221,19 @@ const getMyHistory = async (req, res, next) => {
       totalEntries: countResult.total,
       entries: entries.map(entry => ({
         id: entry.id,
+        entry_type: entry.entry_type,
         entryType: entry.entry_type,
         latitude: parseFloat(entry.latitude),
         longitude: parseFloat(entry.longitude),
+        wifi_ssid: entry.wifi_ssid,
         wifiSSID: entry.wifi_ssid,
+        speed_kmh: entry.speed_kmh ? parseFloat(entry.speed_kmh) : null,
         speedKmh: entry.speed_kmh ? parseFloat(entry.speed_kmh) : null,
+        confidence_score: entry.confidence_score,
         confidenceScore: entry.confidence_score,
+        auto_logged: entry.auto_logged === 1,
         autoLogged: entry.auto_logged === 1,
+        manual_confirmed: entry.manual_confirmed === 1,
         manualConfirmed: entry.manual_confirmed === 1,
         timestamp: entry.timestamp
       }))
