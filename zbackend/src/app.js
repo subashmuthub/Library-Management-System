@@ -68,7 +68,6 @@ app.get('/health', (req, res) => {
 });
 
 // API version 1 routes
-app.use('/api/v1/test', require('./routes/test.routes'));
 app.use('/api/v1/auth', require('./routes/auth.routes'));
 app.use('/api/v1/users', require('./routes/user.routes'));
 app.use('/api/v1/user-management', require('./routes/user-management.routes'));
