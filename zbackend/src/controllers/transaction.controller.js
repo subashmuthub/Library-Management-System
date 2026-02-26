@@ -234,7 +234,8 @@ class TransactionController {
     static async renewBook(req, res) {
         try {
             const transactionId = req.params.id;
-            const { renewDays = 14 } = req.body;
+            // Accept both renewDays and renew_days for flexibility
+            const renewDays = req.body.renewDays || req.body.renew_days || req.body.extend_days || 14;
             const librarianId = req.user?.id;
 
             const connection = await pool.getConnection();
@@ -745,8 +746,14 @@ class TransactionController {
 
             const [countResult] = await pool.query(countQuery, countParams);
 
+            // Map transaction_status to status for frontend compatibility
+            const formattedTransactions = transactions.map(t => ({
+                ...t,
+                status: t.transaction_status || t.status || (t.return_date ? 'returned' : 'active')
+            }));
+
             res.json({
-                transactions,
+                transactions: formattedTransactions,
                 pagination: {
                     page: parsedPage,
                     limit: parsedLimit,

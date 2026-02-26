@@ -157,7 +157,7 @@ const Reservations = () => {
                     <td className="px-4 py-3">{getStatusBadge(reservation.status)}</td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex gap-2">
-                        {reservation.status === 'pending' && (
+                        {(reservation.status === 'active' || reservation.status === 'ready') && (
                           <>
                             <button
                               onClick={() => handleFulfill(reservation.id)}
@@ -173,6 +173,9 @@ const Reservations = () => {
                             </button>
                           </>
                         )}
+                        {!reservation.status || reservation.status === 'cancelled' || reservation.status === 'fulfilled' || reservation.status === 'expired' ? (
+                          <span className="text-gray-400 text-xs">No actions</span>
+                        ) : null}
                       </div>
                     </td>
                   </tr>

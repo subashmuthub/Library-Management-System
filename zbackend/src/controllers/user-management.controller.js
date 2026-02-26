@@ -33,11 +33,17 @@ class UserManagementController {
 
             const [users] = await pool.execute(query);
 
+            // Format users with full name for frontend
+            const formattedUsers = users.map(u => ({
+                ...u,
+                name: `${u.first_name} ${u.last_name}`
+            }));
+
             res.json({
                 success: true,
-                users,
+                users: formattedUsers,
                 pagination: {
-                    total: users.length,
+                    total: formattedUsers.length,
                     page: 1,
                     limit: 20,
                     totalPages: 1

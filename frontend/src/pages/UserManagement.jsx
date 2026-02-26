@@ -53,10 +53,11 @@ const UserManagement = () => {
   };
 
   const handleToggleStatus = async (userId, currentStatus) => {
+    const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
     const action = currentStatus === 'active' ? 'deactivate' : 'activate';
     if (confirm(`Are you sure you want to ${action} this user?`)) {
       try {
-        await userManagementService.toggleUserStatus(userId);
+        await userManagementService.toggleUserStatus(userId, { status: newStatus });
         alert(`User ${action}d successfully!`);
         loadUsers();
       } catch (error) {

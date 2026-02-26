@@ -299,8 +299,15 @@ class ReservationController {
 
             const [countResult] = await pool.query(countQuery, countParams);
 
+            // Format reservations with proper field names for frontend
+            const formattedReservations = reservations.map(r => ({
+                ...r,
+                book_title: r.title,
+                queue_position: r.position_in_queue || r.queue_position
+            }));
+
             res.json({
-                reservations,
+                reservations: formattedReservations,
                 pagination: {
                     page: parsedPage,
                     limit: parsedLimit,

@@ -65,7 +65,7 @@ const Transactions = () => {
 
   const handleRenew = async (transactionId) => {
     try {
-      await transactionService.renewBook(transactionId, { renew_days: 14 });
+      await transactionService.renewBook(transactionId, { renewDays: 14 });
       alert('Book renewed successfully!');
       loadTransactions();
     } catch (error) {
