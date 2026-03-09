@@ -8,6 +8,14 @@ const Transactions = () => {
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('all'); // all, active, returned, overdue
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  const [showRenewModal, setShowRenewModal] = useState(false);
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState(null);
+  const [renewDays, setRenewDays] = useState(14);
+  const [returnForm, setReturnForm] = useState({
+    condition: 'good',
+    notes: ''
+  });
   const [checkoutForm, setCheckoutForm] = useState({
     user_id: '',
     book_id: '',
@@ -44,33 +52,64 @@ const Transactions = () => {
     }
   };
 
-  const handleReturn = async (transactionId) => {
-    if (confirm('Are you sure you want to return this book?')) {
-      try {
-        const result = await transactionService.returnBook(transactionId, {
-          condition: 'good',
-          notes: 'Returned via web interface'
-        });
-        if (result.fine_amount > 0) {
-          alert(`Book returned! Fine amount: $${result.fine_amount}`);
-        } else {
-          alert('Book returned successfully!');
-        }
-        loadTransactions();
-      } catch (error) {
-        alert(`Return failed: ${error.response?.data?.error || error.message}`);
+  const handleReturn = (transaction) => {
+    setSelectedTransaction(transaction);
+    setReturnForm({
+      condition: 'good',
+      notes: ''
+    });
+    setShowReturnModal(true);
+  };
+
+  const confirmReturn = async () => {
+    try {
+      const result = await transactionService.returnBook(selectedTransaction.id, returnForm);
+      if (result.fine_amount > 0) {
+        alert(`Book returned! Fine amount: $${result.fine_amount}`);
+      } else {
+        alert('Book returned successfully!');
       }
+      setShowReturnModal(false);
+      setSelectedTransaction(null);
+      loadTransactions();
+    } catch (error) {
+      alert(`Return failed: ${error.response?.data?.error || error.message}`);
     }
   };
 
-  const handleRenew = async (transactionId) => {
+  const handleRenew = (transaction) => {
+    setSelectedTransaction(transaction);
+    setRenewDays(14);
+    setShowRenewModal(true);
+  };
+
+  const confirmRenew = async () => {
     try {
-      await transactionService.renewBook(transactionId, { renewDays: 14 });
+      await transactionService.renewBook(selectedTransaction.id, { renewDays: renewDays });
       alert('Book renewed successfully!');
+      setShowRenewModal(false);
+      setSelectedTransaction(null);
       loadTransactions();
     } catch (error) {
       alert(`Renewal failed: ${error.response?.data?.error || error.message}`);
     }
+  };
+
+  const getNewDueDate = () => {
+    if (!selectedTransaction?.due_date) return '';
+    const currentDue = new Date(selectedTransaction.due_date);
+    const newDue = new Date(currentDue);
+    newDue.setDate(newDue.getDate() + parseInt(renewDays));
+    return format(newDue, 'yyyy-MM-dd');
+  };
+
+  const getDaysOverdue = () => {
+    if (!selectedTransaction?.due_date) return 0;
+    const dueDate = new Date(selectedTransaction.due_date);
+    const today = new Date();
+    const diffTime = today - dueDate;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return Math.max(0, diffDays);
   };
 
   const getStatusBadge = (status) => {
@@ -79,8 +118,15 @@ const Transactions = () => {
       returned: 'bg-green-100 text-green-700',
       overdue: 'bg-red-100 text-red-700',
     };
+    
+    const labels = {
+      active: 'IN USE',
+      returned: 'RETURNED',
+      overdue: 'OVERDUE'
+    };
+    
     return <span className={`px-2 py-1 rounded text-xs font-semibold ${styles[status] || 'bg-gray-100 text-gray-700'}`}>
-      {status?.toUpperCase()}
+      {labels[status] || status?.toUpperCase()}
     </span>;
   };
 
@@ -104,19 +150,28 @@ const Transactions = () => {
       {/* Filters */}
       <div className="card">
         <div className="flex gap-2">
-          {['all', 'active', 'returned', 'overdue'].map(f => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`px-4 py-2 rounded font-medium ${
-                filter === f 
-                  ? 'bg-blue-500 text-white' 
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              {f.charAt(0).toUpperCase() + f.slice(1)}
-            </button>
-          ))}
+          {['all', 'active', 'returned', 'overdue'].map(f => {
+            const filterLabels = {
+              all: 'All',
+              active: 'In Use',
+              returned: 'Returned',
+              overdue: 'Overdue'
+            };
+            
+            return (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`px-4 py-2 rounded font-medium ${
+                  filter === f 
+                    ? 'bg-blue-500 text-white' 
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {filterLabels[f]}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -155,13 +210,13 @@ const Transactions = () => {
                         {transaction.status === 'active' && (
                           <>
                             <button
-                              onClick={() => handleReturn(transaction.id)}
+                              onClick={() => handleReturn(transaction)}
                               className="text-green-600 hover:text-green-700 font-medium"
                             >
                               Return
                             </button>
                             <button
-                              onClick={() => handleRenew(transaction.id)}
+                              onClick={() => handleRenew(transaction)}
                               className="text-blue-600 hover:text-blue-700 font-medium"
                             >
                               Renew
@@ -236,6 +291,209 @@ const Transactions = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Renew Modal */}
+      {showRenewModal && selectedTransaction && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold mb-4 flex items-center">
+              <RefreshCw size={24} className="mr-2 text-blue-500" />
+              Renew Book
+            </h2>
+            
+            <div className="space-y-4">
+              {/* Transaction Details */}
+              <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                <div className="flex items-start">
+                  <BookOpen size={18} className="mr-2 mt-0.5 text-gray-600" />
+                  <div>
+                    <p className="text-sm text-gray-600">Book</p>
+                    <p className="font-semibold">{selectedTransaction.title || `Book #${selectedTransaction.book_id}`}</p>
+                  </div>
+                </div>
+                <div className="flex items-start">
+                  <User size={18} className="mr-2 mt-0.5 text-gray-600" />
+                  <div>
+                    <p className="text-sm text-gray-600">Borrower</p>
+                    <p className="font-semibold">{selectedTransaction.user_name || `User #${selectedTransaction.user_id}`}</p>
+                  </div>
+                </div>
+                <div className="flex items-start">
+                  <Calendar size={18} className="mr-2 mt-0.5 text-gray-600" />
+                  <div>
+                    <p className="text-sm text-gray-600">Current Due Date</p>
+                    <p className="font-semibold">{selectedTransaction.due_date}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Renewal Options */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Extend by (days)</label>
+                <select
+                  className="input w-full"
+                  value={renewDays}
+                  onChange={(e) => setRenewDays(parseInt(e.target.value))}
+                >
+                  <option value="7">7 days</option>
+                  <option value="14">14 days (Standard)</option>
+                  <option value="21">21 days</option>
+                  <option value="30">30 days</option>
+                </select>
+              </div>
+
+              {/* New Due Date */}
+              <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg">
+                <p className="text-sm text-blue-600 mb-1">New Due Date</p>
+                <p className="text-lg font-bold text-blue-700">{getNewDueDate()}</p>
+              </div>
+
+              {/* Renewal Info */}
+              <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-lg text-sm text-yellow-800">
+                <p className="font-medium mb-1">⚠️ Renewal Policy</p>
+                <ul className="list-disc list-inside space-y-1 text-xs">
+                  <li>Maximum 2 renewals per transaction</li>
+                  <li>Cannot renew if book is reserved by others</li>
+                  <li>Late fees must be cleared before renewal</li>
+                </ul>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRenewModal(false);
+                    setSelectedTransaction(null);
+                  }}
+                  className="btn bg-gray-200 hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={confirmRenew} 
+                  className="btn btn-primary flex items-center"
+                >
+                  <RefreshCw size={18} className="mr-2" />
+                  Confirm Renewal
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Return Modal */}
+      {showReturnModal && selectedTransaction && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold mb-4 flex items-center">
+              <CheckCircle size={24} className="mr-2 text-green-500" />
+              Return Book
+            </h2>
+            
+            <div className="space-y-4">
+              {/* Transaction Details */}
+              <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                <div className="flex items-start">
+                  <BookOpen size={18} className="mr-2 mt-0.5 text-gray-600" />
+                  <div>
+                    <p className="text-sm text-gray-600">Book</p>
+                    <p className="font-semibold">{selectedTransaction.title || `Book #${selectedTransaction.book_id}`}</p>
+                  </div>
+                </div>
+                <div className="flex items-start">
+                  <User size={18} className="mr-2 mt-0.5 text-gray-600" />
+                  <div>
+                    <p className="text-sm text-gray-600">Borrower</p>
+                    <p className="font-semibold">{selectedTransaction.user_name || `User #${selectedTransaction.user_id}`}</p>
+                  </div>
+                </div>
+                <div className="flex items-start">
+                  <Calendar size={18} className="mr-2 mt-0.5 text-gray-600" />
+                  <div>
+                    <p className="text-sm text-gray-600">Checkout Date</p>
+                    <p className="font-semibold">{selectedTransaction.checkout_date}</p>
+                  </div>
+                </div>
+                <div className="flex items-start">
+                  <Calendar size={18} className="mr-2 mt-0.5 text-gray-600" />
+                  <div>
+                    <p className="text-sm text-gray-600">Due Date</p>
+                    <p className="font-semibold">{selectedTransaction.due_date}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Overdue Warning */}
+              {getDaysOverdue() > 0 && (
+                <div className="bg-red-50 border border-red-200 p-3 rounded-lg">
+                  <p className="text-sm text-red-600 mb-1">⚠️ Overdue by {getDaysOverdue()} day(s)</p>
+                  <p className="text-xs text-red-600">Late fees may apply</p>
+                </div>
+              )}
+
+              {/* Book Condition */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Book Condition</label>
+                <select
+                  className="input w-full"
+                  value={returnForm.condition}
+                  onChange={(e) => setReturnForm({ ...returnForm, condition: e.target.value })}
+                >
+                  <option value="excellent">Excellent - Like new</option>
+                  <option value="good">Good - Normal wear</option>
+                  <option value="fair">Fair - Visible wear</option>
+                  <option value="poor">Poor - Damaged</option>
+                </select>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Notes (Optional)</label>
+                <textarea
+                  className="input w-full"
+                  rows="3"
+                  placeholder="Add any notes about the return..."
+                  value={returnForm.notes}
+                  onChange={(e) => setReturnForm({ ...returnForm, notes: e.target.value })}
+                />
+              </div>
+
+              {/* Return Info */}
+              <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg text-sm text-blue-800">
+                <p className="font-medium mb-1">ℹ️ Return Information</p>
+                <ul className="list-disc list-inside space-y-1 text-xs">
+                  <li>Book will be marked as available</li>
+                  <li>Outstanding fines will be calculated</li>
+                  <li>Return date: {format(new Date(), 'yyyy-MM-dd')}</li>
+                </ul>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowReturnModal(false);
+                    setSelectedTransaction(null);
+                  }}
+                  className="btn bg-gray-200 hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={confirmReturn} 
+                  className="btn bg-green-600 hover:bg-green-700 text-white flex items-center"
+                >
+                  <CheckCircle size={18} className="mr-2" />
+                  Confirm Return
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

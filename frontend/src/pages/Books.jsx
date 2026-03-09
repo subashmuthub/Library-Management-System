@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { bookService } from '../services';
-import { Search, BookOpen, Filter, MapPin, Plus, Edit, Trash2, Upload, Download, SortAsc, SortDesc, Eye, Star, Clock, TrendingUp, Grid, List } from 'lucide-react';
+import { Search, BookOpen, Filter, MapPin, Plus, Edit, Trash2, Upload, Download, SortAsc, SortDesc, Eye, Star, Clock, TrendingUp, Grid, List, CheckCircle, XCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const Books = () => {
@@ -33,6 +33,7 @@ const Books = () => {
     title: '',
     author: '',
     isbn: '',
+    type: 'book', // book or journal
     category: '',
     publisher: '',
     publication_year: '',
@@ -66,6 +67,7 @@ const Books = () => {
       title: '',
       author: '',
       isbn: '',
+      type: 'book',
       category: '',
       publisher: '',
       publication_year: '',
@@ -81,7 +83,7 @@ const Books = () => {
 
   useEffect(() => {
     loadBooks();
-  }, [searchTerm, filters.category, sortBy, sortOrder]);
+  }, [searchTerm, filters.category, filters.available, sortBy, sortOrder]);
 
   const loadBooks = async () => {
     setLoading(true);
@@ -89,12 +91,22 @@ const Books = () => {
       const params = {
         q: searchTerm || undefined,
         category: filters.category || undefined,
+        availability: filters.available || undefined,
         limit: 100,
         sortBy: sortBy,
         sortOrder: sortOrder
       };
       const response = await bookService.getAllBooks(params);
       let booksData = response.data?.books || response.books || [];
+      
+      // Client-side filtering for availability if not filtered by backend
+      if (filters.available) {
+        if (filters.available === 'available') {
+          booksData = booksData.filter(book => book.is_available === 1 || book.is_available === true);
+        } else if (filters.available === 'in-use') {
+          booksData = booksData.filter(book => book.is_available === 0 || book.is_available === false);
+        }
+      }
       
       // Apply client-side sorting if needed
       booksData.sort((a, b) => {
@@ -188,7 +200,7 @@ const Books = () => {
       Publisher: book.publisher || '',
       'Publication Year': book.publication_year || '',
       'Total Copies': book.total_copies || 1,
-      Status: book.is_available ? 'Available' : 'Checked Out'
+      Status: book.is_available ? 'Available' : 'In Use'
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -208,6 +220,7 @@ const Books = () => {
       title: book.title,
       author: book.author,
       isbn: book.isbn,
+      type: book.type || 'book',
       category: book.category,
       publisher: book.publisher || '',
       publication_year: book.publication_year || '',
@@ -363,92 +376,106 @@ const Books = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {/* Page Header */}
+      <div className="card bg-gradient-to-r from-blue-600 to-blue-700 text-white">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold mb-1">Books Management</h1>
+            <p className="text-blue-100 text-sm">
+              Manage your library collection, search books, and track availability
+            </p>
+          </div>
+          <BookOpen size={40} className="text-blue-200 opacity-80" />
+        </div>
+      </div>
+
       {/* Search Bar */}
       <div className="card">
-        <form onSubmit={handleSearch} className="space-y-4">
-          <div className="flex gap-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-                <input
-                  type="text"
-                  placeholder="Search by title, author, or description..."
-                  className="input pl-10"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-                {searchTerm && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchTerm('')}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
+        <div className="flex gap-3 items-start">
+          {/* Search Input */}
+          <div className="flex-1">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+              <input
+                type="text"
+                placeholder="Search by title, author, or description..."
+                className="input pl-10 pr-10"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSearch(e)}
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xl"
+                >
+                  ×
+                </button>
+              )}
             </div>
-            <button type="submit" className="btn btn-primary px-6">
-              Search
-            </button>
-            {(searchTerm || filters.category) && (
-              <button 
-                type="button" 
-                onClick={handleClearFilters}
-                className="btn btn-secondary px-4"
-              >
-                Clear
-              </button>
-            )}
           </div>
 
-          {/* Filters */}
-          <div className="flex gap-4 items-center">
-            <Filter size={20} className="text-gray-600" />
-            <select
-              className="input"
-              value={filters.category}
-              onChange={(e) => setFilters({ ...filters, category: e.target.value })}
+          {/* Filter Dropdowns */}
+          <select
+            className="input w-64"
+            value={filters.category}
+            onChange={(e) => setFilters({ ...filters, category: e.target.value })}
+          >
+            <option value="">All Departments</option>
+            {departmentCategories.map(dept => (
+              <option key={dept.code} value={dept.code}>
+                {dept.code} - {dept.name}
+              </option>
+            ))}
+          </select>
+          
+          <select
+            className="input w-48"
+            value={filters.available}
+            onChange={(e) => setFilters({ ...filters, available: e.target.value })}
+          >
+            <option value="">All Status</option>
+            <option value="available">✅ Available Only</option>
+            <option value="in-use">🔴 In Use Only</option>
+          </select>
+
+          {/* Clear Button */}
+          {(searchTerm || filters.category || filters.available) && (
+            <button 
+              type="button" 
+              onClick={handleClearFilters}
+              className="btn btn-secondary px-4 whitespace-nowrap"
             >
-              <option value="">All Departments</option>
-              {departmentCategories.map(dept => (
-                <option key={dept.code} value={dept.code}>
-                  {dept.code} - {dept.name}
-                </option>
-              ))}
-            </select>
-            <div className="text-sm text-gray-600">
-              {searchTerm && `Searching: "${searchTerm}"`}
-              {searchTerm && filters.category && " | "}
-              {filters.category && `Department: ${filters.category}`}
-            </div>
-          </div>
-        </form>
+              Clear Filters
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Category Statistics */}
       <div className="card">
-        <h3 className="text-lg font-semibold mb-4">Books by Department</h3>
+        <h3 className="text-base font-semibold mb-3 text-gray-900">Books by Department</h3>
         <div className="flex gap-3 overflow-x-auto pb-2">
-          <div className="bg-blue-50 rounded-lg p-3 text-center min-w-[120px] flex-shrink-0">
-            <div className="text-xl font-bold text-blue-900">{totalCount}</div>
-            <div className="text-xs text-blue-700">Total Books</div>
+          <div className="bg-blue-50 rounded-lg p-3 text-center min-w-[100px] flex-shrink-0 border border-blue-100">
+            <div className="text-2xl font-bold text-blue-900">{totalCount}</div>
+            <div className="text-xs text-blue-700 font-medium">Total Books</div>
           </div>
           {departmentCategories.map(dept => {
             const stat = categoryStats.find(s => s.name === dept.code);
             const count = stat?.count || 0;
             return (
-              <div key={dept.code} className={`rounded-lg p-3 text-center cursor-pointer transition-all min-w-[120px] flex-shrink-0 ${
+              <div key={dept.code} className={`rounded-lg p-3 text-center cursor-pointer transition-all min-w-[100px] flex-shrink-0 border ${
                 filters.category === dept.code 
-                  ? 'bg-primary-100 border-2 border-primary-500' 
-                  : 'bg-gray-50 hover:bg-gray-100'
+                  ? 'bg-primary-100 border-2 border-primary-500 shadow-md' 
+                  : 'bg-gray-50 hover:bg-gray-100 border-gray-200 hover:border-gray-300'
               }`}
               onClick={() => setFilters({ ...filters, category: filters.category === dept.code ? '' : dept.code })}
               >
-                <div className="text-lg font-bold text-gray-900">{count}</div>
+                <div className="text-xl font-bold text-gray-900">{count}</div>
                 <div className="text-xs font-semibold text-gray-700">{dept.code}</div>
-                <div className="text-[10px] text-gray-500 leading-tight">{dept.name}</div>
+                <div className="text-[10px] text-gray-500 leading-tight mt-0.5">{dept.name}</div>
               </div>
             );
           })}
@@ -457,9 +484,10 @@ const Books = () => {
 
       {/* Results */}
       <div className="card">
-        <div className="flex items-center justify-between mb-4">
+        {/* Header Section */}
+        <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-200">
           <div>
-            <h2 className="text-xl font-bold">
+            <h2 className="text-xl font-bold text-gray-900">
               {searchTerm ? `Search Results for "${searchTerm}"` : 
                filters.category ? `${filters.category} Department Books` : 'All Books'}
             </h2>
@@ -467,12 +495,21 @@ const Books = () => {
               {books.length} books displayed {totalCount !== books.length && `of ${totalCount} total`}
             </p>
           </div>
+          
+          {/* Primary Action Button */}
+          <button 
+            onClick={handleAddBook}
+            className="btn btn-primary flex items-center gap-2 px-6 py-2.5 shadow-md hover:shadow-lg transition-shadow"
+          >
+            <Plus size={18} />
+            Add Book
+          </button>
+        </div>
+
+        {/* Controls Bar */}
+        <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
+          {/* Left Side - View Controls */}
           <div className="flex items-center gap-3">
-            {/* View Mode Indicator */}
-            <span className="text-xs text-gray-500 hidden md:inline">
-              View: {viewMode === 'grid' ? 'Grid' : 'List'}
-            </span>
-            
             {/* View Toggle */}
             <div className="flex border border-gray-300 rounded-lg overflow-hidden shadow-sm bg-white">
               <button
@@ -480,7 +517,7 @@ const Books = () => {
                   console.log('Switching to grid view');
                   setViewMode('grid');
                 }}
-                className={`p-2.5 transition-all duration-200 ${
+                className={`p-2 transition-all duration-200 ${
                   viewMode === 'grid' 
                     ? 'bg-primary-500 text-white shadow-inner' 
                     : 'bg-white text-gray-600 hover:bg-gray-50'
@@ -494,7 +531,7 @@ const Books = () => {
                   console.log('Switching to list view');
                   setViewMode('list');
                 }}
-                className={`p-2.5 border-l border-gray-300 transition-all duration-200 ${
+                className={`p-2 border-l border-gray-300 transition-all duration-200 ${
                   viewMode === 'list' 
                     ? 'bg-primary-500 text-white shadow-inner' 
                     : 'bg-white text-gray-600 hover:bg-gray-50'
@@ -505,50 +542,46 @@ const Books = () => {
               </button>
             </div>
 
-            {/* Sort Options */}
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="input text-sm py-2"
-            >
-              <option value="title">Sort by Title</option>
-              <option value="author">Sort by Author</option>
-              <option value="category">Sort by Department</option>
-              <option value="publication_year">Sort by Year</option>
-              <option value="created_at">Sort by Added Date</option>
-            </select>
+            {/* Sort Controls */}
+            <div className="flex items-center gap-2 border border-gray-300 rounded-lg overflow-hidden bg-white">
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="px-3 py-2 text-sm border-0 outline-none focus:ring-0 bg-transparent cursor-pointer"
+              >
+                <option value="title">Sort by Title</option>
+                <option value="author">Sort by Author</option>
+                <option value="category">Sort by Department</option>
+                <option value="publication_year">Sort by Year</option>
+                <option value="created_at">Sort by Added Date</option>
+              </select>
+              <button
+                onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                className="px-3 py-2 border-l border-gray-300 hover:bg-gray-50 transition-colors"
+                title={`Sort ${sortOrder === 'asc' ? 'Descending' : 'Ascending'}`}
+              >
+                {sortOrder === 'asc' ? <SortAsc size={16} /> : <SortDesc size={16} />}
+              </button>
+            </div>
+          </div>
 
-            <button
-              onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-              className="btn btn-secondary p-2"
-              title={`Sort ${sortOrder === 'asc' ? 'Descending' : 'Ascending'}`}
-            >
-              {sortOrder === 'asc' ? <SortAsc size={16} /> : <SortDesc size={16} />}
-            </button>
-
-            {/* Export Button */}
+          {/* Right Side - Action Buttons */}
+          <div className="flex items-center gap-2">
             <button 
               onClick={handleExportBooks}
-              className="btn bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-2"
+              className="btn bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-2 px-4 py-2"
               title="Export to Excel"
             >
               <Download size={16} />
-              Export
+              <span className="hidden sm:inline">Export</span>
             </button>
             
             <button 
               onClick={handleOpenImportModal}
-              className="btn bg-green-600 hover:bg-green-700 text-white flex items-center gap-2"
+              className="btn bg-green-600 hover:bg-green-700 text-white flex items-center gap-2 px-4 py-2"
             >
-              <Upload size={18} />
-              Import
-            </button>
-            <button 
-              onClick={handleAddBook}
-              className="btn btn-primary flex items-center gap-2"
-            >
-              <Plus size={18} />
-              Add Book
+              <Upload size={16} />
+              <span className="hidden sm:inline">Import</span>
             </button>
           </div>
         </div>
@@ -561,17 +594,17 @@ const Books = () => {
           <>
             {/* Recently Viewed Section */}
             {recentlyViewed.length > 0 && (
-              <div className="mb-6">
+              <div className="mb-5 pb-5 border-b border-gray-200">
                 <div className="flex items-center gap-2 mb-3">
-                  <Clock size={18} className="text-gray-600" />
-                  <h3 className="text-lg font-semibold">Recently Viewed</h3>
+                  <Clock size={16} className="text-gray-600" />
+                  <h3 className="text-sm font-semibold text-gray-900">Recently Viewed</h3>
                 </div>
-                <div className="flex gap-4 overflow-x-auto pb-2">
+                <div className="flex gap-3 overflow-x-auto pb-2">
                   {recentlyViewed.map((book) => (
-                    <div key={`recent-${book.id}`} className="min-w-[200px] bg-gray-50 rounded-lg p-3 flex-shrink-0">
-                      <h4 className="font-semibold text-sm truncate">{book.title}</h4>
-                      <p className="text-xs text-gray-600 truncate">{book.author}</p>
-                      <span className="inline-block mt-1 px-2 py-1 bg-primary-100 text-primary-700 text-xs rounded">
+                    <div key={`recent-${book.id}`} className="min-w-[180px] bg-gray-50 rounded-lg p-2.5 flex-shrink-0 border border-gray-200 hover:border-primary-300 hover:shadow-sm transition-all cursor-pointer">
+                      <h4 className="font-semibold text-sm truncate text-gray-900">{book.title}</h4>
+                      <p className="text-xs text-gray-600 truncate mt-0.5">{book.author}</p>
+                      <span className="inline-block mt-1.5 px-2 py-0.5 bg-primary-100 text-primary-700 text-xs rounded font-medium">
                         {book.category}
                       </span>
                     </div>
@@ -616,8 +649,19 @@ const Books = () => {
                             {book.title}
                           </h3>
                           <p className="text-sm text-gray-600 truncate mb-2">{book.author}</p>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="badge badge-info text-xs">{book.category}</span>
+                            {book.is_available ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                                <CheckCircle size={12} className="mr-1" />
+                                Available
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">
+                                <XCircle size={12} className="mr-1" />
+                                In Use
+                              </span>
+                            )}
                             {book.current_shelf && (
                               <span className="flex items-center gap-1 text-xs text-gray-500">
                                 <MapPin size={12} />
@@ -676,8 +720,19 @@ const Books = () => {
                         >
                           <h3 className="font-semibold text-gray-900 hover:text-primary-600">{book.title}</h3>
                           <p className="text-sm text-gray-600">{book.author}</p>
-                          <div className="flex items-center gap-3 mt-1">
+                          <div className="flex items-center gap-3 mt-1 flex-wrap">
                             <span className="badge badge-info text-xs">{book.category}</span>
+                            {book.is_available ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                                <CheckCircle size={12} className="mr-1" />
+                                Available
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">
+                                <XCircle size={12} className="mr-1" />
+                                In Use
+                              </span>
+                            )}
                             {book.publication_year && (
                               <span className="text-xs text-gray-500">Published: {book.publication_year}</span>
                             )}
@@ -733,11 +788,26 @@ const Books = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-2xl">
             <h3 className="text-xl font-bold mb-4">
-              {editingBook ? 'Edit Book' : 'Add New Book'}
+              {editingBook ? 'Edit Book/Journal' : 'Add New Book/Journal'}
             </h3>
             
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Type *
+                  </label>
+                  <select
+                    value={formData.type}
+                    onChange={(e) => setFormData({...formData, type: e.target.value})}
+                    className="input"
+                    required
+                  >
+                    <option value="book">📚 Book</option>
+                    <option value="journal">📰 Journal</option>
+                  </select>
+                </div>
+                
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Title *

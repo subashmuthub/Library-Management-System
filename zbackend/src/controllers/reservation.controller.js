@@ -5,6 +5,7 @@
 
 const mysql = require('mysql2/promise');
 const { pool } = require('../config/database');
+const EmailService = require('../services/email.service');
 
 class ReservationController {
     // Reserve a book
@@ -84,21 +85,31 @@ class ReservationController {
                 });
             }
 
-            let status, scheduledDate, expiryDate;
-
+            // If book is available, reject and redirect to checkout
             if (book.available_copies > 0) {
-                // Book is available, mark as ready
-                status = 'ready';
-                scheduledDate = new Date();
-                expiryDate = new Date();
-                expiryDate.setDate(expiryDate.getDate() + 3); // 3 days to pick up
-            } else {
-                // Book is not available, add to queue
-                status = 'active';
-                scheduledDate = null;
-                expiryDate = new Date();
-                expiryDate.setDate(expiryDate.getDate() + 30); // 30 days max wait
+                connection.release();
+                return res.status(409).json({
+                    error: 'BOOK_AVAILABLE_FOR_CHECKOUT',
+                    message: 'This book is currently available on the shelf. Please checkout directly instead of reserving.',
+                    redirect_to_checkout: true,
+                    book_id: book_id,
+                    book_title: book.title
+                });
             }
+
+            // Book is not available — get current holder info
+            const [currentHolder] = await connection.execute(`
+                SELECT CONCAT(u.first_name, ' ', u.last_name) as name, bt.due_date
+                FROM book_transactions bt
+                JOIN users u ON bt.user_id = u.id
+                WHERE bt.book_id = ? AND bt.status = 'active'
+                ORDER BY bt.checkout_date DESC LIMIT 1
+            `, [book_id]);
+
+            const status = 'active';
+            const scheduledDate = null;
+            const expiryDate = new Date();
+            expiryDate.setDate(expiryDate.getDate() + 30);
 
             // Get queue position
             const [queuePosition] = await connection.execute(`
@@ -137,14 +148,16 @@ class ReservationController {
 
             connection.release();
 
-            const message = status === 'ready' 
-                ? 'Book reserved successfully! Ready for pickup.'
-                : `Book reserved successfully! You are #${queuePosition[0].position} in queue.`;
+            const message = `Reserved successfully! You are #${queuePosition[0].position} in queue. You'll be notified by email when the book becomes available.`;
 
             res.status(201).json({
                 success: true,
                 message,
-                reservation: newReservation[0]
+                reservation: newReservation[0],
+                current_holder: currentHolder.length > 0 ? {
+                    name: currentHolder[0].name,
+                    due_date: currentHolder[0].due_date
+                } : null
             });
 
         } catch (error) {
@@ -167,7 +180,7 @@ class ReservationController {
                     b.title,
                     b.author,
                     b.isbn,
-                    b.cover_image,
+                    b.cover_image_url,
                     b.total_copies,
                     COALESCE(b.total_copies - COUNT(bt.id), b.total_copies) as available_copies
                 FROM reservations r
@@ -253,10 +266,14 @@ class ReservationController {
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
                     u.email,
                     u.student_id,
-                    u.phone
+                    u.phone,
+                    CONCAT(cu.first_name, ' ', cu.last_name) as current_holder,
+                    bt2.due_date as expected_return_date
                 FROM reservations r
                 JOIN books b ON r.book_id = b.id
                 JOIN users u ON r.user_id = u.id
+                LEFT JOIN book_transactions bt2 ON r.book_id = bt2.book_id AND bt2.status = 'active'
+                LEFT JOIN users cu ON bt2.user_id = cu.id
                 WHERE 1=1
             `;
 
@@ -584,7 +601,29 @@ class ReservationController {
                     WHERE id = ?
                 `, [expiryDate, reservation.id]);
 
-                // Here you could also send notification to user
+                // Get user email and book details for notification
+                const [userInfo] = await connection.execute(`
+                    SELECT 
+                        u.email,
+                        CONCAT(u.first_name, ' ', u.last_name) as user_name,
+                        b.title as book_title
+                    FROM users u
+                    CROSS JOIN books b
+                    WHERE u.id = ? AND b.id = ?
+                `, [reservation.user_id, reservation.book_id]);
+
+                if (userInfo.length > 0 && userInfo[0].email) {
+                    // Send email notification
+                    EmailService.sendReservationReadyEmail(
+                        userInfo[0].email,
+                        userInfo[0].user_name,
+                        userInfo[0].book_title,
+                        reservation.id
+                    ).catch(err => {
+                        console.error(`Failed to send email for reservation ${reservation.id}:`, err);
+                    });
+                }
+
                 console.log(`Reservation ${reservation.id} is now ready for pickup`);
             }
 

@@ -36,7 +36,7 @@ const EntryLog = () => {
 
   const loadHistory = async () => {
     try {
-      const response = await entryService.getMyHistory();
+      const response = await entryService.getMyHistory(user?.id);
       setHistory(response.entries || []);
     } catch (error) {
       console.error('Failed to load history:', error);

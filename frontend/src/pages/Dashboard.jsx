@@ -20,11 +20,25 @@ const Dashboard = () => {
 
   const loadDashboardData = async () => {
     try {
+      console.log('Dashboard: Loading data for user:', user);
+      console.log('User ID:', user?.id);
+      
       const [occupancyData, historyData, booksData] = await Promise.all([
-        entryService.getCurrentOccupancy().catch(() => ({ current_occupancy: 0 })),
-        entryService.getMyHistory(user?.id).catch(() => ({ entries: [] })),
-        bookService.getAllBooks({ limit: 5 }).catch(() => ({ data: { books: [] } })),
+        entryService.getCurrentOccupancy().catch((err) => {
+          console.error('Occupancy error:', err);
+          return { current_occupancy: 0 };
+        }),
+        entryService.getMyHistory(user?.id || 4).catch((err) => {  // Fallback to user ID 4 for testing
+          console.error('History error:', err);
+          return { entries: [] };
+        }),
+        bookService.getAllBooks({ limit: 5 }).catch((err) => {
+          console.error('Books error:', err);
+          return { data: { books: [] } };
+        }),
       ]);
+
+      console.log('Dashboard: API responses:', { occupancyData, historyData, booksData });
 
       setStats({
         occupancy: occupancyData.current_occupancy || 0,
@@ -43,11 +57,11 @@ const Dashboard = () => {
     <div className="card">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm text-gray-600 mb-1">{label}</p>
-          <p className="text-3xl font-bold text-gray-900">{value}</p>
+          <p className="text-xs text-gray-600 mb-1">{label}</p>
+          <p className="text-2xl font-bold text-gray-900">{value}</p>
         </div>
-        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${color}`}>
-          <Icon size={24} className="text-white" />
+        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${color}`}>
+          <Icon size={20} className="text-white" />
         </div>
       </div>
     </div>
@@ -65,8 +79,8 @@ const Dashboard = () => {
     <div className="space-y-6">
       {/* Welcome Section */}
       <div className="card bg-gradient-to-r from-primary-500 to-primary-700 text-white">
-        <h1 className="text-2xl font-bold mb-2">Welcome back, {user?.name}!</h1>
-        <p className="text-primary-100">
+        <h1 className="text-xl font-bold mb-2">Welcome back, {user?.name}!</h1>
+        <p className="text-primary-100 text-sm">
           {user?.role === 'student'
             ? 'Ready to explore our library collection?'
             : 'Here\'s your library overview for today.'}

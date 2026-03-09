@@ -8,7 +8,6 @@ const Navigation = () => {
   const [selectedBook, setSelectedBook] = useState(null);
   const [navigation, setNavigation] = useState(null);
   const [loading, setLoading] = useState(false);
-
   const handleSearch = async (e) => {
     e.preventDefault();
     if (!searchTerm.trim()) return;
@@ -42,40 +41,43 @@ const Navigation = () => {
 
   return (
     <div className="space-y-6">
-      {/* Info Card */}
-      <div className="card bg-primary-50 border border-primary-200">
-        <div className="flex items-start gap-3">
-          <NavigationIcon className="text-primary-600 flex-shrink-0 mt-1" size={24} />
-          <div>
-            <h3 className="font-bold mb-1">Indoor Navigation</h3>
-            <p className="text-sm text-gray-700">
-              Search for a book and get turn-by-turn directions using BLE beacon technology. 
-              The system will guide you to the exact shelf location.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Search */}
+      {/* Navigation */}
       <div className="card">
-        <h2 className="text-xl font-bold mb-4">Search for a Book</h2>
-        <form onSubmit={handleSearch} className="flex gap-4">
-          <div className="flex-1">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-              <input
-                type="text"
-                className="input pl-10"
-                placeholder="Enter book title, author, or ISBN..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+            {/* Info Card */}
+            <div className="bg-primary-50 border border-primary-200 p-4 rounded-lg mb-6">
+              <div className="flex items-start gap-3">
+                <NavigationIcon className="text-primary-600 flex-shrink-0 mt-1" size={24} />
+                <div>
+                  <h3 className="font-bold mb-1">Indoor Navigation</h3>
+                  <p className="text-sm text-gray-700">
+                    Search for a book and get turn-by-turn directions using BLE beacon technology. 
+                    The system will guide you to the exact shelf location.
+                  </p>
+                </div>
+              </div>
             </div>
-          </div>
-          <button type="submit" className="btn btn-primary px-6" disabled={loading}>
-            Search
-          </button>
-        </form>
+
+            {/* Search */}
+            <div>
+              <h2 className="text-xl font-bold mb-4">Search for a Book</h2>
+              <form onSubmit={handleSearch} className="flex gap-4">
+                <div className="flex-1">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+                    <input
+                      type="text"
+                      className="input pl-10"
+                      placeholder="Enter book title, author, or ISBN..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <button type="submit" className="btn btn-primary px-6" disabled={loading}>
+                  Search
+                </button>
+              </form>
+            </div>
       </div>
 
       {/* Search Results */}

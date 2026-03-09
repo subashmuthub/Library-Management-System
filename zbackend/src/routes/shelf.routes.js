@@ -10,8 +10,8 @@ const shelfController = require('../controllers/shelf.controller');
 const { authenticate } = require('../middleware/auth.middleware');
 const { validationRules, handleValidationErrors } = require('../middleware/validator.middleware');
 
-// List all shelves
-router.get('/', authenticate, shelfController.listShelves);
+// List all shelves (no auth needed - used by RFID Scanner)
+router.get('/', shelfController.listShelves);
 
 // Get shelf by ID
 router.get(

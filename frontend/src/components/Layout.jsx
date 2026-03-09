@@ -16,7 +16,7 @@ import {
   DollarSign,
   Bookmark,
   Users,
-  TestTube
+  Search
 } from 'lucide-react';
 
 const Layout = () => {
@@ -34,6 +34,7 @@ const Layout = () => {
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/books', label: 'Books', icon: BookOpen },
+    { path: '/book-search', label: 'Book Search', icon: Search },
     { path: '/transactions', label: 'Transactions', icon: RefreshCw },
     { path: '/fines', label: 'Fines', icon: DollarSign },
     { path: '/reservations', label: 'Reservations', icon: Bookmark },
@@ -41,7 +42,6 @@ const Layout = () => {
     { path: '/entry', label: 'Entry Log', icon: LogIn },
     { path: '/rfid', label: 'RFID Scanner', icon: Scan },
     { path: '/navigation', label: 'Navigation', icon: NavigationIcon },
-    { path: '/api-test', label: 'API Test', icon: TestTube },
   ];
 
   return (

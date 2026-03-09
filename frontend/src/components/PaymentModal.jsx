@@ -11,31 +11,42 @@ const PaymentModal = ({ fine, onClose, onPaymentSuccess }) => {
   const paymentGateways = [
     { 
       id: 'gpay', 
-      name: 'Google Pay', 
+      name: 'Google Pay (UPI)', 
       icon: Smartphone, 
       color: 'blue',
-      description: 'Pay by any UPI app'
+      description: 'Pay using Google Pay UPI',
+      upiApp: 'gpay'
     },
     { 
       id: 'phonepe', 
-      name: 'PhonePe', 
+      name: 'PhonePe (UPI)', 
       icon: Smartphone, 
       color: 'purple',
-      description: 'UPI & Wallets'
+      description: 'Pay using PhonePe UPI',
+      upiApp: 'phonepe'
     },
     { 
       id: 'paytm', 
-      name: 'Paytm', 
+      name: 'Paytm (UPI)', 
       icon: Wallet, 
       color: 'indigo',
-      description: 'Paytm & UPI'
+      description: 'Pay using Paytm UPI',
+      upiApp: 'paytm'
+    },
+    { 
+      id: 'upi', 
+      name: 'Other UPI Apps', 
+      icon: Smartphone, 
+      color: 'cyan',
+      description: 'Pay using any UPI app',
+      upiApp: 'upi'
     },
     { 
       id: 'card', 
       name: 'Credit / Debit Card', 
       icon: CreditCard, 
       color: 'green',
-      description: 'Add and secure cards as per RBI guidelines'
+      description: 'Pay securely with cards'
     },
     { 
       id: 'cash', 
@@ -149,8 +160,21 @@ const PaymentModal = ({ fine, onClose, onPaymentSuccess }) => {
 
       // Add UPI-specific options
       if (isUpiGateway(selectedGateway) && upiId) {
-        options.method = 'upi';
+        options.method = {
+          upi: true
+        };
         options.prefill.vpa = upiId; // Pre-fill UPI ID
+        
+        // Add GPay specific configuration
+        if (selectedGateway.id === 'gpay') {
+          options.config = {
+            payment_capture: 1
+          };
+          options.notes = {
+            payment_app: 'gpay',
+            upi_id: upiId
+          };
+        }
       }
 
       const razorpay = new window.Razorpay(options);

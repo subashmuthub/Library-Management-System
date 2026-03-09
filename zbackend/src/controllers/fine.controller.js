@@ -10,7 +10,7 @@ class FineController {
     // Get all pending fines
     static async getPendingFines(req, res) {
         try {
-            const { page = 1, limit = 50, userId } = req.query;
+            const { page = 1, limit = 50, userId, status } = req.query;
             
             // Parse and validate pagination parameters
             const parsedPage = Math.max(1, parseInt(page) || 1);
@@ -47,10 +47,16 @@ class FineController {
                 JOIN users u ON f.user_id = u.id
                 JOIN book_transactions bt ON f.transaction_id = bt.id
                 JOIN books b ON bt.book_id = b.id
-                WHERE f.status = 'pending'
+                WHERE 1=1
             `;
 
             let params = [];
+            
+            // Filter by status if provided and not 'all'
+            if (status && status !== 'all') {
+                query += ` AND f.status = ?`;
+                params.push(status);
+            }
             
             if (userId) {
                 query += ` AND f.user_id = ?`;
@@ -70,9 +76,15 @@ class FineController {
             let countQuery = `
                 SELECT COUNT(*) as total
                 FROM fines f
-                WHERE f.status = 'pending'
+                WHERE 1=1
             `;
             let countParams = [];
+
+            // Filter by status if provided and not 'all'
+            if (status && status !== 'all') {
+                countQuery += ` AND f.status = ?`;
+                countParams.push(status);
+            }
 
             if (userId) {
                 countQuery += ` AND f.user_id = ?`;

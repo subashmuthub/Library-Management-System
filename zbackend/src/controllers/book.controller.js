@@ -118,13 +118,55 @@ class BookController {
     // Legacy search method for backward compatibility
     static async searchBooks(req, res) {
         try {
-            const { q } = req.query;
+            const { q, isbn, title, author, type, department } = req.query;
             
-            if (!q || q.trim().length < 2) {
-                return res.status(400).json({ 
-                    error: 'Search query must be at least 2 characters' 
-                });
+            // Build search conditions
+            let whereConditions = [];
+            let queryParams = [];
+
+            // General search (q parameter)
+            if (q && q.trim().length >= 2) {
+                whereConditions.push('(b.title LIKE ? OR b.author LIKE ? OR b.isbn LIKE ? OR b.description LIKE ?)');
+                const searchParam = `%${q.trim()}%`;
+                queryParams.push(searchParam, searchParam, searchParam, searchParam);
             }
+
+            // ISBN search
+            if (isbn && isbn.trim()) {
+                whereConditions.push('b.isbn LIKE ?');
+                queryParams.push(`%${isbn.trim()}%`);
+            }
+
+            // Title search
+            if (title && title.trim()) {
+                whereConditions.push('b.title LIKE ?');
+                queryParams.push(`%${title.trim()}%`);
+            }
+
+            // Author search
+            if (author && author.trim()) {
+                whereConditions.push('b.author LIKE ?');
+                queryParams.push(`%${author.trim()}%`);
+            }
+
+            // Type filter (book or journal)
+            if (type && (type === 'book' || type === 'journal')) {
+                whereConditions.push('b.type = ?');
+                queryParams.push(type);
+            }
+
+            // Department filter
+            if (department && department.trim() && department !== 'all') {
+                whereConditions.push('b.department = ?');
+                queryParams.push(department.trim());
+            }
+
+            // If no search criteria provided
+            if (whereConditions.length === 0) {
+                whereConditions.push('1=1');
+            }
+
+            const whereClause = whereConditions.join(' AND ');
 
             const connection = await pool.getConnection();
             
@@ -133,23 +175,25 @@ class BookController {
                     b.*,
                     cbl.shelf_code,
                     cbl.zone,
+                    CONCAT(u.first_name, ' ', u.last_name) as current_borrower,
+                    bt.due_date,
                     CASE 
-                        WHEN bt.id IS NOT NULL THEN 'checked_out'
+                        WHEN bt.id IS NOT NULL THEN 'in_use'
                         ELSE 'available'
                     END as status
                 FROM books b
                 LEFT JOIN current_book_locations cbl ON b.id = cbl.book_id
                 LEFT JOIN book_transactions bt ON b.id = bt.book_id AND bt.return_date IS NULL
-                WHERE b.title LIKE ?
-                   OR b.author LIKE ?
-                   OR b.isbn LIKE ?
+                LEFT JOIN users u ON bt.user_id = u.id
+                WHERE ${whereClause}
                 ORDER BY b.title ASC
-                LIMIT 50
-            `, [`%${q}%`, `%${q}%`, `%${q}%`]);
+                LIMIT 100
+            `, queryParams);
 
             connection.release();
 
             res.json({
+                success: true,
                 total: books.length,
                 books: books.map(book => ({
                     id: book.id,
@@ -157,20 +201,28 @@ class BookController {
                     title: book.title,
                     author: book.author,
                     publisher: book.publisher,
-                    publicationYear: book.publication_year,
+                    publication_year: book.publication_year,
                     category: book.category,
+                    department: book.department || 'General',
+                    type: book.type || 'book',
                     pages: book.pages,
-                    isAvailable: book.is_available === 1,
-                    currentLocation: book.shelf_code ? {
-                        shelfCode: book.shelf_code,
-                        zone: book.zone
-                    } : null
+                    description: book.description,
+                    total_copies: book.total_copies,
+                    is_available: book.is_available === 1,
+                    current_borrower: book.current_borrower || null,
+                    due_date: book.due_date || null,
+                    status: book.status,
+                    shelf_location: book.shelf_code ? `${book.zone}-${book.shelf_code}` : null
                 }))
             });
 
         } catch (error) {
             console.error('Error searching books:', error);
-            res.status(500).json({ error: 'Internal server error' });
+            res.status(500).json({ 
+                success: false,
+                error: 'Internal server error',
+                details: error.message 
+            });
         }
     }
 
@@ -228,27 +280,36 @@ class BookController {
 
             const book = books[0];
             res.json({
-                id: book.id,
-                isbn: book.isbn,
-                title: book.title,
-                author: book.author,
-                publisher: book.publisher,
-                publicationYear: book.publication_year,
-                category: book.category,
-                edition: book.edition,
-                language: book.language,
-                pages: book.pages,
-                description: book.description,
-                coverImageUrl: book.cover_image_url,
-                isAvailable: book.is_available === 1,
-                rfidTag: book.tag_id,
-                status: book.status,
-                currentLocation: book.shelf_code ? {
-                    shelfCode: book.shelf_code,
-                    zone: book.zone,
-                    section: book.section,
-                    lastScanned: book.last_scanned
-                } : null,
+                book: {
+                    id: book.id,
+                    isbn: book.isbn,
+                    title: book.title,
+                    author: book.author,
+                    publisher: book.publisher,
+                    publication_year: book.publication_year,
+                    category: book.category,
+                    type: book.type || 'book',
+                    department: book.department,
+                    edition: book.edition,
+                    language: book.language,
+                    pages: book.pages,
+                    description: book.description,
+                    cover_image_url: book.cover_image_url,
+                    total_copies: book.total_copies,
+                    is_available: book.is_available === 1,
+                    rfid_tag: book.tag_id,
+                    status: book.status,
+                    borrower_name: book.borrower_name,
+                    checked_out_by: book.checked_out_by,
+                    due_date: book.due_date,
+                    current_shelf: book.shelf_code,
+                    currentLocation: book.shelf_code ? {
+                        shelfCode: book.shelf_code,
+                        zone: book.zone,
+                        section: book.section,
+                        lastScanned: book.last_scanned
+                    } : null
+                },
                 locationHistory: history.map(h => ({
                     shelfCode: h.shelf_code,
                     timestamp: h.timestamp,
@@ -331,6 +392,7 @@ class BookController {
                 publisher,
                 publication_year,
                 category,
+                type = 'book', // book or journal
                 edition,
                 language = 'English',
                 pages,
@@ -343,6 +405,13 @@ class BookController {
             if (!isbn || !title || !author) {
                 return res.status(400).json({ 
                     error: 'ISBN, title, and author are required' 
+                });
+            }
+
+            // Validate type
+            if (type && !['book', 'journal'].includes(type)) {
+                return res.status(400).json({ 
+                    error: 'Type must be either "book" or "journal"' 
                 });
             }
 
@@ -364,12 +433,12 @@ class BookController {
             // Insert new book
             const [result] = await connection.execute(`
                 INSERT INTO books (
-                    isbn, title, author, publisher, publication_year,
+                    isbn, title, author, type, publisher, publication_year,
                     category, edition, language, pages, description, 
                     cover_image_url, total_copies
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
-                isbn, title, author, publisher, publication_year,
+                isbn, title, author, type, publisher, publication_year,
                 category, edition, language, pages, description, 
                 cover_image_url, total_copies
             ]);

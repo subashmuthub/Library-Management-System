@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { bookService, navigationService } from '../services';
-import { ArrowLeft, BookOpen, MapPin, Compass, Clock, Tag } from 'lucide-react';
+import { bookService, navigationService, transactionService, reservationService } from '../services';
+import { ArrowLeft, BookOpen, MapPin, Compass, Clock, Tag, CheckCircle, XCircle, User, Calendar, AlertCircle, BookmarkPlus, Users } from 'lucide-react';
 import { format } from 'date-fns';
 
 const BookDetails = () => {
@@ -9,16 +9,20 @@ const BookDetails = () => {
   const navigate = useNavigate();
   const [book, setBook] = useState(null);
   const [locationHistory, setLocationHistory] = useState([]);
+  const [transactionHistory, setTransactionHistory] = useState([]);
+  const [reservationQueue, setReservationQueue] = useState([]);
   const [navigation, setNavigation] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [reserving, setReserving] = useState(false);
+  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
   useEffect(() => {
     loadBookDetails();
   }, [id]);
 
   const loadBookDetails = async () => {
-    if (!id || id === 'undefined') {
-      console.error('Invalid book ID:', id);
+    if (!id) {
+      setLoading(false);
       return;
     }
     
@@ -26,14 +30,66 @@ const BookDetails = () => {
     try {
       const [bookData, historyData] = await Promise.all([
         bookService.getBookById(id),
-        bookService.getBookLocationHistory(id),
+        bookService.getBookLocationHistory(id).catch(() => ({ history: [] })),
       ]);
-      setBook(bookData.book || bookData.data);
+      
+      const bookInfo = bookData.book || bookData.data || bookData;
+      setBook(bookInfo);
       setLocationHistory(historyData.history || historyData.data || []);
+      
+      // Load transaction history
+      loadTransactionHistory();
+      
+      // Load reservation queue if book is not available
+      if (!bookInfo.is_available || bookInfo.status !== 'available') {
+        loadReservationQueue();
+      }
     } catch (error) {
       console.error('Failed to load book details:', error);
+      setBook(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadTransactionHistory = async () => {
+    try {
+      const response = await transactionService.getAllTransactions({ book_id: id, limit: 10 });
+      setTransactionHistory(response.transactions || response.data || []);
+    } catch (error) {
+      console.error('Failed to load transaction history:', error);
+    }
+  };
+
+  const loadReservationQueue = async () => {
+    try {
+      const response = await reservationService.getBookQueue(id);
+      setReservationQueue(response.queue || response.data || []);
+    } catch (error) {
+      console.error('Failed to load reservation queue:', error);
+    }
+  };
+
+  const handleReserveBook = async () => {
+    if (!currentUser.id) {
+      alert('Please login to reserve books');
+      navigate('/login');
+      return;
+    }
+
+    setReserving(true);
+    try {
+      await reservationService.reserveBook({
+        book_id: id,
+        user_id: currentUser.id
+      });
+      alert('Book reserved successfully! You will be notified when it becomes available.');
+      loadReservationQueue();
+    } catch (error) {
+      console.error('Reservation failed:', error);
+      alert(error.response?.data?.error || 'Failed to reserve book');
+    } finally {
+      setReserving(false);
     }
   };
 
@@ -80,7 +136,21 @@ const BookDetails = () => {
             <BookOpen size={48} className="text-primary-600" />
           </div>
           <div className="flex-1">
-            <h1 className="text-3xl font-bold mb-2">{book.title}</h1>
+            <div className="flex items-start justify-between mb-2">
+              <h1 className="text-3xl font-bold">{book.title}</h1>
+              {/* Availability Badge */}
+              {book.is_available || book.status === 'available' ? (
+                <span className="inline-flex items-center px-4 py-2 rounded-full text-sm font-semibold bg-green-100 text-green-700">
+                  <CheckCircle size={18} className="mr-2" />
+                  Available
+                </span>
+              ) : (
+                <span className="inline-flex items-center px-4 py-2 rounded-full text-sm font-semibold bg-red-100 text-red-700">
+                  <XCircle size={18} className="mr-2" />
+                  In Use
+                </span>
+              )}
+            </div>
             <p className="text-xl text-gray-600 mb-4">{book.author}</p>
             
             <div className="grid grid-cols-2 gap-4 mb-4">
@@ -100,7 +170,41 @@ const BookDetails = () => {
                 <p className="text-sm text-gray-600">Year</p>
                 <p className="font-medium">{book.publication_year || 'N/A'}</p>
               </div>
+              {book.type && (
+                <div>
+                  <p className="text-sm text-gray-600">Type</p>
+                  <p className="font-medium capitalize">{book.type}</p>
+                </div>
+              )}
+              {book.total_copies && (
+                <div>
+                  <p className="text-sm text-gray-600">Total Copies</p>
+                  <p className="font-medium">{book.total_copies}</p>
+                </div>
+              )}
             </div>
+
+            {/* Current Borrower Info */}
+            {(book.borrower_name || book.checked_out_by) && (
+              <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg mb-4">
+                <div className="flex items-start gap-3">
+                  <User className="text-yellow-600 flex-shrink-0 mt-1" size={20} />
+                  <div className="flex-1">
+                    <p className="font-semibold text-yellow-900 mb-1">Currently Borrowed</p>
+                    {book.borrower_name && (
+                      <p className="text-sm text-yellow-800">
+                        <span className="font-medium">Borrower:</span> {book.borrower_name}
+                      </p>
+                    )}
+                    {book.due_date && (
+                      <p className="text-sm text-yellow-800">
+                        <span className="font-medium">Due Date:</span> {format(new Date(book.due_date), 'MMM dd, yyyy')}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {book.current_shelf && (
               <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg mb-4">
@@ -112,10 +216,23 @@ const BookDetails = () => {
               </div>
             )}
 
-            <button onClick={handleNavigate} className="btn btn-primary">
-              <Compass size={20} className="inline mr-2" />
-              Get Directions
-            </button>
+            <div className="flex gap-3">
+              {book.is_available || book.status === 'available' ? (
+                <button onClick={handleNavigate} className="btn btn-primary">
+                  <Compass size={20} className="inline mr-2" />
+                  Get Directions
+                </button>
+              ) : (
+                <button 
+                  onClick={handleReserveBook} 
+                  disabled={reserving}
+                  className="btn btn-primary"
+                >
+                  <BookmarkPlus size={20} className="inline mr-2" />
+                  {reserving ? 'Reserving...' : 'Reserve This Book'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -150,6 +267,85 @@ const BookDetails = () => {
           <div className="bg-gray-50 p-4 rounded-lg">
             <p className="text-sm text-gray-600 mb-1">Tag ID</p>
             <code className="text-sm bg-white px-3 py-2 rounded border">{book.rfid_tag}</code>
+          </div>
+        </div>
+      )}
+
+      {/* Reservation Queue */}
+      {reservationQueue.length > 0 && (
+        <div className="card">
+          <div className="flex items-center gap-2 mb-4">
+            <Users className="text-orange-600" size={20} />
+            <h2 className="text-xl font-bold">Reservation Queue</h2>
+          </div>
+          <div className="bg-orange-50 border border-orange-200 p-4 rounded-lg mb-3">
+            <AlertCircle className="inline mr-2 text-orange-600" size={18} />
+            <span className="text-orange-800 font-medium">
+              {reservationQueue.length} {reservationQueue.length === 1 ? 'person is' : 'people are'} waiting for this book
+            </span>
+          </div>
+          <div className="space-y-2">
+            {reservationQueue.map((reservation, index) => (
+              <div key={reservation.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <span className="text-sm font-bold text-orange-700">#{index + 1}</span>
+                </div>
+                <div className="flex-1">
+                  <p className="font-medium">{reservation.user_name || 'Student'}</p>
+                  <p className="text-sm text-gray-600">
+                    Reserved on {format(new Date(reservation.reserved_date || reservation.created_at), 'MMM dd, yyyy')}
+                  </p>
+                </div>
+                <span className={`text-xs px-2 py-1 rounded-full font-semibold ${
+                  reservation.status === 'active' ? 'bg-blue-100 text-blue-700' :
+                  reservation.status === 'ready' ? 'bg-green-100 text-green-700' :
+                  'bg-gray-100 text-gray-700'
+                }`}>
+                  {reservation.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Transaction History */}
+      {transactionHistory.length > 0 && (
+        <div className="card">
+          <div className="flex items-center gap-2 mb-4">
+            <Calendar className="text-blue-600" size={20} />
+            <h2 className="text-xl font-bold">Borrowing History</h2>
+          </div>
+          <div className="space-y-3">
+            {transactionHistory.map((transaction) => (
+              <div key={transaction.id} className="flex items-start gap-4 p-3 bg-gray-50 rounded-lg">
+                <div className="w-2 h-2 bg-blue-600 rounded-full mt-2"></div>
+                <div className="flex-1">
+                  <p className="font-medium">{transaction.user_name || 'Unknown User'}</p>
+                  <div className="text-sm text-gray-600 space-y-1">
+                    <p>
+                      <span className="font-medium">Borrowed:</span>{' '}
+                      {format(new Date(transaction.checkout_date || transaction.issue_date), 'MMM dd, yyyy')}
+                    </p>
+                    {transaction.return_date ? (
+                      <p>
+                        <span className="font-medium">Returned:</span>{' '}
+                        {format(new Date(transaction.return_date), 'MMM dd, yyyy')}
+                      </p>
+                    ) : (
+                      <p className="text-orange-600 font-medium">
+                        Currently borrowed - Due: {transaction.due_date ? format(new Date(transaction.due_date), 'MMM dd, yyyy') : 'N/A'}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <span className={`text-xs px-2 py-1 rounded-full font-semibold ${
+                  transaction.return_date ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'
+                }`}>
+                  {transaction.return_date ? 'Returned' : 'Active'}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}
