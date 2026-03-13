@@ -593,7 +593,7 @@ FROM users u
 LEFT JOIN book_transactions bt ON u.id = bt.user_id
 LEFT JOIN fines f ON u.id = f.user_id
 LEFT JOIN reservations r ON u.id = r.user_id
-WHERE u.role = 'student'
+WHERE u.role_id = 3
 GROUP BY u.id;
 
 -- ============================================================================

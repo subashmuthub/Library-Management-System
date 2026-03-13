@@ -12,15 +12,19 @@ const api = axios.create({
 });
 
 // Response interceptor for error handling
-// Temporarily disabled for testing without authentication
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Disabled 401 redirect for development/testing
-    // if (error.response?.status === 401) {
-    //   localStorage.removeItem('user');
-    //   window.location.href = '/login';
-    // }
+    if (error.response?.status === 401) {
+      // Session expired or not found — clear local state and redirect to login.
+      // Skip redirect when the request itself IS the login or /auth/me check.
+      const url = error.config?.url || '';
+      const isAuthCheck = url.includes('/auth/login') || url.includes('/auth/me');
+      if (!isAuthCheck) {
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+      }
+    }
     return Promise.reject(error);
   }
 );

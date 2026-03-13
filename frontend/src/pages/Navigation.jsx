@@ -14,7 +14,7 @@ const Navigation = () => {
 
     setLoading(true);
     try {
-      const response = await bookService.searchBooks({ query: searchTerm, limit: 10 });
+      const response = await bookService.searchBooks({ q: searchTerm, limit: 10 });
       setBooks(response.books || []);
       setSelectedBook(null);
       setNavigation(null);
@@ -29,7 +29,7 @@ const Navigation = () => {
     setSelectedBook(book);
     setLoading(true);
     try {
-      const navData = await navigationService.findBook(book.book_id);
+      const navData = await navigationService.findBook(book.id);
       setNavigation(navData);
     } catch (error) {
       console.error('Failed to get navigation:', error);
@@ -87,7 +87,7 @@ const Navigation = () => {
           <div className="space-y-2">
             {books.map((book) => (
               <button
-                key={book.book_id}
+                key={book.id}
                 onClick={() => handleNavigate(book)}
                 className="w-full p-4 border border-gray-200 rounded-lg hover:border-primary-300 hover:bg-primary-50 transition-all text-left flex items-center justify-between"
               >
@@ -125,10 +125,10 @@ const Navigation = () => {
                 <p className="font-medium">Location</p>
               </div>
               <p className="text-2xl font-bold text-green-700">
-                Shelf {navigation.shelf?.shelf_code}
+                Shelf {navigation.location?.shelfCode}
               </p>
               <p className="text-sm text-gray-600">
-                {navigation.shelf?.section} - {navigation.shelf?.floor}
+                {navigation.location?.section} - {navigation.location?.floor}
               </p>
             </div>
 
@@ -138,11 +138,15 @@ const Navigation = () => {
                 <NavigationIcon className="text-blue-600" size={20} />
                 <p className="font-medium">Directions</p>
               </div>
-              <p className="text-gray-700">{navigation.directions}</p>
+              <div className="space-y-2 text-gray-700">
+                {(navigation.navigation?.instructions || []).map((instruction, index) => (
+                  <p key={`${instruction}-${index}`}>{instruction}</p>
+                ))}
+              </div>
             </div>
 
             {/* Beacon Info */}
-            {navigation.beacon && (
+            {navigation.navigation?.beacon && (
               <div className="bg-white p-4 rounded-lg">
                 <div className="flex items-center gap-2 mb-3">
                   <Radio className="text-purple-600" size={20} />
@@ -152,12 +156,12 @@ const Navigation = () => {
                   <div>
                     <p className="text-xs text-gray-600 mb-1">UUID</p>
                     <code className="text-xs bg-gray-100 px-2 py-1 rounded block break-all">
-                      {navigation.beacon.uuid}
+                      {navigation.navigation.beacon.uuid}
                     </code>
                   </div>
                   <div>
                     <p className="text-xs text-gray-600 mb-1">Zone</p>
-                    <span className="badge badge-info">{navigation.beacon.zone}</span>
+                    <span className="badge badge-info">{navigation.navigation.beacon.zone}</span>
                   </div>
                   <p className="text-xs text-gray-500 mt-2">
                     Use your phone's BLE scanner to detect this beacon

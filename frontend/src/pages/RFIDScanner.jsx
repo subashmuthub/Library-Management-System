@@ -7,9 +7,9 @@ const RFIDScanner = () => {
   const { isDemoMode } = useMode();
   const [shelves, setShelves] = useState([]);
   const [scanData, setScanData] = useState({
-    tag_id: '',
-    reader_id: '',
-    shelf_id: '',
+    tagId: '',
+    readerId: '',
+    shelfId: '',
   });
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -34,13 +34,13 @@ const RFIDScanner = () => {
 
     try {
       const payload = {
-        tag_id: scanData.tag_id,
+        tagId: scanData.tagId,
       };
 
       if (isDemoMode) {
-        payload.shelf_id = parseInt(scanData.shelf_id);
+        payload.shelfId = parseInt(scanData.shelfId, 10);
       } else {
-        payload.reader_id = parseInt(scanData.reader_id);
+        payload.readerId = parseInt(scanData.readerId, 10);
       }
 
       const response = await rfidService.scanTag(payload);
@@ -49,7 +49,7 @@ const RFIDScanner = () => {
       // Reset tag_id but keep reader/shelf selection
       setScanData({
         ...scanData,
-        tag_id: '',
+        tagId: '',
       });
     } catch (error) {
       setResult({ 
@@ -97,7 +97,7 @@ const RFIDScanner = () => {
                     Book: <strong>{result.data.book?.title}</strong>
                   </p>
                   <p className="text-sm text-green-700">
-                    Location: <strong>Shelf {result.data.shelf?.shelf_code}</strong>
+                    Location: <strong>Shelf {result.data.location?.shelfCode}</strong>
                   </p>
                 </div>
               </>
@@ -119,13 +119,13 @@ const RFIDScanner = () => {
             <input
               type="text"
               className="input"
-              placeholder="TAG-00001"
-              value={scanData.tag_id}
-              onChange={(e) => setScanData({ ...scanData, tag_id: e.target.value })}
+              placeholder="RFID-000001"
+              value={scanData.tagId}
+              onChange={(e) => setScanData({ ...scanData, tagId: e.target.value })}
               required
             />
             <p className="text-xs text-gray-500 mt-1">
-              Sample IDs: TAG-00001, TAG-00002, TAG-00003
+              Sample IDs: RFID-000001, RFID-000002, RFID-000003
             </p>
           </div>
 
@@ -137,14 +137,14 @@ const RFIDScanner = () => {
               </label>
               <select
                 className="input"
-                value={scanData.shelf_id}
-                onChange={(e) => setScanData({ ...scanData, shelf_id: e.target.value })}
+                value={scanData.shelfId}
+                onChange={(e) => setScanData({ ...scanData, shelfId: e.target.value })}
                 required
               >
                 <option value="">Choose a shelf...</option>
                 {shelves.map((shelf) => (
-                  <option key={shelf.shelf_id} value={shelf.shelf_id}>
-                    {shelf.shelf_code} - {shelf.section} ({shelf.floor})
+                  <option key={shelf.id} value={shelf.id}>
+                    {shelf.shelfCode} - {shelf.section} ({shelf.floor})
                   </option>
                 ))}
               </select>
@@ -162,8 +162,8 @@ const RFIDScanner = () => {
                 type="number"
                 className="input"
                 placeholder="2"
-                value={scanData.reader_id}
-                onChange={(e) => setScanData({ ...scanData, reader_id: e.target.value })}
+                value={scanData.readerId}
+                onChange={(e) => setScanData({ ...scanData, readerId: e.target.value })}
                 required
               />
               <p className="text-xs text-gray-500 mt-1">
@@ -185,10 +185,10 @@ const RFIDScanner = () => {
         <div className="space-y-2 text-sm">
           <p><strong>Sample RFID Tags:</strong></p>
           <ul className="list-disc list-inside text-gray-700 space-y-1 ml-2">
-            <li>TAG-00001 → "The Great Gatsby"</li>
-            <li>TAG-00002 → "To Kill a Mockingbird"</li>
-            <li>TAG-00003 → "1984"</li>
-            <li>TAG-00004 → "Pride and Prejudice"</li>
+              <li>RFID-000001 → "The Great Gatsby"</li>
+              <li>RFID-000002 → "To Kill a Mockingbird"</li>
+              <li>RFID-000003 → "1984"</li>
+              <li>RFID-000004 → "Pride and Prejudice"</li>
           </ul>
           {!isDemoMode && (
             <>

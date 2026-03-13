@@ -1,50 +1,25 @@
 /**
  * Authentication Middleware
- * 
- * Validates JWT tokens and enforces role-based access control.
+ *
+ * Checks that an active server-side session exists and attaches the stored
+ * user object to the request. No JWT verification needed — the session store
+ * holds the authoritative user data.
  */
-
-const jwt = require('jsonwebtoken');
 
 /**
- * Verify JWT token and attach user to request
+ * Verify session and attach user to request
  */
 const authenticate = (req, res, next) => {
-  try {
-    // Extract token from cookie
-    const token = req.cookies.auth_token;
-    
-    if (!token) {
-      return res.status(401).json({
-        error: 'Unauthorized',
-        message: 'No authentication cookie found'
-      });
-    }
-
-    // Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    // Attach user info to request
-    req.user = {
-      id: decoded.id,
-      email: decoded.email,
-      role: decoded.role
-    };
-
-    next();
-  } catch (error) {
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Session expired'
-      });
-    }
-    
+  if (!req.session || !req.session.user) {
     return res.status(401).json({
       error: 'Unauthorized',
-      message: 'Invalid session'
+      message: 'No active session. Please log in.'
     });
   }
+
+  // Attach the session user to the request so downstream code can use req.user
+  req.user = req.session.user;
+  next();
 };
 
 /**

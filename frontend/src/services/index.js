@@ -1,5 +1,13 @@
 import api from './api';
 
+const splitName = (name = '') => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return {
+    first_name: parts[0] || '',
+    last_name: parts.slice(1).join(' ') || 'User',
+  };
+};
+
 // Authentication endpoints
 export const authService = {
   login: async (email, password) => {
@@ -17,8 +25,19 @@ export const authService = {
     return response.data;
   },
 
+  // Verify the current session is still alive on the server and return the user.
+  me: async () => {
+    const response = await api.get('/auth/me');
+    return response.data;
+  },
+
   getProfile: async () => {
     const response = await api.get('/users/profile');
+    return response.data;
+  },
+
+  getProfileByUserId: async (userId) => {
+    const response = await api.get('/users/profile', { params: { userId } });
     return response.data;
   },
 
@@ -228,6 +247,11 @@ export const fineService = {
     const response = await api.get('/fines/statistics', { params });
     return response.data;
   },
+
+  getPaymentHistory: async (params) => {
+    const response = await api.get('/fines/payments/history', { params });
+    return response.data;
+  },
 };
 
 // Reservation endpoints
@@ -276,7 +300,10 @@ export const userManagementService = {
   },
 
   createUser: async (userData) => {
-    const response = await api.post('/user-management', userData);
+    const response = await api.post('/user-management', {
+      ...userData,
+      ...splitName(userData.name),
+    });
     return response.data;
   },
 
@@ -286,7 +313,10 @@ export const userManagementService = {
   },
 
   updateUser: async (userId, userData) => {
-    const response = await api.put(`/user-management/${userId}`, userData);
+    const response = await api.put(`/user-management/${userId}`, {
+      ...userData,
+      ...splitName(userData.name),
+    });
     return response.data;
   },
 

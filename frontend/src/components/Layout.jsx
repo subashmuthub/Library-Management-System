@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuth, useMode } from '../contexts';
+import { useAuth } from '../contexts';
 import { 
   LayoutDashboard, 
   BookOpen, 
@@ -21,7 +21,6 @@ import {
 
 const Layout = () => {
   const { user, logout } = useAuth();
-  const { isDemoMode, modeLabel } = useMode();
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -45,21 +44,19 @@ const Layout = () => {
   ];
 
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div className="flex h-screen bg-slate-50">
       {/* Sidebar */}
       <aside
         className={`${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        } fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0`}
+        } fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 shadow-lg transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0`}
       >
         <div className="flex flex-col h-full">
           {/* Logo */}
-          <div className="flex items-center justify-between p-4 border-b">
+          <div className="flex items-center justify-between p-5 border-b border-slate-200">
             <div>
-              <h1 className="text-xl font-bold text-primary-600">Smart Library</h1>
-              <span className={`text-xs font-medium ${isDemoMode ? 'text-yellow-600' : 'text-green-600'}`}>
-                {modeLabel} MODE
-              </span>
+              <h1 className="text-2xl font-bold text-primary-600 tracking-tight">Smart Library</h1>
+              <span className="text-xs text-slate-500 font-medium">Library Management System</span>
             </div>
             <button
               onClick={() => setSidebarOpen(false)}
@@ -80,10 +77,10 @@ const Layout = () => {
                     <Link
                       to={item.path}
                       onClick={() => setSidebarOpen(false)}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                      className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
                         isActive
-                          ? 'bg-primary-100 text-primary-700'
-                          : 'text-gray-700 hover:bg-gray-100'
+                          ? 'bg-primary-50 text-primary-700 shadow-sm border border-primary-100'
+                          : 'text-slate-700 hover:bg-slate-100'
                       }`}
                     >
                       <Icon size={20} />
@@ -96,14 +93,14 @@ const Layout = () => {
           </nav>
 
           {/* User Profile */}
-          <div className="border-t p-4">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
+          <div className="border-t border-slate-200 p-4">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
                 <User size={20} className="text-primary-600" />
               </div>
               <div className="flex-1">
                 <p className="font-medium text-sm">{user?.name}</p>
-                <p className="text-xs text-gray-500 capitalize">{user?.role?.role_name}</p>
+                <p className="text-xs text-slate-500 capitalize">{user?.role?.role_name || user?.role}</p>
               </div>
             </div>
             <div className="flex gap-2">
@@ -130,7 +127,7 @@ const Layout = () => {
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar */}
-        <header className="bg-white shadow-sm">
+        <header className="bg-white/95 backdrop-blur border-b border-slate-200 shadow-sm">
           <div className="flex items-center justify-between p-4">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -139,7 +136,7 @@ const Layout = () => {
               <Menu size={24} />
             </button>
             <div className="lg:ml-0 ml-12">
-              <h2 className="text-xl font-semibold text-gray-800">
+              <h2 className="text-xl font-semibold text-slate-800 tracking-tight">
                 {navItems.find((item) => item.path === location.pathname)?.label || 'Dashboard'}
               </h2>
             </div>
@@ -148,7 +145,7 @@ const Layout = () => {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6 bg-slate-50">
           <Outlet />
         </main>
       </div>

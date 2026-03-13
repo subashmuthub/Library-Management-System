@@ -219,7 +219,7 @@ const scanTag = async (req, res, next) => {
         tagId,
         readerId: !isDemoMode ? readerId : null,
         timestamp: new Date(),
-        scannedBy: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim()
+        scannedBy: `${req.user?.firstName || req.user?.first_name || ''} ${req.user?.lastName || req.user?.last_name || ''}`.trim() || 'System'
       },
       message: 'Book location updated successfully'
     });

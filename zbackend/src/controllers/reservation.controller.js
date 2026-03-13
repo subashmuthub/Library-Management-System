@@ -344,7 +344,7 @@ class ReservationController {
         try {
             const { id } = req.params;
             const userId = req.user?.id;
-            const userRole = req.user?.role?.role_name;
+            const userRole = req.user?.role?.role_name || req.user?.role;
 
             const connection = await pool.getConnection();
 
@@ -368,7 +368,7 @@ class ReservationController {
             const reservation = reservations[0];
 
             // Check permissions - user can cancel their own, librarian/admin can cancel any
-            if (reservation.user_id !== userId && 
+            if (userId && reservation.user_id !== userId && 
                 !['admin', 'librarian'].includes(userRole)) {
                 connection.release();
                 return res.status(403).json({ 
@@ -422,7 +422,7 @@ class ReservationController {
     static async fulfillReservation(req, res) {
         try {
             const { id } = req.params;
-            const librarianId = req.user?.id;
+            const librarianId = req.user?.id || null;
 
             const connection = await pool.getConnection();
 

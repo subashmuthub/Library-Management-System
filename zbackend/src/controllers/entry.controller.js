@@ -37,10 +37,18 @@ const logEntry = async (req, res, next) => {
       longitude,
       wifiSSID,
       speedKmh,
-      manualConfirm
+      manualConfirm,
+      userId: requestUserId
     } = req.body;
 
-    const userId = req.user.id;
+    const userId = req.user?.id || requestUserId || req.query.user_id;
+
+    if (!userId) {
+      return res.status(401).json({
+        error: 'Authentication required',
+        message: 'User ID not found. Please login or provide userId for development.'
+      });
+    }
 
     // Step 1: Check library hours (warning only, not blocking)
     const withinHours = await entryService.isWithinLibraryHours();

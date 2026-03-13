@@ -244,12 +244,16 @@ const BookDetails = () => {
             <Compass className="text-primary-600 flex-shrink-0 mt-1" size={24} />
             <div>
               <h3 className="font-bold text-lg mb-2">Navigation Instructions</h3>
-              <p className="text-gray-700 mb-3">{navigation.directions}</p>
-              {navigation.beacon && (
+              <div className="space-y-2 text-gray-700 mb-3">
+                {(navigation.navigation?.instructions || []).map((instruction, index) => (
+                  <p key={`${instruction}-${index}`}>{instruction}</p>
+                ))}
+              </div>
+              {navigation.navigation?.beacon && (
                 <div className="bg-white p-3 rounded-lg">
                   <p className="text-sm text-gray-600 mb-1">Beacon UUID</p>
-                  <code className="text-xs bg-gray-100 px-2 py-1 rounded">{navigation.beacon.uuid}</code>
-                  <p className="text-xs text-gray-500 mt-2">Zone: {navigation.beacon.zone}</p>
+                  <code className="text-xs bg-gray-100 px-2 py-1 rounded">{navigation.navigation.beacon.uuid}</code>
+                  <p className="text-xs text-gray-500 mt-2">Zone: {navigation.navigation.beacon.zone}</p>
                 </div>
               )}
             </div>

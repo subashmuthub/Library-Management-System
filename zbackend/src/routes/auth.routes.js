@@ -28,4 +28,7 @@ router.post(
 // Logout
 router.post('/logout', authController.logout);
 
+// Get current session user (frontend calls this on page load to verify session)
+router.get('/me', authController.me);
+
 module.exports = router;

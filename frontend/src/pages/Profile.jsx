@@ -1,42 +1,37 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts';
-import { authService } from '../services';
+import { authService, entryService, transactionService } from '../services';
 import { User, Mail, CreditCard, Shield, CheckCircle, AlertCircle } from 'lucide-react';
 
 const Profile = () => {
   const { user, updateUser } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({
-    first_name: user?.first_name || '',
-    last_name: user?.last_name || '',
+    first_name: user?.first_name || user?.firstName || '',
+    last_name: user?.last_name || user?.lastName || '',
     email: user?.email || '',
-    student_id: user?.student_id || '',
+    student_id: user?.student_id || user?.studentId || '',
   });
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState({ borrowed: 0, visits: 0 });
+  const displayName = user?.name || [user?.first_name || user?.firstName, user?.last_name || user?.lastName].filter(Boolean).join(' ');
+  const displayRole = user?.role?.role_name || user?.role;
 
   // Load user stats on mount
   useEffect(() => {
     const loadStats = async () => {
       try {
         if (user?.id) {
-          // Get borrowed books count
-          const transactionsRes = await fetch(`http://localhost:3001/api/transactions?user_id=${user.id}&status=active`);
-          if (transactionsRes.ok) {
-            const transData = await transactionsRes.json();
-            const borrowed = transData.transactions?.length || 0;
-            
-            // Get entry logs count
-            const entriesRes = await fetch(`http://localhost:3001/api/entry/user/${user.id}`);
-            let visits = 0;
-            if (entriesRes.ok) {
-              const entryData = await entriesRes.json();
-              visits = entryData.entries?.length || entryData.total || 0;
-            }
-            
-            setStats({ borrowed, visits });
-          }
+          const [transactionsRes, entriesRes] = await Promise.all([
+            transactionService.getAllTransactions({ user_id: user.id, status: 'active' }),
+            entryService.getMyHistory(user.id),
+          ]);
+
+          setStats({
+            borrowed: transactionsRes.transactions?.length || 0,
+            visits: entriesRes.total || entriesRes.entries?.length || 0,
+          });
         }
       } catch (error) {
         console.error('Failed to load stats:', error);
@@ -80,10 +75,10 @@ const Profile = () => {
 
   const handleCancel = () => {
     setFormData({
-      first_name: user?.first_name || '',
-      last_name: user?.last_name || '',
+      first_name: user?.first_name || user?.firstName || '',
+      last_name: user?.last_name || user?.lastName || '',
       email: user?.email || '',
-      student_id: user?.student_id || '',
+      student_id: user?.student_id || user?.studentId || '',
     });
     setIsEditing(false);
     setResult(null);
@@ -96,8 +91,8 @@ const Profile = () => {
         <div className="w-24 h-24 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-4">
           <User size={48} className="text-primary-600" />
         </div>
-        <h1 className="text-2xl font-bold mb-1">{user?.name}</h1>
-        <p className="text-gray-600 capitalize">{user?.role}</p>
+        <h1 className="text-2xl font-bold mb-1">{displayName || 'User'}</h1>
+        <p className="text-gray-600 capitalize">{displayRole}</p>
       </div>
 
       {/* Profile Information */}
@@ -206,7 +201,7 @@ const Profile = () => {
               <User className="text-gray-600 flex-shrink-0 mt-1" size={20} />
               <div>
                 <p className="text-sm text-gray-600">Full Name</p>
-                <p className="font-medium">{user?.name}</p>
+                <p className="font-medium">{displayName || 'N/A'}</p>
               </div>
             </div>
 
@@ -222,7 +217,7 @@ const Profile = () => {
               <CreditCard className="text-gray-600 flex-shrink-0 mt-1" size={20} />
               <div>
                 <p className="text-sm text-gray-600">Student ID</p>
-                <p className="font-medium">{user?.student_id || 'N/A'}</p>
+                <p className="font-medium">{user?.student_id || user?.studentId || 'N/A'}</p>
               </div>
             </div>
 
@@ -230,7 +225,7 @@ const Profile = () => {
               <Shield className="text-gray-600 flex-shrink-0 mt-1" size={20} />
               <div>
                 <p className="text-sm text-gray-600">Role</p>
-                <span className="badge badge-info capitalize">{user?.role}</span>
+                <span className="badge badge-info capitalize">{displayRole || 'user'}</span>
               </div>
             </div>
           </div>

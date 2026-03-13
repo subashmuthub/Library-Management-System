@@ -112,12 +112,13 @@ const UserManagement = () => {
 
   const getRoleBadge = (roleName) => {
     const styles = {
-      'Admin': 'bg-purple-100 text-purple-700',
-      'Librarian': 'bg-blue-100 text-blue-700',
-      'Student': 'bg-gray-100 text-gray-700',
+      admin: 'bg-purple-100 text-purple-700',
+      librarian: 'bg-blue-100 text-blue-700',
+      student: 'bg-gray-100 text-gray-700',
     };
-    return <span className={`px-2 py-1 rounded text-xs font-semibold ${styles[roleName] || 'bg-gray-100 text-gray-700'}`}>
-      {roleName?.toUpperCase()}
+    const normalizedRole = (roleName || '').toLowerCase();
+    return <span className={`px-2 py-1 rounded text-xs font-semibold ${styles[normalizedRole] || 'bg-gray-100 text-gray-700'}`}>
+      {normalizedRole.toUpperCase()}
     </span>;
   };
 

@@ -23,11 +23,11 @@ const EntryLog = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          setLogData({
-            ...logData,
+          setLogData((current) => ({
+            ...current,
             latitude: position.coords.latitude.toString(),
             longitude: position.coords.longitude.toString(),
-          });
+          }));
         },
         (error) => console.error('Location error:', error)
       );
@@ -50,11 +50,12 @@ const EntryLog = () => {
 
     try {
       const payload = {
-        action: logData.action,
-        gps_latitude: parseFloat(logData.latitude),
-        gps_longitude: parseFloat(logData.longitude),
-        wifi_ssid: logData.wifi_ssid || undefined,
-        motion_speed_kmh: logData.motion_speed ? parseFloat(logData.motion_speed) : undefined,
+        entryType: logData.action,
+        latitude: parseFloat(logData.latitude),
+        longitude: parseFloat(logData.longitude),
+        wifiSSID: logData.wifi_ssid || undefined,
+        speedKmh: logData.motion_speed ? parseFloat(logData.motion_speed) : undefined,
+        userId: user?.id,
       };
 
       const response = await entryService.logEntry(payload);
@@ -100,8 +101,8 @@ const EntryLog = () => {
                 <div className="flex-1">
                   <p className="font-medium text-green-800 mb-1">Entry logged successfully!</p>
                   <p className="text-sm text-green-700">
-                    Confidence Score: {result.data.confidence_score}%
-                    {result.data.auto_logged && ' (Auto-logged)'}
+                    Confidence Score: {result.data.confidence?.total ?? result.data.entryLog?.confidenceScore ?? 0}%
+                    {result.data.entryLog?.autoLogged && ' (Auto-logged)'}
                   </p>
                 </div>
               </>
@@ -208,15 +209,15 @@ const EntryLog = () => {
               <div key={index} className="p-4 border border-gray-200 rounded-lg">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
-                    <LogIn size={20} className={entry.action === 'entry' ? 'text-green-600' : 'text-red-600'} />
-                    <span className="font-medium capitalize">{entry.action}</span>
+                    <LogIn size={20} className={entry.entry_type === 'entry' ? 'text-green-600' : 'text-red-600'} />
+                    <span className="font-medium capitalize">{entry.entry_type}</span>
                   </div>
                   {getConfidenceBadge(entry.confidence_score)}
                 </div>
                 <div className="text-sm text-gray-600 space-y-1">
                   <p>
                     <MapPin size={14} className="inline mr-1" />
-                    GPS: {entry.gps_latitude?.toFixed(4)}, {entry.gps_longitude?.toFixed(4)}
+                    GPS: {entry.latitude?.toFixed(4)}, {entry.longitude?.toFixed(4)}
                   </p>
                   {entry.wifi_ssid && (
                     <p>
@@ -224,10 +225,10 @@ const EntryLog = () => {
                       WiFi: {entry.wifi_ssid}
                     </p>
                   )}
-                  {entry.motion_speed_kmh && (
+                  {entry.speed_kmh && (
                     <p>
                       <Activity size={14} className="inline mr-1" />
-                      Speed: {entry.motion_speed_kmh} km/h
+                      Speed: {entry.speed_kmh} km/h
                     </p>
                   )}
                   <p className="text-xs text-gray-500">

@@ -54,20 +54,8 @@ const Fines = () => {
 
   const loadPaymentHistory = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:3001/api/v1/fines/payments/history?limit=50', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      const data = await response.json();
-      console.log('Payment history response:', data);
-      if (data.success) {
-        setPaymentHistory(data.receipts || data.data || []);
-      } else if (data.receipts) {
-        setPaymentHistory(data.receipts);
-      }
+      const data = await fineService.getPaymentHistory({ limit: 50 });
+      setPaymentHistory(data.receipts || data.data || []);
     } catch (error) {
       console.error('Failed to load payment history:', error);
       setPaymentHistory([]);
@@ -92,7 +80,7 @@ const Fines = () => {
     const reason = prompt('Enter reason for waiving this fine:');
     if (reason) {
       try {
-        await fineService.waiveFine(fineId, { reason });
+        await fineService.waiveFine(fineId, reason);
         alert('Fine waived successfully!');
         loadFines();
         loadStats();

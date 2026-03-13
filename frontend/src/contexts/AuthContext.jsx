@@ -16,13 +16,29 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check for existing user session on mount
-    const storedUser = localStorage.getItem('user');
-    
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
-    setLoading(false);
+    // On mount, ping the server to see if the session cookie is still valid.
+    // If the server confirms it, use the session user (source of truth).
+    // If not, clear any stale localStorage data and stay logged out.
+    const verifySession = async () => {
+      try {
+        const { user: sessionUser } = await authService.me();
+        // Build a display-friendly user object (same shape as login response)
+        const storedUser = localStorage.getItem('user');
+        const localUser = storedUser ? JSON.parse(storedUser) : {};
+        // Merge: session data is authoritative for roles; local data fills display fields
+        const merged = { ...localUser, ...sessionUser };
+        setUser(merged);
+        localStorage.setItem('user', JSON.stringify(merged));
+      } catch {
+        // 401 or network error — session is gone
+        localStorage.removeItem('user');
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    verifySession();
   }, []);
 
   const login = async (email, password) => {
