@@ -54,6 +54,11 @@ const validationRules = {
     body("password").notEmpty().withMessage("Password required"),
   ],
 
+  // Google login
+  googleLogin: [
+    body("token").isString().notEmpty().withMessage("Google token required"),
+  ],
+
   // Entry log
   entryLog: [
     body("latitude")

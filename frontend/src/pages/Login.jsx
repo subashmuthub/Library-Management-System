@@ -1,25 +1,70 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts';
-import { BookOpen, AlertCircle } from 'lucide-react';
+import React, { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts";
+import { BookOpen, AlertCircle } from "lucide-react";
 
 const Login = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, googleLogin } = useAuth();
   const navigate = useNavigate();
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
+  const handleGoogleLogin = async () => {
+    setError("");
+
+    if (!googleClientId) {
+      setError(
+        "Google Sign-In is not configured. Please set VITE_GOOGLE_CLIENT_ID.",
+      );
+      return;
+    }
+
+    const gsi = globalThis.google?.accounts?.id;
+
+    if (!gsi) {
+      setError(
+        "Google Sign-In script not loaded. Please refresh and try again.",
+      );
+      return;
+    }
+
+    setLoading(true);
+
+    gsi.initialize({
+      client_id: googleClientId,
+      callback: async (response) => {
+        const token = response?.credential;
+        if (!token) {
+          setError("Google Sign-In failed. Please try again.");
+          setLoading(false);
+          return;
+        }
+
+        const result = await googleLogin(token);
+        if (result.success) {
+          navigate("/dashboard");
+        } else {
+          setError(result.error);
+        }
+        setLoading(false);
+      },
+    });
+
+    gsi.prompt();
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setError("");
     setLoading(true);
 
     const result = await login(email, password);
 
     if (result.success) {
-      navigate('/dashboard');
+      navigate("/dashboard");
     } else {
       setError(result.error);
     }
@@ -34,7 +79,9 @@ const Login = () => {
             <BookOpen size={32} className="text-primary-600" />
           </div>
           <h1 className="text-3xl font-bold text-white mb-2">Smart Library</h1>
-          <p className="text-primary-100">Automated Library Management System</p>
+          <p className="text-primary-100">
+            Automated Library Management System
+          </p>
         </div>
 
         <div className="card">
@@ -42,17 +89,24 @@ const Login = () => {
 
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
-              <AlertCircle size={20} className="text-red-600 flex-shrink-0 mt-0.5" />
+              <AlertCircle
+                size={20}
+                className="text-red-600 flex-shrink-0 mt-0.5"
+              />
               <p className="text-sm text-red-600">{error}</p>
             </div>
           )}
 
           <form onSubmit={handleSubmit}>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-gray-700 mb-2"
+              >
                 Email Address
               </label>
               <input
+                id="email"
                 type="email"
                 className="input"
                 placeholder="student@example.com"
@@ -63,10 +117,14 @@ const Login = () => {
             </div>
 
             <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label
+                htmlFor="password"
+                className="block text-sm font-medium text-gray-700 mb-2"
+              >
                 Password
               </label>
               <input
+                id="password"
                 type="password"
                 className="input"
                 placeholder="Enter your password"
@@ -81,14 +139,26 @@ const Login = () => {
               className="w-full btn btn-primary"
               disabled={loading}
             >
-              {loading ? 'Logging in...' : 'Login'}
+              {loading ? "Logging in..." : "Login"}
+            </button>
+
+            <button
+              type="button"
+              className="w-full btn mt-3 border border-gray-300 text-gray-700 bg-white hover:bg-gray-50"
+              onClick={handleGoogleLogin}
+              disabled={loading}
+            >
+              Continue with Google
             </button>
           </form>
 
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600">
-              Don't have an account?{' '}
-              <Link to="/register" className="text-primary-600 hover:text-primary-700 font-medium">
+              Don't have an account?{" "}
+              <Link
+                to="/register"
+                className="text-primary-600 hover:text-primary-700 font-medium"
+              >
                 Register here
               </Link>
             </p>
@@ -97,7 +167,8 @@ const Login = () => {
           <div className="mt-4 pt-4 border-t text-center">
             <p className="text-xs text-gray-500 mb-2">Demo Credentials:</p>
             <p className="text-xs text-gray-600">
-              <strong>Student:</strong> student1@university.edu / password123<br />
+              <strong>Student:</strong> student1@university.edu / password123
+              <br />
               <strong>Librarian:</strong> librarian1@library.edu / password123
             </p>
           </div>

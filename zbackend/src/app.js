@@ -7,11 +7,14 @@
  */
 
 const express = require("express");
+const http = require("node:http");
+const path = require("node:path");
+const fs = require("node:fs");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const session = require("express-session");
-require("dotenv").config();
+require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
 const app = express();
 
@@ -20,20 +23,60 @@ const app = express();
 // ============================================================================
 
 // Security headers
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        "script-src": [
+          "'self'",
+          "'unsafe-inline'",
+          "https://accounts.google.com",
+          "https://checkout.razorpay.com",
+        ],
+        "frame-src": [
+          "'self'",
+          "https://accounts.google.com",
+          "https://*.google.com",
+          "https://checkout.razorpay.com",
+        ],
+        "connect-src": [
+          "'self'",
+          "https://accounts.google.com",
+          "https://oauth2.googleapis.com",
+          "https://*.googleapis.com",
+        ],
+      },
+    },
+  }),
+);
+
+const isAllowedLocalOrigin = (origin) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+
+const frontendDistPath = path.resolve(__dirname, "../../frontend/dist");
+const hasBuiltFrontend = fs.existsSync(
+  path.join(frontendDistPath, "index.html"),
+);
 
 // CORS configuration - allow credentials
 app.use(
   cors({
-    origin: [
-      "http://localhost:3001",
-      "http://localhost:3002",
-      "http://localhost:5173",
-      "http://localhost:3000",
-    ],
+    origin(origin, callback) {
+      if (!origin || isAllowedLocalOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("CORS origin not allowed"));
+    },
     credentials: true,
   }),
 );
+
+if (hasBuiltFrontend) {
+  app.use(express.static(frontendDistPath));
+}
 
 // Cookie parser middleware
 // Server-side session middleware — replaces the old JWT-in-cookie approach.
@@ -42,16 +85,17 @@ app.use(
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "library-session-secret-fallback",
-    resave: false,           // do not re-save unchanged sessions
+    resave: false, // do not re-save unchanged sessions
     saveUninitialized: false, // only create a session when something is stored
-    name: "library.sid",    // custom cookie name instead of "connect.sid"
+    name: "library.sid", // custom cookie name instead of "connect.sid"
     cookie: {
-      httpOnly: true,        // JS cannot read this cookie
+      httpOnly: true, // JS cannot read this cookie
       secure: process.env.NODE_ENV === "production", // HTTPS only in prod
       sameSite: "lax",
-      maxAge: parseInt(process.env.SESSION_MAX_AGE) || 24 * 60 * 60 * 1000,
+      maxAge:
+        Number.parseInt(process.env.SESSION_MAX_AGE, 10) || 24 * 60 * 60 * 1000,
     },
-  })
+  }),
 );
 
 // Body parsing middleware
@@ -60,8 +104,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60000, // 1 minute
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+  windowMs: Number.parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 60000, // 1 minute
+  max: Number.parseInt(process.env.RATE_LIMIT_MAX_REQUESTS, 10) || 100,
   message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
@@ -95,7 +139,9 @@ app.get("/health", (req, res) => {
 });
 
 // API version 1 routes
-app.use("/api/v1/auth", require("./routes/auth.routes"));
+const authRoutes = require("./routes/auth.routes");
+app.use("/api/v1/auth", authRoutes);
+app.use("/auth", authRoutes);
 app.use("/api/v1/users", require("./routes/user.routes"));
 app.use("/api/v1/user-management", require("./routes/user-management.routes"));
 app.use("/api/v1/dashboard", require("./routes/library-dashboard.routes"));
@@ -113,6 +159,14 @@ app.use("/api/v1/navigation", require("./routes/navigation.routes"));
 
 // 404 handler
 app.use((req, res) => {
+  if (
+    hasBuiltFrontend &&
+    req.method === "GET" &&
+    !req.path.startsWith("/api/")
+  ) {
+    return res.sendFile(path.join(frontendDistPath, "index.html"));
+  }
+
   res.status(404).json({
     error: "Not Found",
     message: `Route ${req.method} ${req.path} does not exist`,
@@ -155,8 +209,11 @@ app.use((err, req, res, next) => {
 // ============================================================================
 
 const PORT = process.env.PORT || 3000;
+const googleRedirectUri =
+  process.env.GOOGLE_REDIRECT_URI ||
+  `http://localhost:${PORT}/api/v1/auth/google/callback`;
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log("=".repeat(60));
   console.log("  Smart Library Automation System");
   console.log("=".repeat(60));
@@ -167,7 +224,34 @@ app.listen(PORT, () => {
   console.log(`  Server: http://localhost:${PORT}`);
   console.log(`  Health: http://localhost:${PORT}/health`);
   console.log(`  API: http://localhost:${PORT}/api/v1`);
+  console.log(`  Google Callback: ${googleRedirectUri}`);
   console.log("=".repeat(60));
+});
+
+server.on("error", (error) => {
+  if (error.code !== "EADDRINUSE") {
+    console.error("Server startup failed:", error);
+    process.exit(1);
+  }
+
+  const request = http.get(`http://localhost:${PORT}/health`, (response) => {
+    if (response.statusCode === 200) {
+      console.log(`✓ Smart Library backend is already running on port ${PORT}`);
+      console.log(`✓ Health: http://localhost:${PORT}/health`);
+      response.resume();
+      process.exit(0);
+      return;
+    }
+
+    console.error(`✗ Port ${PORT} is already in use by another process`);
+    response.resume();
+    process.exit(1);
+  });
+
+  request.on("error", () => {
+    console.error(`✗ Port ${PORT} is already in use by another process`);
+    process.exit(1);
+  });
 });
 
 // Graceful shutdown

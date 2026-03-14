@@ -1,77 +1,179 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { bookService } from '../services';
-import { Search, BookOpen, Filter, MapPin, Plus, Edit, Trash2, Upload, Download, SortAsc, SortDesc, Eye, Star, Clock, TrendingUp, Grid, List, CheckCircle, XCircle } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import React, { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { bookService } from "../services";
+import {
+  Search,
+  BookOpen,
+  Filter,
+  MapPin,
+  Plus,
+  Edit,
+  Trash2,
+  Upload,
+  Download,
+  SortAsc,
+  SortDesc,
+  Eye,
+  Star,
+  Clock,
+  TrendingUp,
+  Grid,
+  List,
+  CheckCircle,
+  XCircle,
+} from "lucide-react";
+import ExcelJS from "exceljs";
+
+const downloadBufferAsFile = (buffer, filename) => {
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+};
+
+const parseCsvRows = (text) => {
+  const rows = [];
+  let current = "";
+  let row = [];
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const nextChar = text[index + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        current += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      row.push(current);
+      current = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && nextChar === "\n") {
+        index += 1;
+      }
+      row.push(current);
+      rows.push(row);
+      row = [];
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.length > 0 || row.length > 0) {
+    row.push(current);
+    rows.push(row);
+  }
+
+  return rows.filter((item) => item.some((cell) => String(cell).trim() !== ""));
+};
+
+const rowsToObjects = (rows) => {
+  if (!rows.length) return [];
+
+  const [headers, ...bodyRows] = rows;
+  const normalizedHeaders = headers.map((header) =>
+    String(header || "").trim(),
+  );
+
+  return bodyRows
+    .map((values) => {
+      const record = {};
+      normalizedHeaders.forEach((header, headerIndex) => {
+        if (!header) return;
+        record[header] = values[headerIndex] ?? "";
+      });
+      return record;
+    })
+    .filter((record) =>
+      Object.values(record).some((value) => String(value).trim() !== ""),
+    );
+};
 
 const Books = () => {
   const [books, setBooks] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [categoryStats, setCategoryStats] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [filters, setFilters] = useState({
-    category: '',
-    available: '',
+    category: "",
+    available: "",
   });
 
   // Department categories
   const departmentCategories = [
-    { code: 'CSE', name: 'Computer Science & Engineering' },
-    { code: 'EEE', name: 'Electrical & Electronics Engineering' },
-    { code: 'ECE', name: 'Electronics & Communication Engineering' },
-    { code: 'MECH', name: 'Mechanical Engineering' },
-    { code: 'AIDS', name: 'Artificial Intelligence & Data Science' },
-    { code: 'S&H', name: 'Science & Humanities' }
+    { code: "CSE", name: "Computer Science & Engineering" },
+    { code: "EEE", name: "Electrical & Electronics Engineering" },
+    { code: "ECE", name: "Electronics & Communication Engineering" },
+    { code: "MECH", name: "Mechanical Engineering" },
+    { code: "AIDS", name: "Artificial Intelligence & Data Science" },
+    { code: "S&H", name: "Science & Humanities" },
   ];
-  
+
   // Modal states for CRUD operations
   const [showModal, setShowModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [editingBook, setEditingBook] = useState(null);
   const [formData, setFormData] = useState({
-    title: '',
-    author: '',
-    isbn: '',
-    type: 'book', // book or journal
-    category: '',
-    publisher: '',
-    publication_year: '',
-    total_copies: 1
+    title: "",
+    author: "",
+    isbn: "",
+    type: "book", // book or journal
+    category: "",
+    publisher: "",
+    publication_year: "",
+    total_copies: 1,
   });
-  
+
   // Import states
   const [importFile, setImportFile] = useState(null);
   const [importData, setImportData] = useState([]);
   const [importResults, setImportResults] = useState(null);
-  
+
   // New feature states - persist viewMode in localStorage
   const [viewMode, setViewMode] = useState(() => {
-    const saved = localStorage.getItem('booksViewMode');
-    return saved || 'grid';
+    const saved = localStorage.getItem("booksViewMode");
+    return saved || "grid";
   }); // 'grid' or 'list'
-  const [sortBy, setSortBy] = useState('title');
-  const [sortOrder, setSortOrder] = useState('asc');
+  const [sortBy, setSortBy] = useState("title");
+  const [sortOrder, setSortOrder] = useState("asc");
   const [favorites, setFavorites] = useState(new Set());
   const [recentlyViewed, setRecentlyViewed] = useState([]);
-  
+
   // Save viewMode preference
   useEffect(() => {
-    localStorage.setItem('booksViewMode', viewMode);
-    console.log('View mode changed to:', viewMode);
+    localStorage.setItem("booksViewMode", viewMode);
+    console.log("View mode changed to:", viewMode);
   }, [viewMode]);
-  
+
   // Reset form
   const resetForm = () => {
     setFormData({
-      title: '',
-      author: '',
-      isbn: '',
-      type: 'book',
-      category: '',
-      publisher: '',
-      publication_year: '',
-      total_copies: 1
+      title: "",
+      author: "",
+      isbn: "",
+      type: "book",
+      category: "",
+      publisher: "",
+      publication_year: "",
+      total_copies: 1,
     });
     setEditingBook(null);
   };
@@ -94,40 +196,44 @@ const Books = () => {
         availability: filters.available || undefined,
         limit: 100,
         sortBy: sortBy,
-        sortOrder: sortOrder
+        sortOrder: sortOrder,
       };
       const response = await bookService.getAllBooks(params);
       let booksData = response.data?.books || response.books || [];
-      
+
       // Client-side filtering for availability if not filtered by backend
       if (filters.available) {
-        if (filters.available === 'available') {
-          booksData = booksData.filter(book => book.is_available === 1 || book.is_available === true);
-        } else if (filters.available === 'in-use') {
-          booksData = booksData.filter(book => book.is_available === 0 || book.is_available === false);
+        if (filters.available === "available") {
+          booksData = booksData.filter(
+            (book) => book.is_available === 1 || book.is_available === true,
+          );
+        } else if (filters.available === "in-use") {
+          booksData = booksData.filter(
+            (book) => book.is_available === 0 || book.is_available === false,
+          );
         }
       }
-      
+
       // Apply client-side sorting if needed
       booksData.sort((a, b) => {
-        let aVal = a[sortBy]?.toString().toLowerCase() || '';
-        let bVal = b[sortBy]?.toString().toLowerCase() || '';
-        
-        if (sortBy === 'publication_year') {
+        let aVal = a[sortBy]?.toString().toLowerCase() || "";
+        let bVal = b[sortBy]?.toString().toLowerCase() || "";
+
+        if (sortBy === "publication_year") {
           aVal = parseInt(a[sortBy]) || 0;
           bVal = parseInt(b[sortBy]) || 0;
         }
-        
-        if (sortOrder === 'desc') {
+
+        if (sortOrder === "desc") {
           return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
         }
         return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
       });
-      
+
       setBooks(booksData);
       setTotalCount(response.data?.pagination?.totalBooks || booksData.length);
     } catch (error) {
-      console.error('Failed to load books:', error);
+      console.error("Failed to load books:", error);
     } finally {
       setLoading(false);
     }
@@ -138,7 +244,7 @@ const Books = () => {
       const response = await bookService.getCategories();
       setCategoryStats(response);
     } catch (error) {
-      console.error('Failed to load category stats:', error);
+      console.error("Failed to load category stats:", error);
     }
   };
 
@@ -167,21 +273,24 @@ const Books = () => {
       newFavorites.add(bookId);
     }
     setFavorites(newFavorites);
-    localStorage.setItem('bookFavorites', JSON.stringify([...newFavorites]));
+    localStorage.setItem("bookFavorites", JSON.stringify([...newFavorites]));
   };
 
   // Add to recently viewed
   const addToRecentlyViewed = (book) => {
-    const updated = [book, ...recentlyViewed.filter(b => b.id !== book.id)].slice(0, 5);
+    const updated = [
+      book,
+      ...recentlyViewed.filter((b) => b.id !== book.id),
+    ].slice(0, 5);
     setRecentlyViewed(updated);
-    localStorage.setItem('recentlyViewed', JSON.stringify(updated));
+    localStorage.setItem("recentlyViewed", JSON.stringify(updated));
   };
 
   // Load saved data on mount
   useEffect(() => {
-    const savedFavorites = localStorage.getItem('bookFavorites');
-    const savedRecentlyViewed = localStorage.getItem('recentlyViewed');
-    
+    const savedFavorites = localStorage.getItem("bookFavorites");
+    const savedRecentlyViewed = localStorage.getItem("recentlyViewed");
+
     if (savedFavorites) {
       setFavorites(new Set(JSON.parse(savedFavorites)));
     }
@@ -191,22 +300,43 @@ const Books = () => {
   }, []);
 
   // Export books to Excel
-  const handleExportBooks = () => {
-    const exportData = books.map(book => ({
+  const handleExportBooks = async () => {
+    const exportData = books.map((book) => ({
       Title: book.title,
       Author: book.author,
       ISBN: book.isbn,
       Category: book.category,
-      Publisher: book.publisher || '',
-      'Publication Year': book.publication_year || '',
-      'Total Copies': book.total_copies || 1,
-      Status: book.is_available ? 'Available' : 'In Use'
+      Publisher: book.publisher || "",
+      "Publication Year": book.publication_year || "",
+      "Total Copies": book.total_copies || 1,
+      Status: book.is_available ? "Available" : "In Use",
     }));
 
-    const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Books Export');
-    XLSX.writeFile(workbook, `books_export_${new Date().toISOString().split('T')[0]}.xlsx`);
+    try {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Books Export");
+
+      worksheet.columns = [
+        { header: "Title", key: "Title", width: 30 },
+        { header: "Author", key: "Author", width: 24 },
+        { header: "ISBN", key: "ISBN", width: 20 },
+        { header: "Category", key: "Category", width: 18 },
+        { header: "Publisher", key: "Publisher", width: 24 },
+        { header: "Publication Year", key: "Publication Year", width: 18 },
+        { header: "Total Copies", key: "Total Copies", width: 14 },
+        { header: "Status", key: "Status", width: 14 },
+      ];
+
+      exportData.forEach((row) => worksheet.addRow(row));
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      downloadBufferAsFile(
+        buffer,
+        `books_export_${new Date().toISOString().split("T")[0]}.xlsx`,
+      );
+    } catch (error) {
+      alert(`Failed to export books: ${error.message}`);
+    }
   };
 
   // CRUD Operations
@@ -220,92 +350,103 @@ const Books = () => {
       title: book.title,
       author: book.author,
       isbn: book.isbn,
-      type: book.type || 'book',
+      type: book.type || "book",
       category: book.category,
-      publisher: book.publisher || '',
-      publication_year: book.publication_year || '',
-      total_copies: book.total_copies || 1
+      publisher: book.publisher || "",
+      publication_year: book.publication_year || "",
+      total_copies: book.total_copies || 1,
     });
     setEditingBook(book);
     setShowModal(true);
   };
 
   const handleDeleteBook = async (bookId) => {
-    if (!window.confirm('Are you sure you want to delete this book?')) return;
-    
+    if (!window.confirm("Are you sure you want to delete this book?")) return;
+
     try {
       await bookService.deleteBook(bookId);
-      alert('Book deleted successfully!');
+      alert("Book deleted successfully!");
       loadBooks();
     } catch (error) {
-      console.error('Failed to delete book:', error);
-      alert('Failed to delete book: ' + (error.response?.data?.message || error.message));
+      console.error("Failed to delete book:", error);
+      alert(
+        "Failed to delete book: " +
+          (error.response?.data?.message || error.message),
+      );
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    
+
     try {
       if (editingBook) {
         await bookService.updateBook(editingBook.id, formData);
-        alert('Book updated successfully!');
+        alert("Book updated successfully!");
       } else {
         await bookService.addBook(formData);
-        alert('Book added successfully!');
+        alert("Book added successfully!");
       }
       setShowModal(false);
       resetForm();
       loadBooks();
     } catch (error) {
-      console.error('Failed to save book:', error);
-      alert('Failed to save book: ' + (error.response?.data?.message || error.message));
+      console.error("Failed to save book:", error);
+      alert(
+        "Failed to save book: " +
+          (error.response?.data?.message || error.message),
+      );
     } finally {
       setLoading(false);
     }
   };
 
   // Download template for bulk import
-  const handleDownloadTemplate = () => {
+  const handleDownloadTemplate = async () => {
     const template = [
       {
-        title: 'Example Book Title',
-        author: 'Author Name',
-        isbn: '978-0123456789',
-        category: 'CSE',
-        publisher: 'Publisher Name',
-        publication_year: '2024',
-        total_copies: '1',
-        edition: '1st Edition',
-        language: 'English',
-        pages: '250',
-        description: 'Book description here',
-        cover_image_url: 'https://example.com/image.jpg'
-      }
+        title: "Example Book Title",
+        author: "Author Name",
+        isbn: "978-0123456789",
+        category: "CSE",
+        publisher: "Publisher Name",
+        publication_year: "2024",
+        total_copies: "1",
+        edition: "1st Edition",
+        language: "English",
+        pages: "250",
+        description: "Book description here",
+        cover_image_url: "https://example.com/image.jpg",
+      },
     ];
 
-    const worksheet = XLSX.utils.json_to_sheet(template);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Books Template');
-    
-    // Set column widths
-    worksheet['!cols'] = [
-      { wch: 30 }, // title
-      { wch: 20 }, // author
-      { wch: 15 }, // isbn
-      { wch: 15 }, // category
-      { wch: 20 }, // publisher
-      { wch: 15 }, // publication_year
-      { wch: 12 }, // total_copies
-      { wch: 15 }, // edition
-      { wch: 10 }, // language
-      { wch: 8 },  // pages
-      { wch: 40 }, // description
-      { wch: 40 }  // cover_image_url
-    ];
+    try {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Books Template");
 
-    XLSX.writeFile(workbook, 'books_import_template.xlsx');
+      worksheet.columns = [
+        { header: "title", key: "title", width: 30 },
+        { header: "author", key: "author", width: 20 },
+        { header: "isbn", key: "isbn", width: 18 },
+        { header: "category", key: "category", width: 16 },
+        { header: "publisher", key: "publisher", width: 22 },
+        { header: "publication_year", key: "publication_year", width: 16 },
+        { header: "total_copies", key: "total_copies", width: 14 },
+        { header: "edition", key: "edition", width: 16 },
+        { header: "language", key: "language", width: 12 },
+        { header: "pages", key: "pages", width: 10 },
+        { header: "description", key: "description", width: 40 },
+        { header: "cover_image_url", key: "cover_image_url", width: 40 },
+      ];
+
+      template.forEach((row) => worksheet.addRow(row));
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      downloadBufferAsFile(buffer, "books_import_template.xlsx");
+    } catch (error) {
+      alert(`Failed to download template: ${error.message}`);
+    }
   };
 
   // Handle file selection
@@ -317,26 +458,53 @@ const Books = () => {
     setImportResults(null);
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
-        const binaryStr = evt.target.result;
-        const workbook = XLSX.read(binaryStr, { type: 'binary' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const data = XLSX.utils.sheet_to_json(worksheet);
-        
-        setImportData(data);
+        const extension = file.name.split(".").pop()?.toLowerCase();
+
+        if (extension === "csv") {
+          const text = evt.target.result;
+          const rows = parseCsvRows(String(text || ""));
+          const parsed = rowsToObjects(rows);
+          setImportData(parsed);
+          return;
+        }
+
+        if (extension !== "xlsx") {
+          throw new Error("Only .xlsx and .csv files are supported.");
+        }
+
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(evt.target.result);
+        const worksheet = workbook.worksheets[0];
+
+        if (!worksheet) {
+          throw new Error("No worksheet found in file.");
+        }
+
+        const rows = [];
+        worksheet.eachRow((row) => {
+          rows.push(row.values.slice(1));
+        });
+
+        const parsed = rowsToObjects(rows);
+        setImportData(parsed);
       } catch (error) {
-        alert('Error reading file: ' + error.message);
+        alert(`Error reading file: ${error.message}`);
       }
     };
-    reader.readAsBinaryString(file);
+
+    if (file.name.toLowerCase().endsWith(".csv")) {
+      reader.readAsText(file);
+    } else {
+      reader.readAsArrayBuffer(file);
+    }
   };
 
   // Handle bulk import
   const handleBulkImport = async () => {
     if (!importData || importData.length === 0) {
-      alert('Please select a valid file with book data');
+      alert("Please select a valid file with book data");
       return;
     }
 
@@ -344,7 +512,7 @@ const Books = () => {
     try {
       const response = await bookService.bulkImportBooks(importData);
       setImportResults(response);
-      
+
       if (response.summary.failed === 0) {
         alert(`Successfully imported ${response.summary.success} books!`);
         setShowImportModal(false);
@@ -352,11 +520,16 @@ const Books = () => {
         setImportData([]);
         loadBooks();
       } else {
-        alert(`Import completed: ${response.summary.success} successful, ${response.summary.failed} failed. Check details below.`);
+        alert(
+          `Import completed: ${response.summary.success} successful, ${response.summary.failed} failed. Check details below.`,
+        );
       }
     } catch (error) {
-      console.error('Failed to import books:', error);
-      alert('Failed to import books: ' + (error.response?.data?.message || error.message));
+      console.error("Failed to import books:", error);
+      alert(
+        "Failed to import books: " +
+          (error.response?.data?.message || error.message),
+      );
     } finally {
       setLoading(false);
     }
@@ -364,8 +537,8 @@ const Books = () => {
 
   // Clear all filters
   const handleClearFilters = () => {
-    setSearchTerm('');
-    setFilters({ category: '', available: '' });
+    setSearchTerm("");
+    setFilters({ category: "", available: "" });
   };
 
   const handleOpenImportModal = () => {
@@ -383,7 +556,8 @@ const Books = () => {
           <div>
             <h1 className="text-2xl font-bold mb-1">Books Management</h1>
             <p className="text-blue-100 text-sm">
-              Manage your library collection, search books, and track availability
+              Manage your library collection, search books, and track
+              availability
             </p>
           </div>
           <BookOpen size={40} className="text-blue-200 opacity-80" />
@@ -396,19 +570,22 @@ const Books = () => {
           {/* Search Input */}
           <div className="flex-1">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+              <Search
+                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                size={20}
+              />
               <input
                 type="text"
                 placeholder="Search by title, author, or description..."
                 className="input pl-10 pr-10"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSearch(e)}
+                onKeyPress={(e) => e.key === "Enter" && handleSearch(e)}
               />
               {searchTerm && (
                 <button
                   type="button"
-                  onClick={() => setSearchTerm('')}
+                  onClick={() => setSearchTerm("")}
                   className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xl"
                 >
                   ×
@@ -421,20 +598,24 @@ const Books = () => {
           <select
             className="input w-64"
             value={filters.category}
-            onChange={(e) => setFilters({ ...filters, category: e.target.value })}
+            onChange={(e) =>
+              setFilters({ ...filters, category: e.target.value })
+            }
           >
             <option value="">All Departments</option>
-            {departmentCategories.map(dept => (
+            {departmentCategories.map((dept) => (
               <option key={dept.code} value={dept.code}>
                 {dept.code} - {dept.name}
               </option>
             ))}
           </select>
-          
+
           <select
             className="input w-48"
             value={filters.available}
-            onChange={(e) => setFilters({ ...filters, available: e.target.value })}
+            onChange={(e) =>
+              setFilters({ ...filters, available: e.target.value })
+            }
           >
             <option value="">All Status</option>
             <option value="available">✅ Available Only</option>
@@ -443,8 +624,8 @@ const Books = () => {
 
           {/* Clear Button */}
           {(searchTerm || filters.category || filters.available) && (
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={handleClearFilters}
               className="btn btn-secondary px-4 whitespace-nowrap"
             >
@@ -456,26 +637,39 @@ const Books = () => {
 
       {/* Category Statistics */}
       <div className="card">
-        <h3 className="text-base font-semibold mb-3 text-gray-900">Books by Department</h3>
+        <h3 className="text-base font-semibold mb-3 text-gray-900">
+          Books by Department
+        </h3>
         <div className="flex gap-3 overflow-x-auto pb-2">
           <div className="bg-blue-50 rounded-lg p-3 text-center min-w-[100px] flex-shrink-0 border border-blue-100">
             <div className="text-2xl font-bold text-blue-900">{totalCount}</div>
             <div className="text-xs text-blue-700 font-medium">Total Books</div>
           </div>
-          {departmentCategories.map(dept => {
-            const stat = categoryStats.find(s => s.name === dept.code);
+          {departmentCategories.map((dept) => {
+            const stat = categoryStats.find((s) => s.name === dept.code);
             const count = stat?.count || 0;
             return (
-              <div key={dept.code} className={`rounded-lg p-3 text-center cursor-pointer transition-all min-w-[100px] flex-shrink-0 border ${
-                filters.category === dept.code 
-                  ? 'bg-primary-100 border-2 border-primary-500 shadow-md' 
-                  : 'bg-gray-50 hover:bg-gray-100 border-gray-200 hover:border-gray-300'
-              }`}
-              onClick={() => setFilters({ ...filters, category: filters.category === dept.code ? '' : dept.code })}
+              <div
+                key={dept.code}
+                className={`rounded-lg p-3 text-center cursor-pointer transition-all min-w-[100px] flex-shrink-0 border ${
+                  filters.category === dept.code
+                    ? "bg-primary-100 border-2 border-primary-500 shadow-md"
+                    : "bg-gray-50 hover:bg-gray-100 border-gray-200 hover:border-gray-300"
+                }`}
+                onClick={() =>
+                  setFilters({
+                    ...filters,
+                    category: filters.category === dept.code ? "" : dept.code,
+                  })
+                }
               >
                 <div className="text-xl font-bold text-gray-900">{count}</div>
-                <div className="text-xs font-semibold text-gray-700">{dept.code}</div>
-                <div className="text-[10px] text-gray-500 leading-tight mt-0.5">{dept.name}</div>
+                <div className="text-xs font-semibold text-gray-700">
+                  {dept.code}
+                </div>
+                <div className="text-[10px] text-gray-500 leading-tight mt-0.5">
+                  {dept.name}
+                </div>
               </div>
             );
           })}
@@ -488,16 +682,20 @@ const Books = () => {
         <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-200">
           <div>
             <h2 className="text-xl font-bold text-gray-900">
-              {searchTerm ? `Search Results for "${searchTerm}"` : 
-               filters.category ? `${filters.category} Department Books` : 'All Books'}
+              {searchTerm
+                ? `Search Results for "${searchTerm}"`
+                : filters.category
+                  ? `${filters.category} Department Books`
+                  : "All Books"}
             </h2>
             <p className="text-sm text-gray-600 mt-1">
-              {books.length} books displayed {totalCount !== books.length && `of ${totalCount} total`}
+              {books.length} books displayed{" "}
+              {totalCount !== books.length && `of ${totalCount} total`}
             </p>
           </div>
-          
+
           {/* Primary Action Button */}
-          <button 
+          <button
             onClick={handleAddBook}
             className="btn btn-primary flex items-center gap-2 px-6 py-2.5 shadow-md hover:shadow-lg transition-shadow"
           >
@@ -514,31 +712,31 @@ const Books = () => {
             <div className="flex border border-gray-300 rounded-lg overflow-hidden shadow-sm bg-white">
               <button
                 onClick={() => {
-                  console.log('Switching to grid view');
-                  setViewMode('grid');
+                  console.log("Switching to grid view");
+                  setViewMode("grid");
                 }}
                 className={`p-2 transition-all duration-200 ${
-                  viewMode === 'grid' 
-                    ? 'bg-primary-500 text-white shadow-inner' 
-                    : 'bg-white text-gray-600 hover:bg-gray-50'
+                  viewMode === "grid"
+                    ? "bg-primary-500 text-white shadow-inner"
+                    : "bg-white text-gray-600 hover:bg-gray-50"
                 }`}
                 title="Grid View"
               >
-                <Grid size={18} strokeWidth={viewMode === 'grid' ? 2.5 : 2} />
+                <Grid size={18} strokeWidth={viewMode === "grid" ? 2.5 : 2} />
               </button>
               <button
                 onClick={() => {
-                  console.log('Switching to list view');
-                  setViewMode('list');
+                  console.log("Switching to list view");
+                  setViewMode("list");
                 }}
                 className={`p-2 border-l border-gray-300 transition-all duration-200 ${
-                  viewMode === 'list' 
-                    ? 'bg-primary-500 text-white shadow-inner' 
-                    : 'bg-white text-gray-600 hover:bg-gray-50'
+                  viewMode === "list"
+                    ? "bg-primary-500 text-white shadow-inner"
+                    : "bg-white text-gray-600 hover:bg-gray-50"
                 }`}
                 title="List View"
               >
-                <List size={18} strokeWidth={viewMode === 'list' ? 2.5 : 2} />
+                <List size={18} strokeWidth={viewMode === "list" ? 2.5 : 2} />
               </button>
             </div>
 
@@ -556,18 +754,24 @@ const Books = () => {
                 <option value="created_at">Sort by Added Date</option>
               </select>
               <button
-                onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                onClick={() =>
+                  setSortOrder(sortOrder === "asc" ? "desc" : "asc")
+                }
                 className="px-3 py-2 border-l border-gray-300 hover:bg-gray-50 transition-colors"
-                title={`Sort ${sortOrder === 'asc' ? 'Descending' : 'Ascending'}`}
+                title={`Sort ${sortOrder === "asc" ? "Descending" : "Ascending"}`}
               >
-                {sortOrder === 'asc' ? <SortAsc size={16} /> : <SortDesc size={16} />}
+                {sortOrder === "asc" ? (
+                  <SortAsc size={16} />
+                ) : (
+                  <SortDesc size={16} />
+                )}
               </button>
             </div>
           </div>
 
           {/* Right Side - Action Buttons */}
           <div className="flex items-center gap-2">
-            <button 
+            <button
               onClick={handleExportBooks}
               className="btn bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-2 px-4 py-2"
               title="Export to Excel"
@@ -575,8 +779,8 @@ const Books = () => {
               <Download size={16} />
               <span className="hidden sm:inline">Export</span>
             </button>
-            
-            <button 
+
+            <button
               onClick={handleOpenImportModal}
               className="btn bg-green-600 hover:bg-green-700 text-white flex items-center gap-2 px-4 py-2"
             >
@@ -597,13 +801,22 @@ const Books = () => {
               <div className="mb-5 pb-5 border-b border-gray-200">
                 <div className="flex items-center gap-2 mb-3">
                   <Clock size={16} className="text-gray-600" />
-                  <h3 className="text-sm font-semibold text-gray-900">Recently Viewed</h3>
+                  <h3 className="text-sm font-semibold text-gray-900">
+                    Recently Viewed
+                  </h3>
                 </div>
                 <div className="flex gap-3 overflow-x-auto pb-2">
                   {recentlyViewed.map((book) => (
-                    <div key={`recent-${book.id}`} className="min-w-[180px] bg-gray-50 rounded-lg p-2.5 flex-shrink-0 border border-gray-200 hover:border-primary-300 hover:shadow-sm transition-all cursor-pointer">
-                      <h4 className="font-semibold text-sm truncate text-gray-900">{book.title}</h4>
-                      <p className="text-xs text-gray-600 truncate mt-0.5">{book.author}</p>
+                    <div
+                      key={`recent-${book.id}`}
+                      className="min-w-[180px] bg-gray-50 rounded-lg p-2.5 flex-shrink-0 border border-gray-200 hover:border-primary-300 hover:shadow-sm transition-all cursor-pointer"
+                    >
+                      <h4 className="font-semibold text-sm truncate text-gray-900">
+                        {book.title}
+                      </h4>
+                      <p className="text-xs text-gray-600 truncate mt-0.5">
+                        {book.author}
+                      </p>
                       <span className="inline-block mt-1.5 px-2 py-0.5 bg-primary-100 text-primary-700 text-xs rounded font-medium">
                         {book.category}
                       </span>
@@ -614,7 +827,7 @@ const Books = () => {
             )}
 
             {/* Books Grid/List */}
-            {viewMode === 'grid' ? (
+            {viewMode === "grid" ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {books.map((book) => (
                   <div
@@ -631,7 +844,11 @@ const Books = () => {
                     >
                       <Star
                         size={16}
-                        className={favorites.has(book.id) ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'}
+                        className={
+                          favorites.has(book.id)
+                            ? "fill-yellow-400 text-yellow-400"
+                            : "text-gray-400"
+                        }
                       />
                     </button>
 
@@ -648,9 +865,13 @@ const Books = () => {
                           <h3 className="font-semibold text-gray-900 truncate mb-1">
                             {book.title}
                           </h3>
-                          <p className="text-sm text-gray-600 truncate mb-2">{book.author}</p>
+                          <p className="text-sm text-gray-600 truncate mb-2">
+                            {book.author}
+                          </p>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="badge badge-info text-xs">{book.category}</span>
+                            <span className="badge badge-info text-xs">
+                              {book.category}
+                            </span>
                             {book.is_available ? (
                               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">
                                 <CheckCircle size={12} className="mr-1" />
@@ -677,7 +898,7 @@ const Books = () => {
                         </div>
                       </div>
                     </Link>
-                    
+
                     {/* Action Buttons */}
                     <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100">
                       <button
@@ -707,7 +928,10 @@ const Books = () => {
             ) : (
               <div className="divide-y divide-gray-200">
                 {books.map((book) => (
-                  <div key={book.id} className="py-4 flex items-center justify-between hover:bg-gray-50 px-4 rounded transition-colors">
+                  <div
+                    key={book.id}
+                    className="py-4 flex items-center justify-between hover:bg-gray-50 px-4 rounded transition-colors"
+                  >
                     <div className="flex items-center gap-4 flex-1">
                       <div className="w-12 h-16 bg-primary-100 rounded flex items-center justify-center">
                         <BookOpen size={20} className="text-primary-600" />
@@ -718,10 +942,14 @@ const Books = () => {
                           onClick={() => addToRecentlyViewed(book)}
                           className="block"
                         >
-                          <h3 className="font-semibold text-gray-900 hover:text-primary-600">{book.title}</h3>
+                          <h3 className="font-semibold text-gray-900 hover:text-primary-600">
+                            {book.title}
+                          </h3>
                           <p className="text-sm text-gray-600">{book.author}</p>
                           <div className="flex items-center gap-3 mt-1 flex-wrap">
-                            <span className="badge badge-info text-xs">{book.category}</span>
+                            <span className="badge badge-info text-xs">
+                              {book.category}
+                            </span>
                             {book.is_available ? (
                               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">
                                 <CheckCircle size={12} className="mr-1" />
@@ -734,10 +962,14 @@ const Books = () => {
                               </span>
                             )}
                             {book.publication_year && (
-                              <span className="text-xs text-gray-500">Published: {book.publication_year}</span>
+                              <span className="text-xs text-gray-500">
+                                Published: {book.publication_year}
+                              </span>
                             )}
                             {book.isbn && (
-                              <span className="text-xs text-gray-500">ISBN: {book.isbn}</span>
+                              <span className="text-xs text-gray-500">
+                                ISBN: {book.isbn}
+                              </span>
                             )}
                           </div>
                         </Link>
@@ -750,7 +982,11 @@ const Books = () => {
                       >
                         <Star
                           size={16}
-                          className={favorites.has(book.id) ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'}
+                          className={
+                            favorites.has(book.id)
+                              ? "fill-yellow-400 text-yellow-400"
+                              : "text-gray-400"
+                          }
                         />
                       </button>
                       <button
@@ -777,7 +1013,9 @@ const Books = () => {
           <div className="text-center py-12">
             <BookOpen size={48} className="mx-auto text-gray-300 mb-4" />
             <p className="text-gray-500">
-              {searchTerm ? 'No books found matching your search' : 'No books available'}
+              {searchTerm
+                ? "No books found matching your search"
+                : "No books available"}
             </p>
           </div>
         )}
@@ -788,9 +1026,9 @@ const Books = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-2xl">
             <h3 className="text-xl font-bold mb-4">
-              {editingBook ? 'Edit Book/Journal' : 'Add New Book/Journal'}
+              {editingBook ? "Edit Book/Journal" : "Add New Book/Journal"}
             </h3>
-            
+
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -799,7 +1037,9 @@ const Books = () => {
                   </label>
                   <select
                     value={formData.type}
-                    onChange={(e) => setFormData({...formData, type: e.target.value})}
+                    onChange={(e) =>
+                      setFormData({ ...formData, type: e.target.value })
+                    }
                     className="input"
                     required
                   >
@@ -807,7 +1047,7 @@ const Books = () => {
                     <option value="journal">📰 Journal</option>
                   </select>
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Title *
@@ -815,12 +1055,14 @@ const Books = () => {
                   <input
                     type="text"
                     value={formData.title}
-                    onChange={(e) => setFormData({...formData, title: e.target.value})}
+                    onChange={(e) =>
+                      setFormData({ ...formData, title: e.target.value })
+                    }
                     className="input"
                     required
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Author *
@@ -828,12 +1070,14 @@ const Books = () => {
                   <input
                     type="text"
                     value={formData.author}
-                    onChange={(e) => setFormData({...formData, author: e.target.value})}
+                    onChange={(e) =>
+                      setFormData({ ...formData, author: e.target.value })
+                    }
                     className="input"
                     required
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     ISBN *
@@ -841,31 +1085,35 @@ const Books = () => {
                   <input
                     type="text"
                     value={formData.isbn}
-                    onChange={(e) => setFormData({...formData, isbn: e.target.value})}
+                    onChange={(e) =>
+                      setFormData({ ...formData, isbn: e.target.value })
+                    }
                     className="input"
                     required
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Category *
                   </label>
                   <select
                     value={formData.category}
-                    onChange={(e) => setFormData({...formData, category: e.target.value})}
+                    onChange={(e) =>
+                      setFormData({ ...formData, category: e.target.value })
+                    }
                     className="input"
                     required
                   >
                     <option value="">Select Department</option>
-                    {departmentCategories.map(dept => (
+                    {departmentCategories.map((dept) => (
                       <option key={dept.code} value={dept.code}>
                         {dept.code} - {dept.name}
                       </option>
                     ))}
                   </select>
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Publisher
@@ -873,11 +1121,13 @@ const Books = () => {
                   <input
                     type="text"
                     value={formData.publisher}
-                    onChange={(e) => setFormData({...formData, publisher: e.target.value})}
+                    onChange={(e) =>
+                      setFormData({ ...formData, publisher: e.target.value })
+                    }
                     className="input"
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Publication Year
@@ -885,13 +1135,18 @@ const Books = () => {
                   <input
                     type="number"
                     value={formData.publication_year}
-                    onChange={(e) => setFormData({...formData, publication_year: e.target.value})}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        publication_year: e.target.value,
+                      })
+                    }
                     className="input"
                     min="1800"
                     max={new Date().getFullYear()}
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Total Copies *
@@ -899,21 +1154,30 @@ const Books = () => {
                   <input
                     type="number"
                     value={formData.total_copies}
-                    onChange={(e) => setFormData({...formData, total_copies: parseInt(e.target.value)})}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        total_copies: parseInt(e.target.value),
+                      })
+                    }
                     className="input"
                     min="1"
                     required
                   />
                 </div>
               </div>
-              
+
               <div className="flex gap-3 pt-4">
                 <button
                   type="submit"
                   disabled={loading}
                   className="btn btn-primary flex-1"
                 >
-                  {loading ? 'Saving...' : (editingBook ? 'Update Book' : 'Add Book')}
+                  {loading
+                    ? "Saving..."
+                    : editingBook
+                      ? "Update Book"
+                      : "Add Book"}
                 </button>
                 <button
                   type="button"
@@ -932,18 +1196,30 @@ const Books = () => {
       {showImportModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
           <div className="bg-white rounded-lg p-6 w-full max-w-4xl m-4 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold mb-4">Import Books from Spreadsheet</h3>
-            
+            <h3 className="text-xl font-bold mb-4">
+              Import Books from Spreadsheet
+            </h3>
+
             <div className="space-y-4">
               {/* Instructions */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h4 className="font-semibold text-blue-900 mb-2">Instructions:</h4>
+                <h4 className="font-semibold text-blue-900 mb-2">
+                  Instructions:
+                </h4>
                 <ul className="list-disc list-inside text-sm text-blue-800 space-y-1">
                   <li>Download the template file to see the required format</li>
-                  <li>Fill in your book data (required fields: title, author, isbn, category, total_copies)</li>
+                  <li>
+                    Fill in your book data (required fields: title, author,
+                    isbn, category, total_copies)
+                  </li>
                   <li>Department categories: CSE, EEE, ECE, MECH, AIDS, S&H</li>
-                  <li>Optional fields: publisher, publication_year, edition, language, pages, description, cover_image_url</li>
-                  <li>Upload the completed file (Excel .xlsx or .xls, or CSV)</li>
+                  <li>
+                    Optional fields: publisher, publication_year, edition,
+                    language, pages, description, cover_image_url
+                  </li>
+                  <li>
+                    Upload the completed file (Excel .xlsx or .xls, or CSV)
+                  </li>
                   <li>Review the results and check for any errors</li>
                 </ul>
               </div>
@@ -980,7 +1256,9 @@ const Books = () => {
               {/* Preview Data */}
               {importData.length > 0 && !importResults && (
                 <div className="border border-gray-200 rounded-lg p-4">
-                  <h4 className="font-semibold mb-2">Preview ({importData.length} books)</h4>
+                  <h4 className="font-semibold mb-2">
+                    Preview ({importData.length} books)
+                  </h4>
                   <div className="overflow-x-auto max-h-60 overflow-y-auto">
                     <table className="min-w-full text-sm">
                       <thead className="bg-gray-50 sticky top-0">
@@ -996,15 +1274,20 @@ const Books = () => {
                         {importData.slice(0, 10).map((book, idx) => (
                           <tr key={idx}>
                             <td className="px-3 py-2">{idx + 1}</td>
-                            <td className="px-3 py-2">{book.title || '-'}</td>
-                            <td className="px-3 py-2">{book.author || '-'}</td>
-                            <td className="px-3 py-2">{book.isbn || '-'}</td>
-                            <td className="px-3 py-2">{book.category || '-'}</td>
+                            <td className="px-3 py-2">{book.title || "-"}</td>
+                            <td className="px-3 py-2">{book.author || "-"}</td>
+                            <td className="px-3 py-2">{book.isbn || "-"}</td>
+                            <td className="px-3 py-2">
+                              {book.category || "-"}
+                            </td>
                           </tr>
                         ))}
                         {importData.length > 10 && (
                           <tr>
-                            <td colSpan="5" className="px-3 py-2 text-center text-gray-500">
+                            <td
+                              colSpan="5"
+                              className="px-3 py-2 text-center text-gray-500"
+                            >
                               ... and {importData.length - 10} more
                             </td>
                           </tr>
@@ -1019,18 +1302,24 @@ const Books = () => {
               {importResults && (
                 <div className="border border-gray-200 rounded-lg p-4">
                   <h4 className="font-semibold mb-3">Import Results</h4>
-                  
+
                   <div className="grid grid-cols-3 gap-4 mb-4">
                     <div className="bg-blue-50 rounded p-3 text-center">
-                      <div className="text-2xl font-bold text-blue-900">{importResults.summary.total}</div>
+                      <div className="text-2xl font-bold text-blue-900">
+                        {importResults.summary.total}
+                      </div>
                       <div className="text-sm text-blue-700">Total</div>
                     </div>
                     <div className="bg-green-50 rounded p-3 text-center">
-                      <div className="text-2xl font-bold text-green-900">{importResults.summary.success}</div>
+                      <div className="text-2xl font-bold text-green-900">
+                        {importResults.summary.success}
+                      </div>
                       <div className="text-sm text-green-700">Success</div>
                     </div>
                     <div className="bg-red-50 rounded p-3 text-center">
-                      <div className="text-2xl font-bold text-red-900">{importResults.summary.failed}</div>
+                      <div className="text-2xl font-bold text-red-900">
+                        {importResults.summary.failed}
+                      </div>
                       <div className="text-sm text-red-700">Failed</div>
                     </div>
                   </div>
@@ -1038,11 +1327,18 @@ const Books = () => {
                   {/* Failed Records */}
                   {importResults.results.failed.length > 0 && (
                     <div className="mt-4">
-                      <h5 className="font-semibold text-red-700 mb-2">Failed Records:</h5>
+                      <h5 className="font-semibold text-red-700 mb-2">
+                        Failed Records:
+                      </h5>
                       <div className="max-h-60 overflow-y-auto">
                         {importResults.results.failed.map((fail, idx) => (
-                          <div key={idx} className="bg-red-50 border border-red-200 rounded p-2 mb-2 text-sm">
-                            <div className="font-semibold">Row {fail.row}: {fail.data?.title || 'Unknown'}</div>
+                          <div
+                            key={idx}
+                            className="bg-red-50 border border-red-200 rounded p-2 mb-2 text-sm"
+                          >
+                            <div className="font-semibold">
+                              Row {fail.row}: {fail.data?.title || "Unknown"}
+                            </div>
                             <div className="text-red-700">{fail.error}</div>
                           </div>
                         ))}
@@ -1053,16 +1349,21 @@ const Books = () => {
                   {/* Success Records */}
                   {importResults.results.success.length > 0 && (
                     <div className="mt-4">
-                      <h5 className="font-semibold text-green-700 mb-2">Successfully Imported:</h5>
+                      <h5 className="font-semibold text-green-700 mb-2">
+                        Successfully Imported:
+                      </h5>
                       <div className="max-h-40 overflow-y-auto text-sm">
-                        {importResults.results.success.slice(0, 5).map((success, idx) => (
-                          <div key={idx} className="text-green-700">
-                            ✓ {success.title} (ISBN: {success.isbn})
-                          </div>
-                        ))}
+                        {importResults.results.success
+                          .slice(0, 5)
+                          .map((success, idx) => (
+                            <div key={idx} className="text-green-700">
+                              ✓ {success.title} (ISBN: {success.isbn})
+                            </div>
+                          ))}
                         {importResults.results.success.length > 5 && (
                           <div className="text-green-600 mt-1">
-                            ... and {importResults.results.success.length - 5} more
+                            ... and {importResults.results.success.length - 5}{" "}
+                            more
                           </div>
                         )}
                       </div>
@@ -1080,7 +1381,9 @@ const Books = () => {
                       disabled={loading || importData.length === 0}
                       className="btn btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {loading ? 'Importing...' : `Import ${importData.length} Books`}
+                      {loading
+                        ? "Importing..."
+                        : `Import ${importData.length} Books`}
                     </button>
                     <button
                       type="button"

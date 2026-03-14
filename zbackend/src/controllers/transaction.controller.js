@@ -3,84 +3,157 @@
  * Handles book checkout, return, renew, and related operations
  */
 
-const mysql = require('mysql2/promise');
-const { pool } = require('../config/database');
+const { pool } = require("../config/database");
+
+const getParsedInt = (value, fallback) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
+};
+
+const getStatusCondition = (status) => {
+  const conditions = {
+    active: "bt.return_date IS NULL",
+    returned: "bt.return_date IS NOT NULL",
+    overdue: "bt.return_date IS NULL AND bt.due_date < CURDATE()",
+  };
+  return conditions[status] || null;
+};
+
+const appendTransactionFilters = (baseQuery, filterInput, params) => {
+  let queryText = baseQuery;
+  const statusCondition = getStatusCondition(filterInput.status);
+
+  if (statusCondition) {
+    queryText += ` AND ${statusCondition}`;
+  }
+
+  if (filterInput.user_id) {
+    queryText += " AND bt.user_id = ?";
+    params.push(filterInput.user_id);
+  }
+
+  if (filterInput.book_id) {
+    queryText += " AND bt.book_id = ?";
+    params.push(filterInput.book_id);
+  }
+
+  if (filterInput.date_from) {
+    queryText += " AND bt.checkout_date >= ?";
+    params.push(filterInput.date_from);
+  }
+
+  if (filterInput.date_to) {
+    queryText += " AND bt.checkout_date <= ?";
+    params.push(filterInput.date_to);
+  }
+
+  return queryText;
+};
+
+const updateRenewalWithCompatibility = async (
+  connection,
+  dueDateIso,
+  transactionId,
+) => {
+  const statements = [
+    `UPDATE book_transactions SET due_date = ?, renewed_count = renewed_count + 1 WHERE id = ?`,
+    `UPDATE book_transactions SET due_date = ?, renewal_count = renewal_count + 1 WHERE id = ?`,
+    `UPDATE book_transactions SET due_date = ? WHERE id = ?`,
+  ];
+
+  let latestError = null;
+
+  for (const statement of statements) {
+    try {
+      await connection.execute(statement, [dueDateIso, transactionId]);
+      return;
+    } catch (error_) {
+      latestError = error_;
+      if (error_.code !== "ER_BAD_FIELD_ERROR") {
+        throw error_;
+      }
+    }
+  }
+
+  throw latestError;
+};
 
 class TransactionController {
-    // Checkout a book
-    static async checkoutBook(req, res) {
-        try {
-            // Accept bookId from either params or body
-            const bookId = req.params.bookId || req.body.bookId || req.body.book_id;
-            const userId = req.body.userId || req.body.user_id;
-            const loanDays = req.body.loanDays || req.body.loan_days || 14;
-            // For development without auth: librarian can be null or from body
-            const librarianId = req.user?.id || req.body.librarianId || null;
-            
-            if (!bookId) {
-                return res.status(400).json({ error: 'Book ID is required' });
-            }
-            
-            if (!userId) {
-                return res.status(400).json({ error: 'User ID is required' });
-            }
+  // Checkout a book
+  static async checkoutBook(req, res) {
+    try {
+      // Accept bookId from either params or body
+      const bookId = req.params.bookId || req.body.bookId || req.body.book_id;
+      const userId = req.body.userId || req.body.user_id;
+      const loanDays = req.body.loanDays || req.body.loan_days || 14;
+      // For development without auth: librarian can be null or from body
+      const librarianId = req.user?.id || req.body.librarianId || null;
 
-            const connection = await pool.getConnection();
-            
-            try {
-                await connection.beginTransaction();
+      if (!bookId) {
+        return res.status(400).json({ error: "Book ID is required" });
+      }
 
-                // Check if book is available
-                const [activeCheckouts] = await connection.execute(
-                    'SELECT COUNT(*) as count FROM book_transactions WHERE book_id = ? AND status = ?',
-                    [bookId, 'active']
-                );
+      if (!userId) {
+        return res.status(400).json({ error: "User ID is required" });
+      }
 
-                if (activeCheckouts[0].count > 0) {
-                    await connection.rollback();
-                    connection.release();
-                    return res.status(400).json({
-                        success: false,
-                        message: 'Book is currently checked out'
-                    });
-                }
+      const connection = await pool.getConnection();
 
-                // Check user's current checkout count
-                const [userCheckouts] = await connection.execute(
-                    'SELECT COUNT(*) as count FROM book_transactions WHERE user_id = ? AND status = ?',
-                    [userId, 'active']
-                );
+      try {
+        await connection.beginTransaction();
 
-                if (userCheckouts[0].count >= 5) {
-                    await connection.rollback();
-                    connection.release();
-                    return res.status(400).json({
-                        success: false,
-                        message: 'Maximum checkout limit (5) reached'
-                    });
-                }
+        // Check if book is available
+        const [activeCheckouts] = await connection.execute(
+          "SELECT COUNT(*) as count FROM book_transactions WHERE book_id = ? AND status = ?",
+          [bookId, "active"],
+        );
 
-                // Check for overdue books
-                const [overdueBooks] = await connection.execute(
-                    'SELECT COUNT(*) as count FROM book_transactions WHERE user_id = ? AND status = ? AND due_date < CURDATE()',
-                    [userId, 'active']
-                );
+        if (activeCheckouts[0].count > 0) {
+          await connection.rollback();
+          connection.release();
+          return res.status(400).json({
+            success: false,
+            message: "Book is currently checked out",
+          });
+        }
 
-                if (overdueBooks[0].count > 0) {
-                    await connection.rollback();
-                    connection.release();
-                    return res.status(400).json({
-                        success: false,
-                        message: 'Cannot checkout: user has overdue books'
-                    });
-                }
+        // Check user's current checkout count
+        const [userCheckouts] = await connection.execute(
+          "SELECT COUNT(*) as count FROM book_transactions WHERE user_id = ? AND status = ?",
+          [userId, "active"],
+        );
 
-                // Create checkout transaction
-                const checkoutDate = new Date();
-                const dueDate = new Date();
-                dueDate.setDate(dueDate.getDate() + parseInt(loanDays));
+        if (userCheckouts[0].count >= 5) {
+          await connection.rollback();
+          connection.release();
+          return res.status(400).json({
+            success: false,
+            message: "Maximum checkout limit (5) reached",
+          });
+        }
 
-                const [result] = await connection.execute(`
+        // Check for overdue books
+        const [overdueBooks] = await connection.execute(
+          "SELECT COUNT(*) as count FROM book_transactions WHERE user_id = ? AND status = ? AND due_date < CURDATE()",
+          [userId, "active"],
+        );
+
+        if (overdueBooks[0].count > 0) {
+          await connection.rollback();
+          connection.release();
+          return res.status(400).json({
+            success: false,
+            message: "Cannot checkout: user has overdue books",
+          });
+        }
+
+        // Create checkout transaction
+        const checkoutDate = new Date();
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + getParsedInt(loanDays, 14));
+
+        const [result] = await connection.execute(
+          `
                     INSERT INTO book_transactions (
                         user_id, 
                         book_id, 
@@ -90,18 +163,21 @@ class TransactionController {
                         transaction_type,
                         status
                     ) VALUES (?, ?, ?, ?, ?, 'checkout', 'active')
-                `, [userId, bookId, librarianId, checkoutDate, dueDate]);
+                `,
+          [userId, bookId, librarianId, checkoutDate, dueDate],
+        );
 
-                // Update book availability status
-                await connection.execute(
-                    'UPDATE books SET is_available = FALSE WHERE id = ?',
-                    [bookId]
-                );
+        // Update book availability status
+        await connection.execute(
+          "UPDATE books SET is_available = FALSE WHERE id = ?",
+          [bookId],
+        );
 
-                await connection.commit();
+        await connection.commit();
 
-                // Get transaction details
-                const [transaction] = await connection.execute(`
+        // Get transaction details
+        const [transaction] = await connection.execute(
+          `
                     SELECT 
                         bt.*,
                         CONCAT(u.first_name, ' ', u.last_name) as user_name,
@@ -111,66 +187,70 @@ class TransactionController {
                     JOIN users u ON bt.user_id = u.id
                     JOIN books b ON bt.book_id = b.id
                     WHERE bt.id = ?
-                `, [result.insertId]);
+                `,
+          [result.insertId],
+        );
 
-                connection.release();
+        connection.release();
 
-                res.json({
-                    success: true,
-                    message: 'Book checked out successfully',
-                    transaction: transaction[0]
-                });
-
-            } catch (error) {
-                await connection.rollback();
-                connection.release();
-                throw error;
-            }
-
-        } catch (error) {
-            console.error('Error during checkout:', error);
-            res.status(500).json({ error: 'Internal server error' });
-        }
+        res.json({
+          success: true,
+          message: "Book checked out successfully",
+          transaction: transaction[0],
+        });
+      } catch (error) {
+        await connection.rollback();
+        connection.release();
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error during checkout:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
+  }
 
-    // Return a book
-    static async returnBook(req, res) {
-        try {
-            const transactionId = req.params.id;
-            const { condition = 'good', notes = '' } = req.body;
-            const librarianId = req.user?.id || req.body.returned_by || null;
+  // Return a book
+  static async returnBook(req, res) {
+    try {
+      const transactionId = req.params.id;
+      const { notes = "" } = req.body;
+      const librarianId = req.user?.id || req.body.returned_by || null;
 
-            const connection = await pool.getConnection();
+      const connection = await pool.getConnection();
 
-            try {
-                await connection.beginTransaction();
+      try {
+        await connection.beginTransaction();
 
-                // Get transaction details
-                const [transactions] = await connection.execute(
-                    'SELECT * FROM book_transactions WHERE id = ? AND status = ?',
-                    [transactionId, 'active']
-                );
+        // Get transaction details
+        const [transactions] = await connection.execute(
+          "SELECT * FROM book_transactions WHERE id = ? AND status = ?",
+          [transactionId, "active"],
+        );
 
-                if (transactions.length === 0) {
-                    await connection.rollback();
-                    connection.release();
-                    return res.status(404).json({
-                        success: false,
-                        message: 'Active transaction not found'
-                    });
-                }
+        if (transactions.length === 0) {
+          await connection.rollback();
+          connection.release();
+          return res.status(404).json({
+            success: false,
+            message: "Active transaction not found",
+          });
+        }
 
-                const transaction = transactions[0];
-                const returnDate = new Date();
-                const dueDate = new Date(transaction.due_date);
-                
-                // Calculate fine if overdue
-                const daysOverdue = Math.max(0, Math.floor((returnDate - dueDate) / (1000 * 60 * 60 * 24)));
-                const finePerDay = 1.00; // $1 per day
-                const fineAmount = daysOverdue * finePerDay;
+        const transaction = transactions[0];
+        const returnDate = new Date();
+        const dueDate = new Date(transaction.due_date);
 
-                // Update transaction
-                await connection.execute(`
+        // Calculate fine if overdue
+        const daysOverdue = Math.max(
+          0,
+          Math.floor((returnDate - dueDate) / (1000 * 60 * 60 * 24)),
+        );
+        const finePerDay = 1;
+        const fineAmount = daysOverdue * finePerDay;
+
+        // Update transaction
+        await connection.execute(
+          `
                     UPDATE book_transactions
                     SET 
                         return_date = ?,
@@ -178,19 +258,20 @@ class TransactionController {
                         notes = ?,
                         status = 'returned'
                     WHERE id = ?
-                `, [returnDate, librarianId, notes, transactionId]);
+                `,
+          [returnDate, librarianId, notes, transactionId],
+        );
 
-                // Update book availability status
-                await connection.execute(
-                    'UPDATE books SET is_available = TRUE WHERE id = ?',
-                    [transaction.book_id]
-                );
+        // Update book availability status
+        await connection.execute(
+          "UPDATE books SET is_available = TRUE WHERE id = ?",
+          [transaction.book_id],
+        );
 
-                let fineId = null;
-
-                // Create fine record if overdue
-                if (daysOverdue > 0) {
-                    const [fineResult] = await connection.execute(`
+        // Create fine record if overdue
+        if (daysOverdue > 0) {
+          await connection.execute(
+            `
                         INSERT INTO fines (
                             user_id,
                             transaction_id,
@@ -198,15 +279,16 @@ class TransactionController {
                             days_overdue,
                             status
                         ) VALUES (?, ?, ?, ?, 'pending')
-                    `, [transaction.user_id, transactionId, fineAmount, daysOverdue]);
-                    
-                    fineId = fineResult.insertId;
-                }
+                    `,
+            [transaction.user_id, transactionId, fineAmount, daysOverdue],
+          );
+        }
 
-                await connection.commit();
+        await connection.commit();
 
-                // Get updated transaction details
-                const [updatedTransaction] = await connection.execute(`
+        // Get updated transaction details
+        const [updatedTransaction] = await connection.execute(
+          `
                     SELECT 
                         bt.*,
                         CONCAT(u.first_name, ' ', u.last_name) as user_name,
@@ -219,48 +301,50 @@ class TransactionController {
                     JOIN books b ON bt.book_id = b.id
                     LEFT JOIN fines f ON bt.id = f.transaction_id AND f.status = 'pending'
                     WHERE bt.id = ?
-                `, [transactionId]);
+                `,
+          [transactionId],
+        );
 
-                connection.release();
+        connection.release();
 
-                res.json({
-                    success: true,
-                    message: 'Book returned successfully',
-                    transaction: updatedTransaction[0],
-                    fine_amount: fineAmount
-                });
+        res.json({
+          success: true,
+          message: "Book returned successfully",
+          transaction: updatedTransaction[0],
+          fine_amount: fineAmount,
+        });
 
-                // Trigger reservation queue — notify next person waiting for this book
-                const ReservationController = require('./reservation.controller');
-                ReservationController.processReservationQueue(transaction.book_id).catch(err => {
-                    console.error('Queue processing error after return:', err);
-                });
-
-            } catch (error) {
-                await connection.rollback();
-                connection.release();
-                throw error;
-            }
-
-        } catch (error) {
-            console.error('Error during return:', error);
-            res.status(500).json({ error: 'Internal server error' });
-        }
+        // Trigger reservation queue — notify next person waiting for this book
+        const ReservationController = require("./reservation.controller");
+        ReservationController.processReservationQueue(
+          transaction.book_id,
+        ).catch((err) => {
+          console.error("Queue processing error after return:", err);
+        });
+      } catch (error) {
+        await connection.rollback();
+        connection.release();
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error during return:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
+  }
 
-    // Renew a book
-    static async renewBook(req, res) {
-        let connection;
-        try {
-            const transactionId = req.params.id;
-            // Accept both renewDays and renew_days for flexibility
-            const renewDays = req.body.renewDays || req.body.renew_days || req.body.extend_days || 14;
-            const librarianId = req.user?.id;
+  // Renew a book
+  static async renewBook(req, res) {
+    let connection;
+    try {
+      const transactionId = req.params.id;
+      // Accept both renewDays and renew_days for flexibility
+      const renewDays =
+        req.body.renewDays || req.body.renew_days || req.body.extend_days || 14;
+      connection = await pool.getConnection();
 
-            connection = await pool.getConnection();
-
-            // Check if renewal is allowed
-            const [transaction] = await connection.execute(`
+      // Check if renewal is allowed
+      const [transaction] = await connection.execute(
+        `
                 SELECT 
                     bt.*,
                     b.title,
@@ -269,84 +353,64 @@ class TransactionController {
                 JOIN books b ON bt.book_id = b.id
                 JOIN users u ON bt.user_id = u.id
                 WHERE bt.id = ? AND bt.return_date IS NULL
-            `, [transactionId]);
+            `,
+        [transactionId],
+      );
 
-            if (transaction.length === 0) {
-                connection.release();
-                return res.status(404).json({
-                    success: false,
-                    error: 'Transaction not found or book already returned'
-                });
-            }
+      if (transaction.length === 0) {
+        connection.release();
+        return res.status(404).json({
+          success: false,
+          error: "Transaction not found or book already returned",
+        });
+      }
 
-            const currentTransaction = transaction[0];
+      const currentTransaction = transaction[0];
 
-            // Check renewal limits (handle both renewed_count and renewal_count)
-            const maxRenewals = 2; // From library settings
-            const renewedCount = currentTransaction.renewed_count || currentTransaction.renewal_count || 0;
-            if (renewedCount >= maxRenewals) {
-                connection.release();
-                return res.status(400).json({
-                    success: false,
-                    error: `Maximum renewal limit (${maxRenewals}) reached`
-                });
-            }
+      // Check renewal limits (handle both renewed_count and renewal_count)
+      const maxRenewals = 2; // From library settings
+      const renewedCount =
+        currentTransaction.renewed_count ||
+        currentTransaction.renewal_count ||
+        0;
+      if (renewedCount >= maxRenewals) {
+        connection.release();
+        return res.status(400).json({
+          success: false,
+          error: `Maximum renewal limit (${maxRenewals}) reached`,
+        });
+      }
 
-            // Check if book is reserved by someone else
-            const [reservations] = await connection.execute(`
+      // Check if book is reserved by someone else
+      const [reservations] = await connection.execute(
+        `
                 SELECT COUNT(*) as count
                 FROM reservations
                 WHERE book_id = ? AND status = 'active' AND user_id != ?
-            `, [currentTransaction.book_id, currentTransaction.user_id]);
+            `,
+        [currentTransaction.book_id, currentTransaction.user_id],
+      );
 
-            if (reservations[0].count > 0) {
-                connection.release();
-                return res.status(400).json({
-                    success: false,
-                    error: 'Cannot renew: Book is reserved by another user'
-                });
-            }
+      if (reservations[0].count > 0) {
+        connection.release();
+        return res.status(400).json({
+          success: false,
+          error: "Cannot renew: Book is reserved by another user",
+        });
+      }
 
-            // Perform renewal
-            const newDueDate = new Date();
-            newDueDate.setDate(newDueDate.getDate() + parseInt(renewDays));
+      // Perform renewal
+      const newDueDate = new Date();
+      newDueDate.setDate(newDueDate.getDate() + getParsedInt(renewDays, 14));
+      await updateRenewalWithCompatibility(
+        connection,
+        newDueDate.toISOString().split("T")[0],
+        transactionId,
+      );
 
-            // Update due date (try different column name variations)
-            // Try renewed_count first
-            try {
-                await connection.execute(`
-                    UPDATE book_transactions 
-                    SET due_date = ?, renewed_count = renewed_count + 1
-                    WHERE id = ?
-                `, [newDueDate.toISOString().split('T')[0], transactionId]);
-            } catch (err) {
-                // Try renewal_count
-                if (err.code === 'ER_BAD_FIELD_ERROR') {
-                    try {
-                        await connection.execute(`
-                            UPDATE book_transactions 
-                            SET due_date = ?, renewal_count = renewal_count + 1
-                            WHERE id = ?
-                        `, [newDueDate.toISOString().split('T')[0], transactionId]);
-                    } catch (err2) {
-                        // Just update due_date without renewal count
-                        if (err2.code === 'ER_BAD_FIELD_ERROR') {
-                            await connection.execute(`
-                                UPDATE book_transactions 
-                                SET due_date = ?
-                                WHERE id = ?
-                            `, [newDueDate.toISOString().split('T')[0], transactionId]);
-                        } else {
-                            throw err2;
-                        }
-                    }
-                } else {
-                    throw err;
-                }
-            }
-
-            // Get updated transaction
-            const [updatedTransaction] = await connection.execute(`
+      // Get updated transaction
+      const [updatedTransaction] = await connection.execute(
+        `
                 SELECT 
                     bt.*,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
@@ -356,37 +420,39 @@ class TransactionController {
                 JOIN users u ON bt.user_id = u.id
                 JOIN books b ON bt.book_id = b.id
                 WHERE bt.id = ?
-            `, [transactionId]);
+            `,
+        [transactionId],
+      );
 
-            connection.release();
+      connection.release();
 
-            res.json({
-                success: true,
-                message: 'Book renewed successfully',
-                transaction: updatedTransaction[0],
-                new_due_date: newDueDate.toISOString().split('T')[0]
-            });
-
-        } catch (error) {
-            if (connection) {
-                connection.release();
-            }
-            console.error('Error during renewal:', error);
-            res.status(500).json({ 
-                success: false,
-                error: error.message || 'Internal server error',
-                details: error.code || 'Unknown error'
-            });
-        }
+      res.json({
+        success: true,
+        message: "Book renewed successfully",
+        transaction: updatedTransaction[0],
+        new_due_date: newDueDate.toISOString().split("T")[0],
+      });
+    } catch (error) {
+      if (connection) {
+        connection.release();
+      }
+      console.error("Error during renewal:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Internal server error",
+        details: error.code || "Unknown error",
+      });
     }
+  }
 
-    // Get active checkouts for a user
-    static async getUserCheckouts(req, res) {
-        try {
-            const { userId } = req.params;
-            const connection = await pool.getConnection();
+  // Get active checkouts for a user
+  static async getUserCheckouts(req, res) {
+    try {
+      const { userId } = req.params;
+      const connection = await pool.getConnection();
 
-            const [checkouts] = await connection.execute(`
+      const [checkouts] = await connection.execute(
+        `
                 SELECT 
                     bt.*,
                     b.title,
@@ -407,28 +473,29 @@ class TransactionController {
                 LEFT JOIN fines f ON bt.id = f.transaction_id AND f.status = 'pending'
                 WHERE bt.user_id = ? AND bt.return_date IS NULL
                 ORDER BY bt.checkout_date DESC
-            `, [userId]);
+            `,
+        [userId],
+      );
 
-            connection.release();
+      connection.release();
 
-            res.json({
-                user_id: parseInt(userId),
-                active_checkouts: checkouts.length,
-                checkouts
-            });
-
-        } catch (error) {
-            console.error('Error fetching user checkouts:', error);
-            res.status(500).json({ error: 'Internal server error' });
-        }
+      res.json({
+        user_id: getParsedInt(userId, 0),
+        active_checkouts: checkouts.length,
+        checkouts,
+      });
+    } catch (error) {
+      console.error("Error fetching user checkouts:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
+  }
 
-    // Get overdue books
-    static async getOverdueBooks(req, res) {
-        try {
-            const connection = await pool.getConnection();
+  // Get overdue books
+  static async getOverdueBooks(req, res) {
+    try {
+      const connection = await pool.getConnection();
 
-            const [overdueBooks] = await connection.execute(`
+      const [overdueBooks] = await connection.execute(`
                 SELECT 
                     bt.*,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
@@ -449,28 +516,30 @@ class TransactionController {
                 ORDER BY bt.due_date ASC, u.last_name, u.first_name
             `);
 
-            connection.release();
+      connection.release();
 
-            res.json({
-                total_overdue: overdueBooks.length,
-                overdue_books: overdueBooks
-            });
-
-        } catch (error) {
-            console.error('Error fetching overdue books:', error);
-            res.status(500).json({ error: 'Internal server error' });
-        }
+      res.json({
+        total_overdue: overdueBooks.length,
+        overdue_books: overdueBooks,
+      });
+    } catch (error) {
+      console.error("Error fetching overdue books:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
+  }
 
-    // Get all active transactions
-    static async getActiveTransactions(req, res) {
-        try {
-            const { page = 1, limit = 50, status = 'active' } = req.query;
-            const connection = await pool.getConnection();
+  // Get all active transactions
+  static async getActiveTransactions(req, res) {
+    try {
+      const { page = 1, limit = 50, status = "active" } = req.query;
+      const connection = await pool.getConnection();
 
-            const offset = (parseInt(page) - 1) * parseInt(limit);
+      const parsedPage = getParsedInt(page, 1);
+      const parsedLimit = getParsedInt(limit, 50);
+      const offset = (parsedPage - 1) * parsedLimit;
 
-            const [transactions] = await connection.execute(`
+      const [transactions] = await connection.execute(
+        `
                 SELECT 
                     bt.*,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
@@ -491,43 +560,50 @@ class TransactionController {
                 WHERE (CASE WHEN bt.return_date IS NULL THEN 'active' ELSE 'returned' END) = ?
                 ORDER BY bt.checkout_date DESC
                 LIMIT ? OFFSET ?
-            `, [status, parseInt(limit), offset]);
+            `,
+        [status, parsedLimit, offset],
+      );
 
-            // Get total count
-            const [countResult] = await connection.execute(`
+      // Get total count
+      const [countResult] = await connection.execute(
+        `
                 SELECT COUNT(*) as total
                 FROM book_transactions
                 WHERE status = ?
-            `, [status]);
+            `,
+        [status],
+      );
 
-            connection.release();
+      connection.release();
 
-            res.json({
-                transactions,
-                pagination: {
-                    page: parseInt(page),
-                    limit: parseInt(limit),
-                    total: countResult[0].total,
-                    totalPages: Math.ceil(countResult[0].total / parseInt(limit))
-                }
-            });
-
-        } catch (error) {
-            console.error('Error fetching transactions:', error);
-            res.status(500).json({ error: 'Internal server error' });
-        }
+      res.json({
+        transactions,
+        pagination: {
+          page: parsedPage,
+          limit: parsedLimit,
+          total: countResult[0].total,
+          totalPages: Math.ceil(countResult[0].total / parsedLimit),
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching transactions:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
+  }
 
-    // Get transaction history for a book
-    static async getBookTransactionHistory(req, res) {
-        try {
-            const { bookId } = req.params;
-            const { page = 1, limit = 20 } = req.query;
-            const connection = await pool.getConnection();
+  // Get transaction history for a book
+  static async getBookTransactionHistory(req, res) {
+    try {
+      const { bookId } = req.params;
+      const { page = 1, limit = 20 } = req.query;
+      const connection = await pool.getConnection();
 
-            const offset = (parseInt(page) - 1) * parseInt(limit);
+      const parsedPage = getParsedInt(page, 1);
+      const parsedLimit = getParsedInt(limit, 20);
+      const offset = (parsedPage - 1) * parsedLimit;
 
-            const [transactions] = await connection.execute(`
+      const [transactions] = await connection.execute(
+        `
                 SELECT 
                     bt.*,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
@@ -539,149 +615,167 @@ class TransactionController {
                 WHERE bt.book_id = ?
                 ORDER BY bt.created_at DESC
                 LIMIT ? OFFSET ?
-            `, [bookId, parseInt(limit), offset]);
+            `,
+        [bookId, parsedLimit, offset],
+      );
 
-            // Get total count
-            const [countResult] = await connection.execute(`
+      // Get total count
+      const [countResult] = await connection.execute(
+        `
                 SELECT COUNT(*) as total
                 FROM book_transactions
                 WHERE book_id = ?
-            `, [bookId]);
+            `,
+        [bookId],
+      );
 
-            connection.release();
+      connection.release();
 
-            res.json({
-                book_id: parseInt(bookId),
-                transactions,
-                pagination: {
-                    page: parseInt(page),
-                    limit: parseInt(limit),
-                    total: countResult[0].total,
-                    totalPages: Math.ceil(countResult[0].total / parseInt(limit))
-                }
-            });
-
-        } catch (error) {
-            console.error('Error fetching book transaction history:', error);
-            res.status(500).json({ error: 'Internal server error' });
-        }
+      res.json({
+        book_id: getParsedInt(bookId, 0),
+        transactions,
+        pagination: {
+          page: parsedPage,
+          limit: parsedLimit,
+          total: countResult[0].total,
+          totalPages: Math.ceil(countResult[0].total / parsedLimit),
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching book transaction history:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
+  }
 
-    // Quick checkout by scanning RFID or barcode
-    static async quickCheckout(req, res) {
-        try {
-            const { tagId, userId, scanMethod = 'rfid' } = req.body;
-            const librarianId = req.user?.id;
+  // Quick checkout by scanning RFID or barcode
+  static async quickCheckout(req, res) {
+    try {
+      const { tagId, userId, scanMethod = "rfid" } = req.body;
+      const librarianId = req.user?.id;
 
-            const connection = await pool.getConnection();
+      const connection = await pool.getConnection();
 
-            // Find book by RFID tag or ISBN
-            let bookQuery;
-            let bookParams;
+      // Find book by RFID tag or ISBN
+      let bookQuery;
+      let bookParams;
 
-            if (scanMethod === 'rfid') {
-                bookQuery = `
+      if (scanMethod === "rfid") {
+        bookQuery = `
                     SELECT b.id, b.title, b.author, b.is_available
                     FROM books b
                     JOIN rfid_tags rt ON b.id = rt.book_id
                     WHERE rt.tag_id = ?
                 `;
-                bookParams = [tagId];
-            } else {
-                // Assume barcode is ISBN
-                bookQuery = `
+        bookParams = [tagId];
+      } else {
+        // Assume barcode is ISBN
+        bookQuery = `
                     SELECT b.id, b.title, b.author, b.is_available
                     FROM books b
                     WHERE b.isbn = ?
                 `;
-                bookParams = [tagId];
-            }
+        bookParams = [tagId];
+      }
 
-            const [books] = await connection.execute(bookQuery, bookParams);
+      const [books] = await connection.execute(bookQuery, bookParams);
 
-            if (books.length === 0) {
-                connection.release();
-                return res.status(404).json({
-                    error: `Book not found with ${scanMethod}: ${tagId}`
-                });
-            }
+      if (books.length === 0) {
+        connection.release();
+        return res.status(404).json({
+          error: `Book not found with ${scanMethod}: ${tagId}`,
+        });
+      }
 
-            const book = books[0];
+      const book = books[0];
 
-            // Use the existing checkout procedure
-            await connection.beginTransaction();
+      // Use the existing checkout procedure
+      await connection.beginTransaction();
 
-            try {
-                const [result] = await connection.execute(`
+      try {
+        await connection.execute(
+          `
                     CALL checkout_book(?, ?, ?, 14, @success, @message)
-                `, [userId, book.id, librarianId]);
+                `,
+          [userId, book.id, librarianId],
+        );
 
-                const [output] = await connection.execute('SELECT @success as success, @message as message');
-                const { success, message } = output[0];
+        const [output] = await connection.execute(
+          "SELECT @success as success, @message as message",
+        );
+        const { success, message } = output[0];
 
-                if (success) {
-                    await connection.commit();
-                    res.json({
-                        success: true,
-                        message: `"${book.title}" checked out successfully`,
-                        book: {
-                            id: book.id,
-                            title: book.title,
-                            author: book.author
-                        },
-                        scan_method: scanMethod,
-                        scanned_id: tagId
-                    });
-                } else {
-                    await connection.rollback();
-                    res.status(400).json({
-                        success: false,
-                        message,
-                        book: {
-                            title: book.title,
-                            author: book.author
-                        }
-                    });
-                }
-
-            } catch (error) {
-                await connection.rollback();
-                throw error;
-            }
-
-        } catch (error) {
-            console.error('Error during quick checkout:', error);
-            res.status(500).json({ error: 'Internal server error' });
+        if (success) {
+          await connection.commit();
+          res.json({
+            success: true,
+            message: `"${book.title}" checked out successfully`,
+            book: {
+              id: book.id,
+              title: book.title,
+              author: book.author,
+            },
+            scan_method: scanMethod,
+            scanned_id: tagId,
+          });
+        } else {
+          await connection.rollback();
+          res.status(400).json({
+            success: false,
+            message,
+            book: {
+              title: book.title,
+              author: book.author,
+            },
+          });
         }
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error during quick checkout:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
+  }
 
-    // Get all transactions with filtering
-    static async getAllTransactions(req, res) {
-        try {
-            const { 
-                status, user_id, book_id, page = 1, limit = 20,
-                date_from, date_to, sort_by = 'checkout_date', sort_order = 'DESC' 
-            } = req.query;
-            
-            // Parse and validate pagination parameters
-            const parsedPage = Math.max(1, parseInt(page) || 1);
-            const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 20));
+  // Get all transactions with filtering
+  static async getAllTransactions(req, res) {
+    try {
+      const {
+        status,
+        user_id,
+        book_id,
+        page = 1,
+        limit = 20,
+        date_from,
+        date_to,
+        sort_by = "checkout_date",
+        sort_order = "DESC",
+      } = req.query;
 
-            // Check if table has any data first
-            const [countCheck] = await pool.query('SELECT COUNT(*) as total FROM book_transactions');
-            if (countCheck[0].total === 0) {
-                return res.json({
-                    transactions: [],
-                    pagination: {
-                        page: parsedPage,
-                        limit: parsedLimit,
-                        total: 0,
-                        totalPages: 0
-                    }
-                });
-            }
+      // Parse and validate pagination parameters
+      const parsedPage = Math.max(1, getParsedInt(page, 1));
+      const parsedLimit = Math.min(100, Math.max(1, getParsedInt(limit, 20)));
 
-            let query = `
+      // Check if table has any data first
+      const [countCheck] = await pool.query(
+        "SELECT COUNT(*) as total FROM book_transactions",
+      );
+      if (countCheck[0].total === 0) {
+        return res.json({
+          transactions: [],
+          pagination: {
+            page: parsedPage,
+            limit: parsedLimit,
+            total: 0,
+            totalPages: 0,
+          },
+        });
+      }
+
+      const filterInput = { status, user_id, book_id, date_from, date_to };
+
+      let query = `
                 SELECT 
                     bt.*,
                     b.title,
@@ -705,127 +799,84 @@ class TransactionController {
                 WHERE 1=1
             `;
 
-            let params = [];
+      let params = [];
+      query = appendTransactionFilters(query, filterInput, params);
 
-            if (status) {
-                if (status === 'active') {
-                    query += ` AND bt.return_date IS NULL`;
-                } else if (status === 'returned') {
-                    query += ` AND bt.return_date IS NOT NULL`;
-                } else if (status === 'overdue') {
-                    query += ` AND bt.return_date IS NULL AND bt.due_date < CURDATE()`;
-                }
-            }
+      // Add sorting
+      const validSortFields = [
+        "checkout_date",
+        "due_date",
+        "return_date",
+        "user_name",
+        "title",
+      ];
+      const sortField = validSortFields.includes(sort_by)
+        ? sort_by
+        : "checkout_date";
+      const sortDirection = sort_order.toUpperCase() === "ASC" ? "ASC" : "DESC";
 
-            if (user_id) {
-                query += ` AND bt.user_id = ?`;
-                params.push(user_id);
-            }
+      if (sort_by === "user_name") {
+        query += ` ORDER BY CONCAT(u.first_name, ' ', u.last_name) ${sortDirection}`;
+      } else if (sort_by === "title") {
+        query += ` ORDER BY b.title ${sortDirection}`;
+      } else {
+        query += ` ORDER BY bt.${sortField} ${sortDirection}`;
+      }
 
-            if (book_id) {
-                query += ` AND bt.book_id = ?`;
-                params.push(book_id);
-            }
+      // Add pagination
+      const offset = (parsedPage - 1) * parsedLimit;
+      query += ` LIMIT ? OFFSET ?`;
+      params.push(parsedLimit, offset);
 
-            if (date_from) {
-                query += ` AND bt.checkout_date >= ?`;
-                params.push(date_from);
-            }
+      const [transactions] = await pool.query(query, params);
 
-            if (date_to) {
-                query += ` AND bt.checkout_date <= ?`;
-                params.push(date_to);
-            }
-
-            // Add sorting
-            const validSortFields = ['checkout_date', 'due_date', 'return_date', 'user_name', 'title'];
-            const sortField = validSortFields.includes(sort_by) ? sort_by : 'checkout_date';
-            const sortDirection = sort_order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-            
-            if (sort_by === 'user_name') {
-                query += ` ORDER BY CONCAT(u.first_name, ' ', u.last_name) ${sortDirection}`;
-            } else if (sort_by === 'title') {
-                query += ` ORDER BY b.title ${sortDirection}`;
-            } else {
-                query += ` ORDER BY bt.${sortField} ${sortDirection}`;
-            }
-
-            // Add pagination
-            const offset = (parsedPage - 1) * parsedLimit;
-            query += ` LIMIT ? OFFSET ?`;
-            params.push(parsedLimit, offset);
-
-            const [transactions] = await pool.query(query, params);
-
-            // Get total count
-            let countQuery = `
+      // Get total count
+      let countQuery = `
                 SELECT COUNT(*) as total
                 FROM book_transactions bt
                 WHERE 1=1
             `;
-            let countParams = [];
+      let countParams = [];
+      countQuery = appendTransactionFilters(
+        countQuery,
+        filterInput,
+        countParams,
+      );
 
-            if (status) {
-                if (status === 'active') {
-                    countQuery += ` AND bt.return_date IS NULL`;
-                } else if (status === 'returned') {
-                    countQuery += ` AND bt.return_date IS NOT NULL`;
-                } else if (status === 'overdue') {
-                    countQuery += ` AND bt.return_date IS NULL AND bt.due_date < CURDATE()`;
-                }
-            }
+      const [countResult] = await pool.query(countQuery, countParams);
 
-            if (user_id) {
-                countQuery += ` AND bt.user_id = ?`;
-                countParams.push(user_id);
-            }
+      // Map transaction_status to status for frontend compatibility
+      const formattedTransactions = transactions.map((t) => ({
+        ...t,
+        status:
+          t.transaction_status ||
+          t.status ||
+          (t.return_date ? "returned" : "active"),
+      }));
 
-            if (book_id) {
-                countQuery += ` AND bt.book_id = ?`;
-                countParams.push(book_id);
-            }
-
-            if (date_from) {
-                countQuery += ` AND bt.checkout_date >= ?`;
-                countParams.push(date_from);
-            }
-
-            if (date_to) {
-                countQuery += ` AND bt.checkout_date <= ?`;
-                countParams.push(date_to);
-            }
-
-            const [countResult] = await pool.query(countQuery, countParams);
-
-            // Map transaction_status to status for frontend compatibility
-            const formattedTransactions = transactions.map(t => ({
-                ...t,
-                status: t.transaction_status || t.status || (t.return_date ? 'returned' : 'active')
-            }));
-
-            res.json({
-                transactions: formattedTransactions,
-                pagination: {
-                    page: parsedPage,
-                    limit: parsedLimit,
-                    total: countResult[0].total,
-                    totalPages: Math.ceil(countResult[0].total / parsedLimit)
-                }
-            });
-
-        } catch (error) {
-            console.error('Error fetching transactions:', error);
-            res.status(500).json({ error: 'Internal server error' });
-        }
+      res.json({
+        transactions: formattedTransactions,
+        pagination: {
+          page: parsedPage,
+          limit: parsedLimit,
+          total: countResult[0].total,
+          totalPages: Math.ceil(countResult[0].total / parsedLimit),
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching transactions:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
+  }
 
-    // Get specific transaction details
-    static async getTransactionById(req, res) {
-        try {
-            const { id } = req.params;
-            const connection = await pool.getConnection();
+  // Get specific transaction details
+  static async getTransactionById(req, res) {
+    try {
+      const { id } = req.params;
+      const connection = await pool.getConnection();
 
-            const [transactions] = await connection.execute(`
+      const [transactions] = await connection.execute(
+        `
                 SELECT 
                     bt.*,
                     b.title,
@@ -855,41 +906,46 @@ class TransactionController {
                 LEFT JOIN users checkout_lib ON bt.checked_out_by = checkout_lib.id
                 LEFT JOIN users return_lib ON bt.returned_by = return_lib.id
                 WHERE bt.id = ?
-            `, [id]);
+            `,
+        [id],
+      );
 
-            if (transactions.length === 0) {
-                connection.release();
-                return res.status(404).json({ error: 'Transaction not found' });
-            }
+      if (transactions.length === 0) {
+        connection.release();
+        return res.status(404).json({ error: "Transaction not found" });
+      }
 
-            // Get fines for this transaction if any
-            const [fines] = await connection.execute(`
+      // Get fines for this transaction if any
+      const [fines] = await connection.execute(
+        `
                 SELECT * FROM fines 
                 WHERE transaction_id = ? 
                 ORDER BY created_at DESC
-            `, [id]);
+            `,
+        [id],
+      );
 
-            connection.release();
+      connection.release();
 
-            res.json({
-                transaction: transactions[0],
-                fines: fines
-            });
-
-        } catch (error) {
-            console.error('Error fetching transaction:', error);
-            res.status(500).json({ error: 'Internal server error' });
-        }
+      res.json({
+        transaction: transactions[0],
+        fines: fines,
+      });
+    } catch (error) {
+      console.error("Error fetching transaction:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
+  }
 
-    // Get transaction statistics for dashboard
-    static async getTransactionStatistics(req, res) {
-        try {
-            const { period = '30' } = req.query;
-            const connection = await pool.getConnection();
+  // Get transaction statistics for dashboard
+  static async getTransactionStatistics(req, res) {
+    try {
+      const { period = "30" } = req.query;
+      const connection = await pool.getConnection();
 
-            // Overall transaction statistics
-            const [overallStats] = await connection.execute(`
+      // Overall transaction statistics
+      const [overallStats] = await connection.execute(
+        `
                 SELECT 
                     COUNT(*) as total_transactions,
                     COUNT(CASE WHEN return_date IS NULL THEN 1 END) as active_checkouts,
@@ -901,10 +957,13 @@ class TransactionController {
                     END) as avg_loan_duration
                 FROM book_transactions
                 WHERE checkout_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-            `, [parseInt(period)]);
+            `,
+        [getParsedInt(period, 30)],
+      );
 
-            // Daily transaction trends
-            const [dailyTrends] = await connection.execute(`
+      // Daily transaction trends
+      const [dailyTrends] = await connection.execute(
+        `
                 SELECT 
                     DATE(checkout_date) as transaction_date,
                     COUNT(*) as checkouts,
@@ -914,10 +973,13 @@ class TransactionController {
                 GROUP BY DATE(checkout_date)
                 ORDER BY transaction_date DESC
                 LIMIT 30
-            `, [parseInt(period)]);
+            `,
+        [getParsedInt(period, 30)],
+      );
 
-            // Most active users
-            const [activeUsers] = await connection.execute(`
+      // Most active users
+      const [activeUsers] = await connection.execute(
+        `
                 SELECT 
                     u.id,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
@@ -930,10 +992,13 @@ class TransactionController {
                 GROUP BY u.id
                 ORDER BY transaction_count DESC
                 LIMIT 10
-            `, [parseInt(period)]);
+            `,
+        [getParsedInt(period, 30)],
+      );
 
-            // Most borrowed books
-            const [popularBooks] = await connection.execute(`
+      // Most borrowed books
+      const [popularBooks] = await connection.execute(
+        `
                 SELECT 
                     b.id,
                     b.title,
@@ -946,23 +1011,24 @@ class TransactionController {
                 GROUP BY b.id
                 ORDER BY checkout_count DESC
                 LIMIT 10
-            `, [parseInt(period)]);
+            `,
+        [getParsedInt(period, 30)],
+      );
 
-            connection.release();
+      connection.release();
 
-            res.json({
-                period_days: parseInt(period),
-                overall_statistics: overallStats[0],
-                daily_trends: dailyTrends,
-                active_users: activeUsers,
-                popular_books: popularBooks
-            });
-
-        } catch (error) {
-            console.error('Error fetching transaction statistics:', error);
-            res.status(500).json({ error: 'Internal server error' });
-        }
+      res.json({
+        period_days: getParsedInt(period, 30),
+        overall_statistics: overallStats[0],
+        daily_trends: dailyTrends,
+        active_users: activeUsers,
+        popular_books: popularBooks,
+      });
+    } catch (error) {
+      console.error("Error fetching transaction statistics:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
+  }
 }
 
 module.exports = TransactionController;

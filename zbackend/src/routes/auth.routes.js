@@ -1,34 +1,51 @@
 /**
  * Authentication Routes
- * 
+ *
  * Handles user registration and login.
  */
 
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const authController = require('../controllers/auth.controller');
-const { validationRules, handleValidationErrors } = require('../middleware/validator.middleware');
+const authController = require("../controllers/auth.controller");
+const {
+  validationRules,
+  handleValidationErrors,
+} = require("../middleware/validator.middleware");
 
 // Register new user
 router.post(
-  '/register',
+  "/register",
   validationRules.register,
   handleValidationErrors,
-  authController.register
+  authController.register,
 );
 
 // Login
 router.post(
-  '/login',
+  "/login",
   validationRules.login,
   handleValidationErrors,
-  authController.login
+  authController.login,
 );
 
+// Google login (ID-token flow — for programmatic use)
+router.post(
+  "/google",
+  validationRules.googleLogin,
+  handleValidationErrors,
+  authController.googleLogin,
+);
+
+// Google OAuth redirect flow — works from ANY frontend port, no JS-origin setup needed
+// Step 1: browser navigates here → gets redirected to Google consent screen
+router.get("/google", authController.googleOAuthStart);
+// Step 2: Google redirects back here after user consents
+router.get("/google/callback", authController.googleOAuthCallback);
+
 // Logout
-router.post('/logout', authController.logout);
+router.post("/logout", authController.logout);
 
 // Get current session user (frontend calls this on page load to verify session)
-router.get('/me', authController.me);
+router.get("/me", authController.me);
 
 module.exports = router;
