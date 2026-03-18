@@ -25,6 +25,16 @@ export const authService = {
     return response.data;
   },
 
+  verifyOtp: async (email, otp) => {
+    const response = await api.post("/auth/verify-otp", { email, otp });
+    return response.data;
+  },
+
+  resendOtp: async (email) => {
+    const response = await api.post("/auth/resend-otp", { email });
+    return response.data;
+  },
+
   logout: async () => {
     const response = await api.post("/auth/logout");
     return response.data;
@@ -92,6 +102,11 @@ export const bookService = {
 
   getBookLocationHistory: async (bookId) => {
     const response = await api.get(`/books/${bookId}/history`);
+    return response.data;
+  },
+
+  getIsbnCopies: async (bookId) => {
+    const response = await api.get(`/books/${bookId}/isbn-copies`);
     return response.data;
   },
 
@@ -244,8 +259,8 @@ export const fineService = {
     return response.data;
   },
 
-  waiveFine: async (fineId, reason) => {
-    const response = await api.post(`/fines/${fineId}/waive`, { reason });
+  waiveFine: async (fineId, waiveData) => {
+    const response = await api.post(`/fines/${fineId}/waive`, waiveData);
     return response.data;
   },
 

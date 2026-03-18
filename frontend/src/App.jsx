@@ -45,7 +45,7 @@ function App() {
               <Route path="transactions" element={<Transactions />} />
               <Route path="fines" element={<Fines />} />
               <Route path="reservations" element={<Reservations />} />
-              <Route path="users" element={<UserManagement />} />
+              <Route path="users" element={<PrivateRoute roles={["admin"]}><UserManagement /></PrivateRoute>} />
               <Route path="entry" element={<EntryLog />} />
               <Route path="rfid" element={<RFIDScanner />} />
               <Route path="navigation" element={<Navigation />} />

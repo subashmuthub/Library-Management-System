@@ -13,6 +13,8 @@ const getParsedInt = (value, fallback) => {
 const getStatusCondition = (status) => {
   const conditions = {
     active: "bt.return_date IS NULL",
+    inuse: "bt.return_date IS NULL",
+    in_use: "bt.return_date IS NULL",
     returned: "bt.return_date IS NOT NULL",
     overdue: "bt.return_date IS NULL AND bt.due_date < CURDATE()",
   };
@@ -173,6 +175,12 @@ class TransactionController {
           [bookId],
         );
 
+        // Keep user account metadata fresh when a checkout happens.
+        await connection.execute(
+          "UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          [userId],
+        );
+
         await connection.commit();
 
         // Get transaction details
@@ -266,6 +274,12 @@ class TransactionController {
         await connection.execute(
           "UPDATE books SET is_available = TRUE WHERE id = ?",
           [transaction.book_id],
+        );
+
+        // Reflect return activity in the user account metadata.
+        await connection.execute(
+          "UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          [transaction.user_id],
         );
 
         // Create fine record if overdue

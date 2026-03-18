@@ -19,12 +19,6 @@ const TransactionController = require('../controllers/transaction.controller');
  */
 router.post('/checkout', TransactionController.checkoutBook);
 
-/**
- * POST /api/transactions/quick-checkout
- * Quick checkout by scanning (minimal validation)
- * Body: { user_identifier, book_identifier }
- */
-router.post('/quick-checkout', TransactionController.quickCheckout);
 
 /**
  * POST /api/transactions/:id/return

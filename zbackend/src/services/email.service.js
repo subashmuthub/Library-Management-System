@@ -7,10 +7,25 @@ const nodemailer = require('nodemailer');
 
 // Create email transporter
 const createTransporter = () => {
+    const hasSmtpCredentials = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+
+    // If SMTP credentials are provided, always prefer them (including development).
+    if (hasSmtpCredentials) {
+        return nodemailer.createTransport({
+            host: process.env.SMTP_HOST || 'smtp.gmail.com',
+            port: Number(process.env.SMTP_PORT) || 587,
+            secure: Number(process.env.SMTP_PORT) === 465,
+            auth: {
+                user: process.env.SMTP_USER,
+                pass: process.env.SMTP_PASS,
+            },
+        });
+    }
+
     // Configure based on environment
     if (process.env.NODE_ENV === 'production') {
         // Production: Use real SMTP settings
-        return nodemailer.createTransporter({
+        return nodemailer.createTransport({
             host: process.env.SMTP_HOST || 'smtp.gmail.com',
             port: process.env.SMTP_PORT || 587,
             secure: false, // true for 465, false for other ports
@@ -21,7 +36,7 @@ const createTransporter = () => {
         });
     } else {
         // Development: Log to console
-        return nodemailer.createTransporter({
+        return nodemailer.createTransport({
             host: 'localhost',
             port: 1025,
             secure: false,
@@ -32,6 +47,40 @@ const createTransporter = () => {
 };
 
 class EmailService {
+    /**
+     * Send account verification OTP email.
+     */
+    static async sendOtpEmail(userEmail, userName, otpCode) {
+        try {
+            const transporter = createTransporter();
+            const mailOptions = {
+                from: process.env.SMTP_FROM || '"Library System" <noreply@library.com>',
+                to: userEmail,
+                subject: 'Verify your Smart Library account',
+                html: `
+                    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 640px; margin: 0 auto; padding: 20px;">
+                        <h2 style="margin: 0 0 10px; color: #0f172a;">Smart Library Email Verification</h2>
+                        <p>Hello ${userName || 'Student'},</p>
+                        <p>Use the OTP below to verify your email and activate dashboard access.</p>
+                        <div style="font-size: 28px; font-weight: 700; letter-spacing: 8px; color: #0f766e; background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 10px; padding: 14px 18px; text-align: center; margin: 18px 0;">
+                            ${otpCode}
+                        </div>
+                        <p><strong>Validity:</strong> 10 minutes</p>
+                        <p>If you did not request this code, you can ignore this email.</p>
+                    </div>
+                `,
+                text: `Hello ${userName || 'Student'},\n\nYour Smart Library verification OTP is: ${otpCode}\nThis OTP is valid for 10 minutes.\n\nIf you did not request this, ignore this email.`,
+            };
+
+            const info = await transporter.sendMail(mailOptions);
+            console.log(`📧 OTP email sent to ${userEmail}: ${info.messageId}`);
+            return { success: true, messageId: info.messageId };
+        } catch (error) {
+            console.error('❌ Failed to send OTP email:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
     /**
      * Send reservation ready notification
      */
@@ -188,6 +237,29 @@ class EmailService {
             return { success: true, messageId: info.messageId };
         } catch (error) {
             console.error('❌ Failed to send overdue notification:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * Notify student when waiver/discount decision is processed.
+     */
+    static async sendFineDecisionEmail(userEmail, userName, fineId, action, amountBefore, amountAfter, reason) {
+        try {
+            const transporter = createTransporter();
+
+            const mailOptions = {
+                from: process.env.SMTP_FROM || '"Library System" <noreply@library.com>',
+                to: userEmail,
+                subject: action === 'waived' ? 'Fine Waiver Approved' : 'Fine Discount Approved',
+                text: `Hi ${userName},\n\nYour fine #${fineId} has been ${action}.\nPrevious amount: ${amountBefore}\nCurrent amount: ${amountAfter}\nReason: ${reason || 'N/A'}\n\nPlease check your student portal for the updated status.`,
+            };
+
+            const info = await transporter.sendMail(mailOptions);
+            console.log(`📧 Fine decision email sent to ${userEmail}: ${info.messageId}`);
+            return { success: true, messageId: info.messageId };
+        } catch (error) {
+            console.error('❌ Failed to send fine decision email:', error);
             return { success: false, error: error.message };
         }
     }

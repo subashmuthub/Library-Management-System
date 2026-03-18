@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts';
 import { 
@@ -16,7 +16,9 @@ import {
   DollarSign,
   Bookmark,
   Users,
-  Search
+  Search,
+  CalendarDays,
+  ArrowUpRight
 } from 'lucide-react';
 
 const Layout = () => {
@@ -24,6 +26,17 @@ const Layout = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const roleName = typeof user?.role === 'string' ? user.role : user?.role?.role_name;
+  const isAdmin = (roleName || '').toLowerCase() === 'admin';
+
+  const todayLabel = useMemo(() => {
+    return new Date().toLocaleDateString(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -37,11 +50,21 @@ const Layout = () => {
     { path: '/transactions', label: 'Transactions', icon: RefreshCw },
     { path: '/fines', label: 'Fines', icon: DollarSign },
     { path: '/reservations', label: 'Reservations', icon: Bookmark },
-    { path: '/users', label: 'Users', icon: Users },
+    ...(isAdmin ? [{ path: '/users', label: 'Users', icon: Users }] : []),
     { path: '/entry', label: 'Entry Log', icon: LogIn },
     { path: '/rfid', label: 'RFID Scanner', icon: Scan },
     { path: '/navigation', label: 'Navigation', icon: NavigationIcon },
   ];
+
+  const currentSection = useMemo(() => {
+    return navItems.find((item) => item.path === location.pathname)?.label || 'Dashboard';
+  }, [location.pathname, navItems]);
+
+  const selectedPath = useMemo(() => {
+    return navItems.some((item) => item.path === location.pathname)
+      ? location.pathname
+      : '/dashboard';
+  }, [location.pathname, navItems]);
 
   return (
     <div className="flex h-screen bg-slate-50">
@@ -56,7 +79,7 @@ const Layout = () => {
           <div className="flex items-center justify-between p-5 border-b border-slate-200">
             <div>
               <h1 className="text-2xl font-bold text-primary-600 tracking-tight">Smart Library</h1>
-              <span className="text-xs text-slate-500 font-medium">Library Management System</span>
+              <span className="text-xs text-slate-500 font-medium">Modern Library Operations Suite</span>
             </div>
             <button
               onClick={() => setSidebarOpen(false)}
@@ -135,11 +158,35 @@ const Layout = () => {
             >
               <Menu size={24} />
             </button>
-            <div className="lg:ml-0 ml-12">
-              <h2 className="text-xl font-semibold text-slate-800 tracking-tight">
-                {navItems.find((item) => item.path === location.pathname)?.label || 'Dashboard'}
+            <div className="lg:ml-0 ml-12 min-w-0">
+              <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Workspace</p>
+              <h2 className="text-xl font-semibold text-slate-800 tracking-tight truncate">
+                {currentSection}
               </h2>
             </div>
+
+            <div className="hidden lg:flex items-center gap-3">
+              <label className="sr-only" htmlFor="quick-jump">Quick jump</label>
+              <div className="relative">
+                <select
+                  id="quick-jump"
+                  className="input py-2 pl-3 pr-10 text-sm min-w-[190px]"
+                  value={selectedPath}
+                  onChange={(e) => navigate(e.target.value)}
+                >
+                  {navItems.map((item) => (
+                    <option key={item.path} value={item.path}>{item.label}</option>
+                  ))}
+                </select>
+                <ArrowUpRight size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+
+              <div className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm text-slate-600 flex items-center gap-2 shadow-sm">
+                <CalendarDays size={15} className="text-slate-500" />
+                {todayLabel}
+              </div>
+            </div>
+
             <div className="lg:hidden w-10"></div>
           </div>
         </header>

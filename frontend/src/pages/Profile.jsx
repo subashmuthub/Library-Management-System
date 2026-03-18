@@ -17,6 +17,7 @@ const Profile = () => {
   const [stats, setStats] = useState({ borrowed: 0, visits: 0 });
   const displayName = user?.name || [user?.first_name || user?.firstName, user?.last_name || user?.lastName].filter(Boolean).join(' ');
   const displayRole = user?.role?.role_name || user?.role;
+  const [borrowedBooks, setBorrowedBooks] = useState([]);
 
   // Load user stats on mount
   useEffect(() => {
@@ -28,8 +29,11 @@ const Profile = () => {
             entryService.getMyHistory(user.id),
           ]);
 
+          const activeBorrowed = transactionsRes.transactions || [];
+          setBorrowedBooks(activeBorrowed);
+
           setStats({
-            borrowed: transactionsRes.transactions?.length || 0,
+            borrowed: activeBorrowed.length || 0,
             visits: entriesRes.total || entriesRes.entries?.length || 0,
           });
         }
@@ -222,6 +226,14 @@ const Profile = () => {
             </div>
 
             <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+              <CreditCard className="text-gray-600 flex-shrink-0 mt-1" size={20} />
+              <div>
+                <p className="text-sm text-gray-600">Registration Number</p>
+                <p className="font-medium">{user?.student_id || 'N/A'}</p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
               <Shield className="text-gray-600 flex-shrink-0 mt-1" size={20} />
               <div>
                 <p className="text-sm text-gray-600">Role</p>
@@ -245,6 +257,24 @@ const Profile = () => {
             <p className="text-sm text-gray-600 mt-1">Library Visits</p>
           </div>
         </div>
+      </div>
+
+      <div className="card">
+        <h2 className="text-xl font-bold mb-4">Books Currently Taken</h2>
+        {borrowedBooks.length > 0 ? (
+          <div className="space-y-3">
+            {borrowedBooks.map((item) => (
+              <div key={item.id} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                <p className="font-semibold">{item.title || `Book #${item.book_id}`}</p>
+                <p className="text-sm text-gray-600">ISBN: {item.isbn || 'N/A'}</p>
+                <p className="text-sm text-gray-600">Due Date: {item.due_date || 'N/A'}</p>
+                <p className="text-xs mt-1 text-orange-600">Status: {item.status || 'active'}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-gray-500">No active borrowed books.</p>
+        )}
       </div>
     </div>
   );

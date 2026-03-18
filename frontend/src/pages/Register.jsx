@@ -12,8 +12,12 @@ const Register = () => {
     student_id: '',
   });
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [pendingEmail, setPendingEmail] = useState('');
+  const [otp, setOtp] = useState('');
+  const [otpStep, setOtpStep] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { register } = useAuth();
+  const { register, verifyEmailOtp, resendEmailOtp } = useAuth();
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -26,6 +30,7 @@ const Register = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setMessage('');
 
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
@@ -48,7 +53,58 @@ const Register = () => {
     });
 
     if (result.success) {
+      if (result.requiresVerification) {
+        setPendingEmail(result.email || formData.email);
+        setOtpStep(true);
+        setMessage('OTP sent to your email. Verify to continue to dashboard.');
+      } else {
+        navigate('/dashboard');
+      }
+    } else {
+      if (
+        (result.code === 'EMAIL_NOT_VERIFIED' || result.code === 'OTP_SEND_FAILED') &&
+        (result.email || formData.email)
+      ) {
+        setPendingEmail(result.email || formData.email);
+        setOtpStep(true);
+        setMessage(
+          result.code === 'OTP_SEND_FAILED'
+            ? 'Account created. OTP email could not be sent now. Use Resend OTP after email setup is fixed.'
+            : 'This email is pending verification. Enter OTP or resend OTP to continue.'
+        );
+      }
+      setError(result.error);
+    }
+    setLoading(false);
+  };
+
+  const handleVerifyOtp = async (e) => {
+    e.preventDefault();
+    setError('');
+    setMessage('');
+
+    if (!/^\d{6}$/.test(otp)) {
+      setError('Enter a valid 6-digit OTP');
+      return;
+    }
+
+    setLoading(true);
+    const result = await verifyEmailOtp(pendingEmail, otp);
+    if (result.success) {
       navigate('/dashboard');
+    } else {
+      setError(result.error);
+    }
+    setLoading(false);
+  };
+
+  const handleResendOtp = async () => {
+    setError('');
+    setMessage('');
+    setLoading(true);
+    const result = await resendEmailOtp(pendingEmail);
+    if (result.success) {
+      setMessage('A new OTP has been sent to your email.');
     } else {
       setError(result.error);
     }
@@ -67,7 +123,7 @@ const Register = () => {
         </div>
 
         <div className="card">
-          <h2 className="text-2xl font-bold mb-6 text-center">Register</h2>
+          <h2 className="text-2xl font-bold mb-6 text-center">{otpStep ? 'Verify Email OTP' : 'Register'}</h2>
 
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
@@ -76,6 +132,13 @@ const Register = () => {
             </div>
           )}
 
+          {message && (
+            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+              <p className="text-sm text-green-700">{message}</p>
+            </div>
+          )}
+
+          {!otpStep ? (
           <form onSubmit={handleSubmit}>
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -160,6 +223,45 @@ const Register = () => {
               {loading ? 'Creating Account...' : 'Register'}
             </button>
           </form>
+          ) : (
+          <form onSubmit={handleVerifyOtp}>
+            <div className="mb-3 p-3 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-700">
+              OTP sent to <strong>{pendingEmail}</strong>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Enter 6-digit OTP
+              </label>
+              <input
+                type="text"
+                maxLength={6}
+                className="input tracking-[0.35em] text-center text-lg font-semibold"
+                placeholder="000000"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="w-full btn btn-primary"
+              disabled={loading}
+            >
+              {loading ? 'Verifying...' : 'Verify OTP & Continue'}
+            </button>
+
+            <button
+              type="button"
+              className="w-full btn btn-secondary mt-3"
+              disabled={loading}
+              onClick={handleResendOtp}
+            >
+              Resend OTP
+            </button>
+          </form>
+          )}
 
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600">

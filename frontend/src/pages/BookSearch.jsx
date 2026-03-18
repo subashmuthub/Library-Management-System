@@ -227,7 +227,7 @@ const BookSearch = () => {
 
   // Open checkout modal
   const openCheckout = (book) => {
-    setCheckoutForm({ user_id: '', loan_days: 14 });
+    setCheckoutForm({ user_id: currentUser?.id ? String(currentUser.id) : '', loan_days: 14 });
     setCheckoutModal(book);
   };
 
@@ -841,11 +841,14 @@ const BookSearch = () => {
                   type="text"
                   value={checkoutForm.user_id}
                   onChange={e => setCheckoutForm(f => ({ ...f, user_id: e.target.value }))}
-                  placeholder="Enter user ID or roll number"
+                  placeholder="User ID from profile"
                   className="input w-full"
                   required
                   autoFocus
                 />
+                {currentUser?.id && (
+                  <p className="text-xs text-green-700 mt-1">Auto-filled from profile: {currentUser.id}</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Loan Period</label>

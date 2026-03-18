@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { transactionService, bookService, userManagementService } from '../services';
+import { useAuth } from '../contexts';
 import { BookOpen, User, Calendar, CheckCircle, XCircle, Clock, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 
 const Transactions = () => {
+  const { user } = useAuth();
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState('all'); // all, active, returned, overdue
+  const [filter, setFilter] = useState('all'); // all, inuse, returned, overdue
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [showRenewModal, setShowRenewModal] = useState(false);
   const [showReturnModal, setShowReturnModal] = useState(false);
@@ -29,7 +31,7 @@ const Transactions = () => {
   const loadTransactions = async () => {
     setLoading(true);
     try {
-      const params = filter !== 'all' ? { status: filter } : {};
+      const params = filter !== 'all' ? { status: filter === 'inuse' ? 'inuse' : filter } : {};
       const response = await transactionService.getAllTransactions(params);
       setTransactions(response.transactions || response.data || []);
     } catch (error) {
@@ -42,10 +44,13 @@ const Transactions = () => {
   const handleCheckout = async (e) => {
     e.preventDefault();
     try {
-      await transactionService.checkoutBook(checkoutForm);
+      await transactionService.checkoutBook({
+        ...checkoutForm,
+        user_id: checkoutForm.user_id || user?.id
+      });
       alert('Book checked out successfully!');
       setShowCheckoutModal(false);
-      setCheckoutForm({ user_id: '', book_id: '', loan_days: 14 });
+      setCheckoutForm({ user_id: user?.id ? String(user.id) : '', book_id: '', loan_days: 14 });
       loadTransactions();
     } catch (error) {
       alert(`Checkout failed: ${error.response?.data?.error || error.message}`);
@@ -130,6 +135,22 @@ const Transactions = () => {
     </span>;
   };
 
+  const parseDateValue = (value) => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const formatDateDisplay = (value) => {
+    const parsed = parseDateValue(value);
+    return parsed ? format(parsed, 'dd MMM yyyy') : 'N/A';
+  };
+
+  const formatTimeDisplay = (value) => {
+    const parsed = parseDateValue(value);
+    return parsed ? format(parsed, 'hh:mm a') : '--';
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -139,7 +160,10 @@ const Transactions = () => {
           <p className="text-gray-600">Manage book checkouts and returns</p>
         </div>
         <button
-          onClick={() => setShowCheckoutModal(true)}
+          onClick={() => {
+            setCheckoutForm((prev) => ({ ...prev, user_id: prev.user_id || (user?.id ? String(user.id) : '') }));
+            setShowCheckoutModal(true);
+          }}
           className="btn btn-primary"
         >
           <BookOpen size={20} className="mr-2" />
@@ -150,10 +174,10 @@ const Transactions = () => {
       {/* Filters */}
       <div className="card">
         <div className="flex gap-2">
-          {['all', 'active', 'returned', 'overdue'].map(f => {
+          {['all', 'inuse', 'returned', 'overdue'].map(f => {
             const filterLabels = {
               all: 'All',
-              active: 'In Use',
+              inuse: 'In Use',
               returned: 'Returned',
               overdue: 'Overdue'
             };
@@ -202,8 +226,18 @@ const Transactions = () => {
                     <td className="px-4 py-3 text-sm">#{transaction.id}</td>
                     <td className="px-4 py-3 text-sm">{transaction.user_name || `User #${transaction.user_id}`}</td>
                     <td className="px-4 py-3 text-sm">{transaction.title || `Book #${transaction.book_id}`}</td>
-                    <td className="px-4 py-3 text-sm">{transaction.checkout_date}</td>
-                    <td className="px-4 py-3 text-sm">{transaction.due_date}</td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="leading-tight">
+                        <p className="font-medium text-slate-800">{formatDateDisplay(transaction.checkout_date)}</p>
+                        <p className="text-xs text-slate-500">{formatTimeDisplay(transaction.checkout_date)}</p>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="leading-tight">
+                        <p className="font-medium text-slate-800">{formatDateDisplay(transaction.due_date)}</p>
+                        <p className="text-xs text-slate-500">{formatTimeDisplay(transaction.due_date)}</p>
+                      </div>
+                    </td>
                     <td className="px-4 py-3">{getStatusBadge(transaction.status)}</td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex gap-2">
@@ -325,7 +359,8 @@ const Transactions = () => {
                   <Calendar size={18} className="mr-2 mt-0.5 text-gray-600" />
                   <div>
                     <p className="text-sm text-gray-600">Current Due Date</p>
-                    <p className="font-semibold">{selectedTransaction.due_date}</p>
+                    <p className="font-semibold">{formatDateDisplay(selectedTransaction.due_date)}</p>
+                    <p className="text-xs text-gray-500">{formatTimeDisplay(selectedTransaction.due_date)}</p>
                   </div>
                 </div>
               </div>
@@ -416,14 +451,16 @@ const Transactions = () => {
                   <Calendar size={18} className="mr-2 mt-0.5 text-gray-600" />
                   <div>
                     <p className="text-sm text-gray-600">Checkout Date</p>
-                    <p className="font-semibold">{selectedTransaction.checkout_date}</p>
+                    <p className="font-semibold">{formatDateDisplay(selectedTransaction.checkout_date)}</p>
+                    <p className="text-xs text-gray-500">{formatTimeDisplay(selectedTransaction.checkout_date)}</p>
                   </div>
                 </div>
                 <div className="flex items-start">
                   <Calendar size={18} className="mr-2 mt-0.5 text-gray-600" />
                   <div>
                     <p className="text-sm text-gray-600">Due Date</p>
-                    <p className="font-semibold">{selectedTransaction.due_date}</p>
+                    <p className="font-semibold">{formatDateDisplay(selectedTransaction.due_date)}</p>
+                    <p className="text-xs text-gray-500">{formatTimeDisplay(selectedTransaction.due_date)}</p>
                   </div>
                 </div>
               </div>

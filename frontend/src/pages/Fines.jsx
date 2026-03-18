@@ -6,7 +6,7 @@ import PaymentModal from '../components/PaymentModal';
 const Fines = () => {
   const [fines, setFines] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState('pending'); // pending, paid, waived, all
+  const [filter, setFilter] = useState('pending'); // pending, paid, all
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedFine, setSelectedFine] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
@@ -77,16 +77,27 @@ const Fines = () => {
   };
 
   const handleWaiveFine = async (fineId) => {
-    const reason = prompt('Enter reason for waiving this fine:');
-    if (reason) {
-      try {
-        await fineService.waiveFine(fineId, reason);
-        alert('Fine waived successfully!');
-        loadFines();
-        loadStats();
-      } catch (error) {
-        alert(`Waiver failed: ${error.response?.data?.error || error.message}`);
-      }
+    const reason = prompt('Enter waiver reason (required):');
+    if (!reason) return;
+
+    const discountPercentInput = prompt('Optional discount percent (0-100). Leave blank for full waive:');
+    const discountPercent = discountPercentInput ? Number(discountPercentInput) : null;
+
+    const isApproved = window.confirm('Approve this waive/discount request now?');
+    if (!isApproved) return;
+
+    try {
+      await fineService.waiveFine(fineId, {
+        reason,
+        approved: true,
+        discount_percent: Number.isFinite(discountPercent) ? discountPercent : null
+      });
+      alert('Waive/discount accepted successfully!');
+      loadFines();
+      loadStats();
+      loadPaymentHistory();
+    } catch (error) {
+      alert(`Waiver failed: ${error.response?.data?.error || error.message}`);
     }
   };
 
@@ -193,7 +204,7 @@ const Fines = () => {
           <>
             {/* Filters */}
             <div className="flex gap-2 flex-wrap p-4 bg-gray-50 border-b">
-              {['pending', 'paid', 'waived', 'all'].map(f => (
+              {['pending', 'paid', 'all'].map(f => (
                 <button
                   key={f}
                   onClick={() => setFilter(f)}

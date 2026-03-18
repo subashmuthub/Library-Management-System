@@ -44,8 +44,9 @@ const validationRules = {
     body("name").notEmpty().withMessage("Name required"),
     body("student_id").notEmpty().withMessage("Student ID required"),
     body("role")
-      .isIn(["student", "librarian", "admin"])
-      .withMessage("Invalid role"),
+      .optional()
+      .isIn(["student"])
+      .withMessage("Self registration allows student role only"),
   ],
 
   // User login
@@ -57,6 +58,20 @@ const validationRules = {
   // Google login
   googleLogin: [
     body("token").isString().notEmpty().withMessage("Google token required"),
+  ],
+
+  // Verify OTP
+  verifyOtp: [
+    body("email").isEmail().withMessage("Valid email required"),
+    body("otp")
+      .isString()
+      .matches(/^\d{6}$/)
+      .withMessage("OTP must be a 6-digit code"),
+  ],
+
+  // Resend OTP
+  resendOtp: [
+    body("email").isEmail().withMessage("Valid email required"),
   ],
 
   // Entry log

@@ -21,6 +21,9 @@ router.get('/categories', BookController.getCategories);
 // Get specific book by ID
 router.get('/:id', BookController.getBookById);
 
+// Get all copies sharing the same ISBN as a given book
+router.get('/:id/isbn-copies', BookController.getIsbnCopies);
+
 // Add new book (no auth required for now)
 router.post('/', BookController.addBook);
 

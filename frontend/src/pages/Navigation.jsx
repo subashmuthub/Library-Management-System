@@ -57,6 +57,18 @@ const Navigation = () => {
               </div>
             </div>
 
+            <div className="bg-white border border-gray-200 p-4 rounded-lg mb-6">
+              <h4 className="font-semibold text-gray-800 mb-2">Beacon Visual Examples</h4>
+              <p className="text-sm text-gray-600 mb-2">
+                Yes, beacon hardware can be added. These references show how BLE beacons look in real deployments.
+              </p>
+              <div className="text-sm space-y-1">
+                <a href="https://estimote.com/product/" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline block">Estimote Beacon Hardware</a>
+                <a href="https://kontakt.io/beacons/" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline block">Kontakt.io Beacon Devices</a>
+                <a href="https://www.minew.com/product/ibeacon/" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline block">Minew iBeacon Product Gallery</a>
+              </div>
+            </div>
+
             {/* Search */}
             <div>
               <h2 className="text-xl font-bold mb-4">Search for a Book</h2>

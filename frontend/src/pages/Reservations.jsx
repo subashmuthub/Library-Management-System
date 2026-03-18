@@ -19,12 +19,18 @@ const Reservations = () => {
   // Reserve modal state
   const [showReserveModal, setShowReserveModal] = useState(false);
   const [reserveStep, setReserveStep] = useState('form'); // form | checking | available | confirm | success
-  const [reserveForm, setReserveForm] = useState({ user_id: '', book_id: '' });
+  const [reserveForm, setReserveForm] = useState({ user_id: user?.id ? String(user.id) : '', book_id: '' });
   const [bookInfo, setBookInfo] = useState(null);
   const [reserveLoading, setReserveLoading] = useState(false);
   const [reserveResult, setReserveResult] = useState(null);
 
   useEffect(() => { loadReservations(); }, [filter]);
+
+  useEffect(() => {
+    if (user?.id) {
+      setReserveForm((prev) => ({ ...prev, user_id: String(user.id) }));
+    }
+  }, [user]);
 
   const loadReservations = async () => {
     setLoading(true);
@@ -83,7 +89,7 @@ const Reservations = () => {
   const closeReserveModal = () => {
     setShowReserveModal(false);
     setReserveStep('form');
-    setReserveForm({ user_id: '', book_id: '' });
+    setReserveForm({ user_id: user?.id ? String(user.id) : '', book_id: '' });
     setBookInfo(null);
     setReserveResult(null);
   };
@@ -216,6 +222,7 @@ const Reservations = () => {
                     <td className="px-4 py-3">
                       <p className="font-semibold text-gray-900 max-w-[180px] truncate">{r.title || `Book #${r.book_id}`}</p>
                       {r.author && <p className="text-xs text-gray-500">by {r.author}</p>}
+                      {r.isbn && <p className="text-xs text-indigo-600">ISBN: {r.isbn}</p>}
                     </td>
 
                     <td className="px-4 py-3">
@@ -300,7 +307,8 @@ const Reservations = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">User ID <span className="text-red-500">*</span></label>
                     <input type="number" required className="input w-full" value={reserveForm.user_id}
                       onChange={e => setReserveForm({ ...reserveForm, user_id: e.target.value })}
-                      placeholder="Enter student / user ID" autoFocus />
+                      placeholder="Auto-filled from profile" autoFocus />
+                    {user?.id && <p className="text-xs text-green-700 mt-1">Using profile user ID: {user.id}</p>}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Book ID <span className="text-red-500">*</span></label>

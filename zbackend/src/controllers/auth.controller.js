@@ -8,8 +8,10 @@ const bcrypt = require("bcryptjs");
 const crypto = require("node:crypto");
 const { OAuth2Client } = require("google-auth-library");
 const { query } = require("../config/database");
+const EmailService = require("../services/email.service");
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+let authSchemaReady = false;
 
 const getGoogleRedirectUri = (req) => {
   if (process.env.GOOGLE_REDIRECT_URI) {
@@ -18,17 +20,66 @@ const getGoogleRedirectUri = (req) => {
   return `${req.protocol}://localhost:${process.env.PORT || 3000}/api/v1/auth/google/callback`;
 };
 
-/**
- * Convert role name to role ID
- * Maps frontend role strings to database role IDs
- */
-const getRoleId = (roleName) => {
-  const roleMap = {
-    admin: 1,
-    librarian: 2,
-    student: 3,
-  };
-  return roleMap[roleName] || 3; // Default to student
+const OTP_EXPIRY_MINUTES = 10;
+
+const hashOtp = (otp) =>
+  crypto.createHash("sha256").update(String(otp)).digest("hex");
+
+const createOtpCode = () => String(Math.floor(100000 + Math.random() * 900000));
+
+const ensureAuthVerificationSchema = async () => {
+  if (authSchemaReady) return;
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS email_verification_otps (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      otp_hash VARCHAR(255) NOT NULL,
+      expires_at DATETIME NOT NULL,
+      is_used BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_otp_email (email),
+      INDEX idx_otp_user (user_id),
+      INDEX idx_otp_expires (expires_at)
+    ) ENGINE=InnoDB;
+  `);
+
+  const emailVerifiedColumn = await query(
+    `SELECT COUNT(*) as total FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'email_verified'`,
+  );
+
+  if (!emailVerifiedColumn[0]?.total) {
+    await query(`ALTER TABLE users ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT FALSE`);
+  }
+
+  const emailVerifiedAtColumn = await query(
+    `SELECT COUNT(*) as total FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'email_verified_at'`,
+  );
+
+  if (!emailVerifiedAtColumn[0]?.total) {
+    await query(`ALTER TABLE users ADD COLUMN email_verified_at TIMESTAMP NULL`);
+  }
+
+  authSchemaReady = true;
+};
+
+const sendEmailVerificationOtp = async ({ userId, email, firstName }) => {
+  const otpCode = createOtpCode();
+  const otpHash = hashOtp(otpCode);
+
+  await query(
+    `INSERT INTO email_verification_otps (user_id, email, otp_hash, expires_at)
+     VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
+    [userId, email, otpHash, OTP_EXPIRY_MINUTES],
+  );
+
+  const emailResult = await EmailService.sendOtpEmail(email, firstName, otpCode);
+  if (!emailResult.success) {
+    throw new Error("Unable to send OTP email. Please try again later.");
+  }
 };
 
 /**
@@ -48,20 +99,44 @@ const getRoleName = (roleId) => {
  * Register a new user
  */
 const register = async (req, res, next) => {
+  let createdUserId = null;
   try {
     console.log("🔷 Registration attempt:", req.body);
+    await ensureAuthVerificationSchema();
 
-    const { email, password, name, role, student_id, phone } = req.body;
+    const { email, password, name, student_id, phone } = req.body;
 
     // Check if user already exists
-    const existingUser = await query("SELECT id FROM users WHERE email = ?", [
-      email,
-    ]);
+    const existingUser = await query(
+      `SELECT id, role_id, status, COALESCE(email_verified, 0) AS email_verified
+       FROM users
+       WHERE email = ?`,
+      [email],
+    );
 
     if (existingUser.length > 0) {
-      return res.status(400).json({
+      if (Number(existingUser[0].role_id) !== 3) {
+        return res.status(403).json({
+          error: "Registration Error",
+          message:
+            "This email belongs to a staff account. Please continue using login or Google sign-in.",
+        });
+      }
+
+      if (!Number(existingUser[0].email_verified)) {
+        return res.status(409).json({
+          error: "Verification Error",
+          message:
+            "This email is already registered but not verified. Please verify OTP or resend OTP.",
+          code: "EMAIL_NOT_VERIFIED",
+          email,
+        });
+      }
+
+      return res.status(409).json({
         error: "Registration Error",
-        message: "Email already registered",
+        message:
+          "Email already exists. Please login with password or Continue with Google. Your account role will be kept unchanged.",
       });
     }
 
@@ -73,50 +148,51 @@ const register = async (req, res, next) => {
     const firstName = nameParts[0];
     const lastName = nameParts.slice(1).join(" ") || nameParts[0];
 
-    // Convert role string to role ID
-    const roleId = getRoleId(role);
-    console.log("🔷 Role conversion:", { role, roleId });
-
-    // Insert new user
     const result = await query(
-      `INSERT INTO users (email, password, first_name, last_name, role_id, student_id, phone)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [email, passwordHash, firstName, lastName, roleId, student_id, phone],
+      `INSERT INTO users (email, password, first_name, last_name, role_id, student_id, phone, status, email_verified)
+       VALUES (?, ?, ?, ?, 3, ?, ?, 'active', 0)`,
+      [email, passwordHash, firstName, lastName, student_id, phone || null],
     );
+    createdUserId = result.insertId;
+    console.log("🔷 User created with ID:", createdUserId);
 
-    console.log("🔷 User created with ID:", result.insertId);
+    await sendEmailVerificationOtp({ userId: createdUserId, email, firstName });
 
-    // Create server-side session.
-    // regenerate() creates a fresh session ID to prevent session fixation.
-    req.session.regenerate((sessionErr) => {
-      if (sessionErr) return next(sessionErr);
-
-      req.session.user = {
-        id: result.insertId,
-        email,
-        role: role || "student",
-        role_id: roleId,
-      };
-
-      req.session.save((saveErr) => {
-        if (saveErr) return next(saveErr);
-
-        res.status(201).json({
-          message: "User registered successfully",
-          user: {
-            id: result.insertId,
-            name: name,
-            first_name: firstName,
-            last_name: lastName,
-            email,
-            role: role || "student",
-            student_id,
-          },
-        });
-      });
+    res.status(201).json({
+      message: "Registration successful. OTP sent to email.",
+      requires_verification: true,
+      email,
+      role: "student",
     });
   } catch (error) {
     console.error("🔴 Registration error:", error);
+
+    if (
+      createdUserId &&
+      String(error?.message || "").includes("Unable to send OTP email")
+    ) {
+      return res.status(503).json({
+        error: "Registration Error",
+        message:
+          "Account created, but OTP email could not be sent. Please use Resend OTP after checking email configuration.",
+        code: "OTP_SEND_FAILED",
+        email: req.body?.email,
+        requires_verification: true,
+      });
+    }
+
+    if (error?.code === "ER_DUP_ENTRY") {
+      const duplicateMessage = String(error?.sqlMessage || "");
+      const message = duplicateMessage.includes("student_id")
+        ? "Student ID already exists. Please use a different Student ID."
+        : "Email already registered. Please login or use Continue with Google.";
+
+      return res.status(400).json({
+        error: "Registration Error",
+        message,
+      });
+    }
+
     next(error);
   }
 };
@@ -127,6 +203,7 @@ const register = async (req, res, next) => {
 const login = async (req, res, next) => {
   try {
     console.log("🔷 Login attempt started:", req.body);
+    await ensureAuthVerificationSchema();
 
     const { email, password } = req.body;
 
@@ -149,7 +226,8 @@ const login = async (req, res, next) => {
             END
           ) AS role_name,
           u.student_id,
-          u.status
+           u.status,
+           COALESCE(u.email_verified, 0) AS email_verified
        FROM users u
        LEFT JOIN user_roles r ON u.role_id = r.id
        WHERE u.email = ?`,
@@ -215,6 +293,7 @@ const login = async (req, res, next) => {
         email: user.email,
         role: user.role_name,
         role_id: user.role_id,
+        email_verified: Number(user.email_verified) === 1,
       };
 
       req.session.save((saveErr) => {
@@ -231,6 +310,7 @@ const login = async (req, res, next) => {
             email: user.email,
             role: user.role_name,
             student_id: user.student_id,
+            email_verified: Number(user.email_verified) === 1,
           },
         });
       });
@@ -246,6 +326,7 @@ const login = async (req, res, next) => {
  */
 const googleLogin = async (req, res, next) => {
   try {
+    await ensureAuthVerificationSchema();
     const { token } = req.body;
 
     if (!process.env.GOOGLE_CLIENT_ID) {
@@ -290,7 +371,8 @@ const googleLogin = async (req, res, next) => {
             END
           ) AS role_name,
           u.student_id,
-          u.status
+           u.status,
+           COALESCE(u.email_verified, 0) AS email_verified
        FROM users u
        LEFT JOIN user_roles r ON u.role_id = r.id
        WHERE u.email = ?`,
@@ -304,8 +386,8 @@ const googleLogin = async (req, res, next) => {
       const passwordHash = await bcrypt.hash(randomPassword, 10);
 
       const insertResult = await query(
-        `INSERT INTO users (email, password, first_name, last_name, role_id, status)
-         VALUES (?, ?, ?, ?, ?, 'active')`,
+        `INSERT INTO users (email, password, first_name, last_name, role_id, status, email_verified, email_verified_at)
+         VALUES (?, ?, ?, ?, ?, 'active', 1, CURRENT_TIMESTAMP)`,
         [email, passwordHash, givenName, familyName, 3],
       );
 
@@ -326,7 +408,8 @@ const googleLogin = async (req, res, next) => {
               END
             ) AS role_name,
             u.student_id,
-            u.status
+             u.status,
+             COALESCE(u.email_verified, 0) AS email_verified
          FROM users u
          LEFT JOIN user_roles r ON u.role_id = r.id
          WHERE u.id = ?`,
@@ -334,6 +417,12 @@ const googleLogin = async (req, res, next) => {
       );
 
       user = createdUsers[0];
+    } else if (!Number(user.email_verified)) {
+      await query(
+        `UPDATE users SET email_verified = 1, email_verified_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [user.id],
+      );
+      user.email_verified = 1;
     }
 
     if (user.status !== "active") {
@@ -351,6 +440,7 @@ const googleLogin = async (req, res, next) => {
         email: user.email,
         role: user.role_name,
         role_id: user.role_id,
+        email_verified: true,
       };
 
       req.session.save((saveErr) => {
@@ -366,6 +456,7 @@ const googleLogin = async (req, res, next) => {
             email: user.email,
             role: user.role_name,
             student_id: user.student_id,
+            email_verified: true,
           },
         });
       });
@@ -403,6 +494,9 @@ const logout = async (req, res, next) => {
  */
 const me = (req, res) => {
   if (req.session?.user) {
+    if (req.session.user.email_verified === false) {
+      return res.status(401).json({ error: "Email not verified" });
+    }
     return res.json({ user: req.session.user });
   }
   return res.status(401).json({ error: "No active session" });
@@ -482,6 +576,7 @@ const googleOAuthCallback = async (req, res, next) => {
   }
 
   try {
+    await ensureAuthVerificationSchema();
     const redirectUri = getGoogleRedirectUri(req);
     const client = new OAuth2Client(
       process.env.GOOGLE_CLIENT_ID,
@@ -512,7 +607,7 @@ const googleOAuthCallback = async (req, res, next) => {
     const users = await query(
       `SELECT u.id, u.email, u.first_name, u.last_name, u.role_id,
               COALESCE(r.role_name, CASE u.role_id WHEN 1 THEN 'admin' WHEN 2 THEN 'librarian' ELSE 'student' END) AS role_name,
-              u.student_id, u.status
+              u.student_id, u.status, COALESCE(u.email_verified, 0) AS email_verified
        FROM users u LEFT JOIN user_roles r ON u.role_id = r.id
        WHERE u.email = ?`,
       [email],
@@ -524,16 +619,22 @@ const googleOAuthCallback = async (req, res, next) => {
       const randomPassword = crypto.randomBytes(32).toString("hex");
       const passwordHash = await bcrypt.hash(randomPassword, 10);
       const insertResult = await query(
-        `INSERT INTO users (email, password, first_name, last_name, role_id, status) VALUES (?, ?, ?, ?, ?, 'active')`,
+        `INSERT INTO users (email, password, first_name, last_name, role_id, status, email_verified, email_verified_at) VALUES (?, ?, ?, ?, ?, 'active', 1, CURRENT_TIMESTAMP)`,
         [email, passwordHash, givenName, familyName, 3],
       );
       const created = await query(
         `SELECT u.id, u.email, u.first_name, u.last_name, u.role_id,
-                COALESCE(r.role_name, 'student') AS role_name, u.student_id, u.status
+                COALESCE(r.role_name, 'student') AS role_name, u.student_id, u.status,
+                COALESCE(u.email_verified, 0) AS email_verified
          FROM users u LEFT JOIN user_roles r ON u.role_id = r.id WHERE u.id = ?`,
         [insertResult.insertId],
       );
       user = created[0];
+    } else {
+      await query(
+        `UPDATE users SET email_verified = 1, email_verified_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [user.id],
+      );
     }
 
     if (user.status !== "active") {
@@ -549,6 +650,7 @@ const googleOAuthCallback = async (req, res, next) => {
           email: user.email,
           role: user.role_name,
           role_id: user.role_id,
+          email_verified: true,
         };
         req.session.save((saveErr) => (saveErr ? reject(saveErr) : resolve()));
       });
@@ -564,10 +666,188 @@ const googleOAuthCallback = async (req, res, next) => {
   }
 };
 
+const verifyOtp = async (req, res, next) => {
+  try {
+    await ensureAuthVerificationSchema();
+    const { email, otp } = req.body;
+
+    const users = await query(
+      `SELECT u.id, u.email, u.first_name, u.last_name, u.role_id, u.student_id,
+              COALESCE(r.role_name, CASE u.role_id WHEN 1 THEN 'admin' WHEN 2 THEN 'librarian' ELSE 'student' END) AS role_name,
+              COALESCE(u.email_verified, 0) AS email_verified
+       FROM users u
+       LEFT JOIN user_roles r ON u.role_id = r.id
+       WHERE u.email = ?`,
+      [email],
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({
+        error: "Verification Error",
+        message: "User not found for this email",
+      });
+    }
+
+    const user = users[0];
+
+    if (Number(user.email_verified) === 1) {
+      return res.json({
+        message: "Email already verified",
+        user: {
+          id: user.id,
+          name: `${user.first_name} ${user.last_name}`,
+          first_name: user.first_name,
+          last_name: user.last_name,
+          email: user.email,
+          role: user.role_name,
+          student_id: user.student_id,
+          email_verified: true,
+        },
+      });
+    }
+
+    const otpRows = await query(
+      `SELECT id, otp_hash, expires_at
+       FROM email_verification_otps
+       WHERE email = ? AND is_used = 0
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [email],
+    );
+
+    if (otpRows.length === 0) {
+      return res.status(400).json({
+        error: "Verification Error",
+        message: "OTP expired or not found. Please request a new OTP.",
+      });
+    }
+
+    const latestOtp = otpRows[0];
+    const expiresAt = new Date(latestOtp.expires_at);
+    if (Date.now() > expiresAt.getTime()) {
+      return res.status(400).json({
+        error: "Verification Error",
+        message: "OTP expired. Please request a new OTP.",
+      });
+    }
+
+    if (latestOtp.otp_hash !== hashOtp(otp)) {
+      return res.status(400).json({
+        error: "Verification Error",
+        message: "Invalid OTP. Please try again.",
+      });
+    }
+
+    await query(`UPDATE email_verification_otps SET is_used = 1 WHERE id = ?`, [
+      latestOtp.id,
+    ]);
+
+    await query(
+      `UPDATE users
+       SET email_verified = 1, email_verified_at = CURRENT_TIMESTAMP, status = 'active'
+       WHERE id = ?`,
+      [user.id],
+    );
+
+    req.session.regenerate((sessionErr) => {
+      if (sessionErr) return next(sessionErr);
+
+      req.session.user = {
+        id: user.id,
+        email: user.email,
+        role: user.role_name,
+        role_id: user.role_id,
+        email_verified: true,
+      };
+
+      req.session.save((saveErr) => {
+        if (saveErr) return next(saveErr);
+
+        res.json({
+          message: "Email verified successfully",
+          user: {
+            id: user.id,
+            name: `${user.first_name} ${user.last_name}`,
+            first_name: user.first_name,
+            last_name: user.last_name,
+            email: user.email,
+            role: user.role_name,
+            student_id: user.student_id,
+            email_verified: true,
+          },
+        });
+      });
+    });
+  } catch (error) {
+    console.error("🔴 OTP verification error:", error);
+    next(error);
+  }
+};
+
+const resendOtp = async (req, res, next) => {
+  try {
+    await ensureAuthVerificationSchema();
+    const { email } = req.body;
+
+    const users = await query(
+      `SELECT id, email, first_name, COALESCE(email_verified, 0) AS email_verified
+       FROM users
+       WHERE email = ?`,
+      [email],
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({
+        error: "Verification Error",
+        message: "User not found for this email",
+      });
+    }
+
+    const user = users[0];
+    if (Number(user.email_verified) === 1) {
+      return res.status(400).json({
+        error: "Verification Error",
+        message: "Email is already verified",
+      });
+    }
+
+    const recentOtp = await query(
+      `SELECT id
+       FROM email_verification_otps
+       WHERE email = ? AND is_used = 0 AND created_at >= DATE_SUB(NOW(), INTERVAL 60 SECOND)
+       LIMIT 1`,
+      [email],
+    );
+
+    if (recentOtp.length > 0) {
+      return res.status(429).json({
+        error: "Verification Error",
+        message: "Please wait 60 seconds before requesting another OTP.",
+      });
+    }
+
+    await sendEmailVerificationOtp({
+      userId: user.id,
+      email: user.email,
+      firstName: user.first_name,
+    });
+
+    res.json({
+      message: "OTP resent successfully",
+      email,
+    });
+  } catch (error) {
+    console.error("🔴 Resend OTP error:", error);
+    next(error);
+  }
+};
+
 module.exports = {
   register,
   login,
   googleLogin,
+  verifyOtp,
+  resendOtp,
   googleOAuthStart,
   googleOAuthCallback,
   logout,

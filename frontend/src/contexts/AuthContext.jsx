@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import PropTypes from "prop-types";
 import { authService } from "../services";
 import { AuthContext } from "./authContextStore";
@@ -6,8 +6,14 @@ import { AuthContext } from "./authContextStore";
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const hasInitializedRef = useRef(false);
 
   useEffect(() => {
+    if (hasInitializedRef.current) {
+      return;
+    }
+    hasInitializedRef.current = true;
+
     // On mount, ping the server to see if the session cookie is still valid.
     // If the server confirms it, use the session user (source of truth).
     // If not, clear any stale localStorage data and stay logged out.
@@ -46,6 +52,8 @@ export const AuthProvider = ({ children }) => {
       return {
         success: false,
         error: error.response?.data?.message || "Login failed",
+        code: error.response?.data?.code,
+        email: error.response?.data?.email,
       };
     }
   };
@@ -70,16 +78,54 @@ export const AuthProvider = ({ children }) => {
   const register = async (userData) => {
     try {
       const response = await authService.register(userData);
-      const { user: newUser } = response;
+      if (response.user) {
+        const { user: newUser } = response;
+        setUser(newUser);
+        localStorage.setItem("user", JSON.stringify(newUser));
+      }
 
-      setUser(newUser);
-      localStorage.setItem("user", JSON.stringify(newUser));
+      return {
+        success: true,
+        requiresVerification: !!response.requires_verification,
+        email: response.email,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.message || "Registration failed",
+        code: error.response?.data?.code,
+        email: error.response?.data?.email,
+      };
+    }
+  };
+
+  const verifyEmailOtp = async (email, otp) => {
+    try {
+      const response = await authService.verifyOtp(email, otp);
+      const { user: verifiedUser } = response;
+
+      if (verifiedUser) {
+        setUser(verifiedUser);
+        localStorage.setItem("user", JSON.stringify(verifiedUser));
+      }
 
       return { success: true };
     } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.message || "Registration failed",
+        error: error.response?.data?.message || "OTP verification failed",
+      };
+    }
+  };
+
+  const resendEmailOtp = async (email) => {
+    try {
+      await authService.resendOtp(email);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.message || "Unable to resend OTP",
       };
     }
   };
@@ -108,6 +154,8 @@ export const AuthProvider = ({ children }) => {
       login,
       googleLogin,
       register,
+      verifyEmailOtp,
+      resendEmailOtp,
       logout,
       updateUser,
       isAuthenticated: !!user,

@@ -1,36 +1,97 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --brand-ink: #0f172a;
+    --brand-muted: #334155;
+    --brand-accent: #0f766e;
+    --brand-accent-soft: #ccfbf1;
+    --page-wash-1: #f8fafc;
+    --page-wash-2: #eef6ff;
+  }
+
+  html {
+    font-family: 'Source Sans 3', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  }
+
   body {
-    @apply bg-slate-50 text-slate-900 antialiased;
+    @apply text-slate-900 antialiased;
+    background:
+      radial-gradient(circle at 8% 10%, rgba(20, 184, 166, 0.08), transparent 28%),
+      radial-gradient(circle at 92% 6%, rgba(59, 130, 246, 0.08), transparent 24%),
+      linear-gradient(180deg, var(--page-wash-2), var(--page-wash-1));
+    min-height: 100vh;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: 'Manrope', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: var(--brand-ink);
+    letter-spacing: -0.02em;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f8fafc;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #f8fafc;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 999px;
+    border: 2px solid #f8fafc;
   }
 }
 
 @layer components {
   .btn {
-    @apply px-4 py-2 rounded-xl font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary-300;
+    @apply px-4 py-2 rounded-xl font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary-300;
+    letter-spacing: 0.01em;
   }
   
   .btn-primary {
-    @apply bg-primary-600 text-white hover:bg-primary-700 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed;
+    @apply text-white hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed;
+    background: linear-gradient(135deg, #0f766e, #0f172a);
   }
   
   .btn-secondary {
-    @apply bg-white border border-slate-200 text-slate-700 hover:bg-slate-100;
+    @apply bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 shadow-sm;
   }
   
   .btn-danger {
-    @apply bg-red-600 text-white hover:bg-red-700 hover:shadow-md;
+    @apply text-white hover:shadow-md;
+    background: linear-gradient(135deg, #dc2626, #b91c1c);
   }
   
   .input {
-    @apply w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none bg-white;
+    @apply w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none bg-white shadow-sm;
   }
   
   .card {
     @apply bg-white rounded-2xl shadow-sm border border-slate-200 p-5;
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.94));
+    transition: transform 180ms ease, box-shadow 180ms ease;
+  }
+
+  .card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
   }
   
   .badge {
@@ -51,5 +112,43 @@
   
   .badge-info {
     @apply bg-blue-100 text-blue-800;
+  }
+
+  .section-title {
+    @apply text-2xl font-bold;
+    color: var(--brand-ink);
+  }
+
+  .section-subtitle {
+    @apply text-sm;
+    color: var(--brand-muted);
+  }
+
+  .table-shell {
+    @apply overflow-x-auto rounded-xl border border-slate-200;
+  }
+
+  .table-shell table {
+    @apply w-full;
+  }
+
+  .table-shell thead {
+    @apply bg-slate-50;
+  }
+
+  .table-shell th {
+    @apply px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+
+  .table-shell td {
+    @apply px-4 py-3 text-sm text-slate-700;
+  }
+
+  .table-shell tbody tr {
+    @apply border-t border-slate-100;
+  }
+
+  .table-shell tbody tr:hover {
+    @apply bg-slate-50;
   }
 }

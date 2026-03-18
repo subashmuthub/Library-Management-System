@@ -11,7 +11,16 @@ class UserManagementController {
     // Get all users with library statistics
     static async getAllUsers(req, res) {
         try {
-            // Simplified query without complex parameters
+            const { status } = req.query;
+
+            let whereClause = '';
+            const params = [];
+
+            if (status && status !== 'all') {
+                whereClause = 'WHERE u.status = ?';
+                params.push(status);
+            }
+
             const query = `
                 SELECT 
                     u.id,
@@ -27,11 +36,11 @@ class UserManagementController {
                     r.role_name
                 FROM users u
                 LEFT JOIN user_roles r ON u.role_id = r.id
+                ${whereClause}
                 ORDER BY u.created_at DESC
-                LIMIT 20
             `;
 
-            const [users] = await pool.execute(query);
+            const [users] = await pool.execute(query, params);
 
             // Format users with full name for frontend
             const formattedUsers = users.map(u => ({
@@ -45,7 +54,7 @@ class UserManagementController {
                 pagination: {
                     total: formattedUsers.length,
                     page: 1,
-                    limit: 20,
+                    limit: formattedUsers.length,
                     totalPages: 1
                 }
             });

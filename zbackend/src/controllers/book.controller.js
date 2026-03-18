@@ -276,6 +276,27 @@ class BookController {
                 LIMIT 10
             `, [id]);
 
+            // Fetch all physical copies for the same ISBN and their current locations.
+            const [isbnCopies] = await connection.execute(`
+                SELECT
+                    b.id,
+                    b.isbn,
+                    b.title,
+                    b.is_available,
+                    cbl.shelf_code,
+                    cbl.zone,
+                    cbl.section,
+                    CASE
+                        WHEN bt.id IS NOT NULL THEN 'in_use'
+                        ELSE 'available'
+                    END as copy_status
+                FROM books b
+                LEFT JOIN current_book_locations cbl ON b.id = cbl.book_id
+                LEFT JOIN book_transactions bt ON b.id = bt.book_id AND bt.return_date IS NULL
+                WHERE b.isbn = ?
+                ORDER BY b.id ASC
+            `, [books[0].isbn]);
+
             connection.release();
 
             const book = books[0];
@@ -296,6 +317,8 @@ class BookController {
                     description: book.description,
                     cover_image_url: book.cover_image_url,
                     total_copies: book.total_copies,
+                    isbn_copy_count: isbnCopies.length,
+                    available_isbn_copies: isbnCopies.filter(copy => copy.copy_status === 'available').length,
                     is_available: book.is_available === 1,
                     rfid_tag: book.tag_id,
                     status: book.status,
@@ -310,6 +333,16 @@ class BookController {
                         lastScanned: book.last_scanned
                     } : null
                 },
+                isbnCopies: isbnCopies.map(copy => ({
+                    id: copy.id,
+                    isbn: copy.isbn,
+                    copy_status: copy.copy_status,
+                    is_available: copy.is_available === 1,
+                    location: copy.shelf_code ? `${copy.zone || ''}${copy.zone ? '-' : ''}${copy.shelf_code}` : 'Unassigned',
+                    shelf_code: copy.shelf_code,
+                    zone: copy.zone,
+                    section: copy.section
+                })),
                 locationHistory: history.map(h => ({
                     shelfCode: h.shelf_code,
                     timestamp: h.timestamp,
@@ -321,6 +354,50 @@ class BookController {
 
         } catch (error) {
             console.error('Error fetching book:', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    }
+
+    // Get all physical copies that share the same ISBN as the given book
+    static async getIsbnCopies(req, res) {
+        try {
+            const { id } = req.params;
+            const connection = await pool.getConnection();
+
+            const [bookRows] = await connection.execute('SELECT isbn FROM books WHERE id = ?', [id]);
+            if (bookRows.length === 0) {
+                connection.release();
+                return res.status(404).json({ error: 'Book not found' });
+            }
+
+            const isbn = bookRows[0].isbn;
+            const [copies] = await connection.execute(`
+                SELECT
+                    b.id,
+                    b.isbn,
+                    b.title,
+                    b.is_available,
+                    cbl.shelf_code,
+                    cbl.zone,
+                    cbl.section,
+                    CASE WHEN bt.id IS NOT NULL THEN 'in_use' ELSE 'available' END as copy_status
+                FROM books b
+                LEFT JOIN current_book_locations cbl ON b.id = cbl.book_id
+                LEFT JOIN book_transactions bt ON b.id = bt.book_id AND bt.return_date IS NULL
+                WHERE b.isbn = ?
+                ORDER BY b.id ASC
+            `, [isbn]);
+
+            connection.release();
+
+            res.json({
+                isbn,
+                total_copies: copies.length,
+                available_copies: copies.filter(copy => copy.copy_status === 'available').length,
+                copies
+            });
+        } catch (error) {
+            console.error('Error fetching ISBN copies:', error);
             res.status(500).json({ error: 'Internal server error' });
         }
     }
@@ -619,7 +696,9 @@ class BookController {
             };
 
             for (let i = 0; i < books.length; i++) {
-                const book = books[i];
+                const rawBook = books[i];
+                // Ignore any imported identifiers from spreadsheet data.
+                const { id, transaction_id, transactionId, ...book } = rawBook;
                 const rowNumber = i + 2; // +2 because row 1 is header and array is 0-indexed
 
                 try {
@@ -726,6 +805,7 @@ module.exports = {
     updateBook: BookController.updateBook,
     deleteBook: BookController.deleteBook,
     getCategories: BookController.getCategories,
+    getIsbnCopies: BookController.getIsbnCopies,
     getBookLocationHistory: BookController.getBookLocationHistory,
     bulkImportBooks: BookController.bulkImportBooks,
     

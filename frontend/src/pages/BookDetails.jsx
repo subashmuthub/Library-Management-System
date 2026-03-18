@@ -9,12 +9,14 @@ const BookDetails = () => {
   const navigate = useNavigate();
   const [book, setBook] = useState(null);
   const [locationHistory, setLocationHistory] = useState([]);
+  const [isbnCopies, setIsbnCopies] = useState([]);
   const [transactionHistory, setTransactionHistory] = useState([]);
   const [reservationQueue, setReservationQueue] = useState([]);
   const [navigation, setNavigation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reserving, setReserving] = useState(false);
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const isStudent = (currentUser?.role || '').toLowerCase() === 'student';
 
   useEffect(() => {
     loadBookDetails();
@@ -35,6 +37,7 @@ const BookDetails = () => {
       
       const bookInfo = bookData.book || bookData.data || bookData;
       setBook(bookInfo);
+      setIsbnCopies(bookData.isbnCopies || []);
       setLocationHistory(historyData.history || historyData.data || []);
       
       // Load transaction history
@@ -180,6 +183,12 @@ const BookDetails = () => {
                 <div>
                   <p className="text-sm text-gray-600">Total Copies</p>
                   <p className="font-medium">{book.total_copies}</p>
+                </div>
+              )}
+              {book.isbn_copy_count && (
+                <div>
+                  <p className="text-sm text-gray-600">Copies With Same ISBN</p>
+                  <p className="font-medium">{book.available_isbn_copies || 0} available / {book.isbn_copy_count} total</p>
                 </div>
               )}
             </div>
@@ -354,32 +363,57 @@ const BookDetails = () => {
         </div>
       )}
 
-      {/* Location History */}
-      <div className="card">
-        <div className="flex items-center gap-2 mb-4">
-          <Clock className="text-primary-600" size={20} />
-          <h2 className="text-xl font-bold">Location History</h2>
-        </div>
-        {locationHistory.length > 0 ? (
-          <div className="space-y-3">
-            {locationHistory.map((entry, index) => (
-              <div key={index} className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg">
-                <div className="w-2 h-2 bg-primary-600 rounded-full"></div>
-                <div className="flex-1">
-                  <p className="font-medium">Shelf {entry.shelf_code}</p>
-                  <p className="text-sm text-gray-600">Scanned by: {entry.scanner_type} reader</p>
+      {/* ISBN Copy Locations */}
+      {isbnCopies.length > 0 && (
+        <div className="card">
+          <div className="flex items-center gap-2 mb-4">
+            <MapPin className="text-indigo-600" size={20} />
+            <h2 className="text-xl font-bold">Same ISBN Copy Locations</h2>
+          </div>
+          <div className="space-y-2">
+            {isbnCopies.map((copy) => (
+              <div key={copy.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="font-medium">Copy ID #{copy.id}</p>
+                  <p className="text-sm text-gray-600">Location: {copy.location || 'Unassigned'}</p>
                 </div>
-                <div className="text-right">
-                  <p className="text-sm font-medium">{format(new Date(entry.timestamp), 'MMM dd, yyyy')}</p>
-                  <p className="text-xs text-gray-500">{format(new Date(entry.timestamp), 'h:mm a')}</p>
-                </div>
+                <span className={`text-xs px-2 py-1 rounded-full font-semibold ${copy.copy_status === 'available' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                  {copy.copy_status === 'available' ? 'Available' : 'In Use'}
+                </span>
               </div>
             ))}
           </div>
-        ) : (
-          <p className="text-gray-500 text-center py-8">No location history available</p>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Location History */}
+      {!isStudent && (
+        <div className="card">
+          <div className="flex items-center gap-2 mb-4">
+            <Clock className="text-primary-600" size={20} />
+            <h2 className="text-xl font-bold">Location History</h2>
+          </div>
+          {locationHistory.length > 0 ? (
+            <div className="space-y-3">
+              {locationHistory.map((entry, index) => (
+                <div key={index} className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg">
+                  <div className="w-2 h-2 bg-primary-600 rounded-full"></div>
+                  <div className="flex-1">
+                    <p className="font-medium">Shelf {entry.shelf_code || entry.shelfCode}</p>
+                    <p className="text-sm text-gray-600">Location event captured</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-medium">{format(new Date(entry.timestamp), 'MMM dd, yyyy')}</p>
+                    <p className="text-xs text-gray-500">{format(new Date(entry.timestamp), 'h:mm a')}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-gray-500 text-center py-8">No location history available</p>
+          )}
+        </div>
+      )}
     </div>
   );
 };

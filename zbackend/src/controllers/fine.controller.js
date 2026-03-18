@@ -5,6 +5,7 @@
 
 const mysql = require('mysql2/promise');
 const { pool } = require('../config/database');
+const EmailService = require('../services/email.service');
 
 class FineController {
     // Get all pending fines
@@ -298,16 +299,20 @@ class FineController {
         }
     }
 
-    // Waive a fine
+    // Waive or discount a fine with explicit approval
     static async waiveFine(req, res) {
         try {
             const { id } = req.params;
-            const { reason } = req.body;
+            const { reason, approved = false, discount_percent = null } = req.body;
             const librarianId = req.user?.id || null;
 
+            if (!approved) {
+                return res.status(400).json({ error: 'Waive/discount must be explicitly approved' });
+            }
+
             if (!reason || reason.trim().length < 5) {
-                return res.status(400).json({ 
-                    error: 'Waive reason is required (minimum 5 characters)' 
+                return res.status(400).json({
+                    error: 'Waive reason is required (minimum 5 characters)'
                 });
             }
 
@@ -315,7 +320,7 @@ class FineController {
 
             // Check if fine exists and is pending
             const [fines] = await connection.query(`
-                SELECT f.*, CONCAT(u.first_name, ' ', u.last_name) as user_name
+                SELECT f.*, u.email, CONCAT(u.first_name, ' ', u.last_name) as user_name
                 FROM fines f
                 JOIN users u ON f.user_id = u.id
                 WHERE f.id = ? AND f.status IN ('pending', 'partial')
@@ -323,27 +328,46 @@ class FineController {
 
             if (fines.length === 0) {
                 connection.release();
-                return res.status(404).json({ 
-                    error: 'Fine not found or already processed' 
+                return res.status(404).json({
+                    error: 'Fine not found or already processed'
                 });
             }
 
-            // Update fine as waived
+            const fine = fines[0];
+            const amountBefore = parseFloat(fine.amount || 0);
+            const discountPercent = Number(discount_percent);
+            const hasDiscount = Number.isFinite(discountPercent) && discountPercent > 0 && discountPercent < 100;
+
+            let statusToSet = 'waived';
+            let amountToSet = 0;
+            let notesSuffix = ` WAIVED: ${reason}`;
+            let action = 'waived';
+
+            if (hasDiscount) {
+                amountToSet = parseFloat((amountBefore * (1 - discountPercent / 100)).toFixed(2));
+                statusToSet = amountToSet > 0 ? 'pending' : 'waived';
+                notesSuffix = ` DISCOUNT APPROVED (${discountPercent}%): ${reason}`;
+                action = 'discounted';
+            }
+
+            // Update fine as waived/discounted
             await connection.query(`
                 UPDATE fines SET
-                    status = 'waived',
-                    payment_date = CURDATE(),
-                    payment_method = 'waived',
+                    amount = ?,
+                    status = ?,
+                    payment_date = CASE WHEN ? = 'waived' THEN CURDATE() ELSE payment_date END,
+                    payment_method = CASE WHEN ? = 'waived' THEN 'waived' ELSE payment_method END,
                     processed_by = ?,
-                    notes = CONCAT(IFNULL(notes, ''), ' WAIVED: ', ?)
+                    notes = CONCAT(IFNULL(notes, ''), ?)
                 WHERE id = ?
-            `, [librarianId, reason, id]);
+            `, [amountToSet, statusToSet, statusToSet, statusToSet, librarianId, notesSuffix, id]);
 
             // Get updated fine details
             const [updatedFine] = await connection.query(`
-                SELECT 
+                SELECT
                     f.*,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
+                    u.email,
                     b.title,
                     CONCAT(processor.first_name, ' ', processor.last_name) as processed_by_name
                 FROM fines f
@@ -356,11 +380,27 @@ class FineController {
 
             connection.release();
 
+            // Notify student account owner; failures do not block API response.
+            if (fine.email) {
+                EmailService.sendFineDecisionEmail(
+                    fine.email,
+                    fine.user_name,
+                    id,
+                    action,
+                    amountBefore,
+                    amountToSet,
+                    reason
+                ).catch(() => {});
+            }
+
             res.json({
                 success: true,
-                message: 'Fine waived successfully',
+                message: hasDiscount ? 'Fine discount approved successfully' : 'Fine waived successfully',
                 fine: updatedFine[0],
-                waive_reason: reason
+                waive_reason: reason,
+                discount_percent: hasDiscount ? discountPercent : 100,
+                previous_amount: amountBefore,
+                current_amount: amountToSet
             });
 
         } catch (error) {

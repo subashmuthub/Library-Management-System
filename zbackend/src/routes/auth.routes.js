@@ -36,6 +36,22 @@ router.post(
   authController.googleLogin,
 );
 
+// Verify email OTP
+router.post(
+  "/verify-otp",
+  validationRules.verifyOtp,
+  handleValidationErrors,
+  authController.verifyOtp,
+);
+
+// Resend email OTP
+router.post(
+  "/resend-otp",
+  validationRules.resendOtp,
+  handleValidationErrors,
+  authController.resendOtp,
+);
+
 // Google OAuth redirect flow — works from ANY frontend port, no JS-origin setup needed
 // Step 1: browser navigates here → gets redirected to Google consent screen
 router.get("/google", authController.googleOAuthStart);

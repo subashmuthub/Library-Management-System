@@ -8,52 +8,18 @@ const Login = () => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login, googleLogin } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
-  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const apiBase = import.meta.env.VITE_API_URL || "/api/v1";
 
   const handleGoogleLogin = async () => {
     setError("");
 
-    if (!googleClientId) {
-      setError(
-        "Google Sign-In is not configured. Please set VITE_GOOGLE_CLIENT_ID.",
-      );
-      return;
-    }
-
-    const gsi = globalThis.google?.accounts?.id;
-
-    if (!gsi) {
-      setError(
-        "Google Sign-In script not loaded. Please refresh and try again.",
-      );
-      return;
-    }
-
-    setLoading(true);
-
-    gsi.initialize({
-      client_id: googleClientId,
-      callback: async (response) => {
-        const token = response?.credential;
-        if (!token) {
-          setError("Google Sign-In failed. Please try again.");
-          setLoading(false);
-          return;
-        }
-
-        const result = await googleLogin(token);
-        if (result.success) {
-          navigate("/dashboard");
-        } else {
-          setError(result.error);
-        }
-        setLoading(false);
-      },
-    });
-
-    gsi.prompt();
+    const base = apiBase.startsWith("http")
+      ? apiBase
+      : `${globalThis.location.origin}${apiBase}`;
+    const oauthUrl = `${base.replace(/\/$/, "")}/auth/google?return_url=${encodeURIComponent(`${globalThis.location.origin}/dashboard`)}`;
+    globalThis.location.href = oauthUrl;
   };
 
   const handleSubmit = async (e) => {
@@ -164,14 +130,6 @@ const Login = () => {
             </p>
           </div>
 
-          <div className="mt-4 pt-4 border-t text-center">
-            <p className="text-xs text-gray-500 mb-2">Demo Credentials:</p>
-            <p className="text-xs text-gray-600">
-              <strong>Student:</strong> student1@university.edu / password123
-              <br />
-              <strong>Librarian:</strong> librarian1@library.edu / password123
-            </p>
-          </div>
         </div>
       </div>
     </div>
