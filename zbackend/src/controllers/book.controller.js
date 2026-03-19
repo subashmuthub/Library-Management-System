@@ -6,6 +6,8 @@
 const mysql = require('mysql2/promise');
 const { pool } = require('../config/database');
 
+const getRoleName = (user) => String(user?.role?.role_name || user?.role || '').toLowerCase();
+
 class BookController {
     // Get all books with search and filtering
     static async getAllBooks(req, res) {
@@ -261,6 +263,11 @@ class BookController {
                 return res.status(404).json({ error: 'Book not found' });
             }
 
+            const [sameIsbn] = await connection.execute(
+                'SELECT COUNT(*) AS copies_count FROM books WHERE isbn = ?',
+                [books[0].isbn]
+            );
+
             // Get location history (last 10 movements)
             const [history] = await connection.execute(`
                 SELECT 
@@ -296,6 +303,7 @@ class BookController {
                     description: book.description,
                     cover_image_url: book.cover_image_url,
                     total_copies: book.total_copies,
+                    same_isbn_copies: sameIsbn[0]?.copies_count || book.total_copies || 1,
                     is_available: book.is_available === 1,
                     rfid_tag: book.tag_id,
                     status: book.status,
@@ -307,6 +315,7 @@ class BookController {
                         shelfCode: book.shelf_code,
                         zone: book.zone,
                         section: book.section,
+                        locationDetails: [book.zone, book.section, book.shelf_code].filter(Boolean).join(' - '),
                         lastScanned: book.last_scanned
                     } : null
                 },
@@ -331,6 +340,14 @@ class BookController {
             const bookId = req.params.id;
             const limit = parseInt(req.query.limit) || 50;
             const offset = parseInt(req.query.offset) || 0;
+
+            if (getRoleName(req.user) === 'student') {
+                return res.json({
+                    bookId: parseInt(bookId),
+                    totalRecords: 0,
+                    history: []
+                });
+            }
 
             const connection = await pool.getConnection();
 

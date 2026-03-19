@@ -5,6 +5,11 @@
 
 const mysql = require('mysql2/promise');
 const { pool } = require('../config/database');
+const EmailService = require('../services/email.service');
+
+const getRoleName = (user) => String(user?.role?.role_name || user?.role || '').toLowerCase();
+
+const isStaffUser = (user) => ['admin', 'librarian'].includes(getRoleName(user));
 
 class FineController {
     // Get all pending fines
@@ -33,6 +38,7 @@ class FineController {
             let query = `
                 SELECT 
                     f.*,
+                    CASE WHEN LOCATE('[WAIVE_REQUEST]', COALESCE(f.notes, '')) > 0 THEN 1 ELSE 0 END as waive_requested,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
                     u.email,
                     u.student_id,
@@ -365,6 +371,178 @@ class FineController {
 
         } catch (error) {
             console.error('Error waiving fine:', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    }
+
+    // Request fine waiver (student request)
+    static async requestWaiveFine(req, res) {
+        try {
+            const { id } = req.params;
+            const { reason } = req.body;
+
+            if (!reason || String(reason).trim().length < 5) {
+                return res.status(400).json({
+                    error: 'Waive reason is required (minimum 5 characters)'
+                });
+            }
+
+            const connection = await pool.getConnection();
+            const [fines] = await connection.query(
+                'SELECT * FROM fines WHERE id = ? AND status IN (\'pending\', \'partial\')',
+                [id]
+            );
+
+            if (fines.length === 0) {
+                connection.release();
+                return res.status(404).json({ error: 'Fine not found or already processed' });
+            }
+
+            const currentNotes = fines[0].notes || '';
+            if (currentNotes.includes('[WAIVE_REQUEST]')) {
+                connection.release();
+                return res.status(400).json({ error: 'Waive request already submitted for this fine' });
+            }
+
+            await connection.query(
+                `UPDATE fines
+                 SET notes = CONCAT(IFNULL(notes, ''), ' [WAIVE_REQUEST] ', ?)
+                 WHERE id = ?`,
+                [String(reason).trim(), id]
+            );
+
+            connection.release();
+
+            res.json({
+                success: true,
+                message: 'Waive request submitted. Waiting for admin/librarian approval.',
+            });
+        } catch (error) {
+            console.error('Error requesting waive fine:', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    }
+
+    // Approve waiver with optional discount
+    static async approveWaiveFine(req, res) {
+        try {
+            if (!isStaffUser(req.user)) {
+                return res.status(403).json({
+                    error: 'Forbidden',
+                    message: 'Only admin/librarian can approve waive requests'
+                });
+            }
+
+            const { id } = req.params;
+            const {
+                reason,
+                discount_percent = 0,
+                discount_amount = 0
+            } = req.body;
+
+            const parsedPercent = Math.max(0, Math.min(100, parseFloat(discount_percent) || 0));
+            const parsedAmount = Math.max(0, parseFloat(discount_amount) || 0);
+
+            const connection = await pool.getConnection();
+
+            try {
+                await connection.beginTransaction();
+
+                const [fines] = await connection.query(
+                    `SELECT
+                        f.*,
+                        CONCAT(u.first_name, ' ', u.last_name) as user_name,
+                        u.email,
+                        b.title
+                     FROM fines f
+                     JOIN users u ON f.user_id = u.id
+                     JOIN book_transactions bt ON f.transaction_id = bt.id
+                     JOIN books b ON bt.book_id = b.id
+                     WHERE f.id = ? AND f.status IN ('pending', 'partial')`,
+                    [id]
+                );
+
+                if (fines.length === 0) {
+                    await connection.rollback();
+                    connection.release();
+                    return res.status(404).json({ error: 'Fine not found or already processed' });
+                }
+
+                const fine = fines[0];
+                const originalAmount = parseFloat(fine.amount || 0);
+                const percentDiscountValue = (originalAmount * parsedPercent) / 100;
+                const totalDiscount = Math.min(originalAmount, percentDiscountValue + parsedAmount);
+                const finalAmount = Math.max(0, originalAmount - totalDiscount);
+                const shouldWaiveCompletely = finalAmount === 0;
+
+                const updateStatus = shouldWaiveCompletely ? 'waived' : 'pending';
+                const paymentMethod = shouldWaiveCompletely ? 'waived' : fine.payment_method;
+                const approvedBy = req.user?.id || null;
+
+                const approvalReason = reason || 'Approved by admin';
+
+                await connection.query(
+                    `UPDATE fines
+                     SET amount = ?,
+                         status = ?,
+                         payment_method = ?,
+                         payment_date = CASE WHEN ? = 'waived' THEN CURDATE() ELSE payment_date END,
+                         processed_by = ?,
+                         notes = CONCAT(IFNULL(notes, ''), ' [WAIVE_APPROVED] reason=', ?, '; discount=', ?, '; final=', ?)
+                     WHERE id = ?`,
+                    [
+                        finalAmount,
+                        updateStatus,
+                        paymentMethod,
+                        updateStatus,
+                        approvedBy,
+                        approvalReason,
+                        totalDiscount,
+                        finalAmount,
+                        id
+                    ]
+                );
+
+                const [updatedFine] = await connection.query(
+                    'SELECT * FROM fines WHERE id = ?',
+                    [id]
+                );
+
+                await connection.commit();
+                connection.release();
+
+                await EmailService.sendFineDecisionEmail(
+                    fine.email,
+                    fine.user_name,
+                    fine.title,
+                    {
+                        fineId: fine.id,
+                        originalAmount,
+                        discountAmount: totalDiscount,
+                        finalAmount,
+                        reason: approvalReason,
+                        status: updateStatus,
+                    }
+                );
+
+                res.json({
+                    success: true,
+                    message: shouldWaiveCompletely
+                        ? 'Waive request approved and reflected in student account'
+                        : 'Discount approved and reflected in student account',
+                    fine: updatedFine[0],
+                    notification: {
+                        email_sent: true,
+                        message: 'Student notification email triggered',
+                    }
+                });
+            } catch (error) {
+                await connection.rollback();
+                connection.release();
+                throw error;
+            }
+        } catch (error) {
+            console.error('Error approving waive fine:', error);
             res.status(500).json({ error: 'Internal server error' });
         }
     }

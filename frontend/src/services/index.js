@@ -172,6 +172,11 @@ export const beaconService = {
     return response.data;
   },
 
+  addBeacon: async (beaconData) => {
+    const response = await api.post("/beacons", beaconData);
+    return response.data;
+  },
+
   getBeaconByZone: async (zone) => {
     const response = await api.get(`/beacons/zone/${zone}`);
     return response.data;
@@ -246,6 +251,16 @@ export const fineService = {
 
   waiveFine: async (fineId, reason) => {
     const response = await api.post(`/fines/${fineId}/waive`, { reason });
+    return response.data;
+  },
+
+  requestWaive: async (fineId, reason) => {
+    const response = await api.post(`/fines/${fineId}/waive-request`, { reason });
+    return response.data;
+  },
+
+  approveWaive: async (fineId, payload) => {
+    const response = await api.post(`/fines/${fineId}/waive-approve`, payload);
     return response.data;
   },
 

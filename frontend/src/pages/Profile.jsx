@@ -174,7 +174,7 @@ const Profile = () => {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <CreditCard size={16} className="inline mr-1" />
-                Student ID
+                  Registration Number
               </label>
               <input
                 type="text"
@@ -216,7 +216,7 @@ const Profile = () => {
             <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
               <CreditCard className="text-gray-600 flex-shrink-0 mt-1" size={20} />
               <div>
-                <p className="text-sm text-gray-600">Student ID</p>
+                <p className="text-sm text-gray-600">Registration Number</p>
                 <p className="font-medium">{user?.student_id || user?.studentId || 'N/A'}</p>
               </div>
             </div>

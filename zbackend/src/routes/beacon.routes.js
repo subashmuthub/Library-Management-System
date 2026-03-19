@@ -8,12 +8,15 @@
 const express = require('express');
 const router = express.Router();
 const beaconController = require('../controllers/beacon.controller');
-// const { authenticate } = require('../middleware/auth.middleware');
+const { authenticate, authorize } = require('../middleware/auth.middleware');
 
 // List all beacons
 router.get('/', beaconController.listBeacons);
 
 // Get beacon by zone
 router.get('/zone/:zone', beaconController.getBeaconByZone);
+
+// Add beacon (admin only)
+router.post('/', authenticate, authorize(['admin']), beaconController.createBeacon);
 
 module.exports = router;

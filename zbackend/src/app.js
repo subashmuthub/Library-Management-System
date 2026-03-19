@@ -147,6 +147,7 @@ app.use("/api/v1/user-management", require("./routes/user-management.routes"));
 app.use("/api/v1/dashboard", require("./routes/library-dashboard.routes"));
 app.use("/api/v1/entry", require("./routes/entry.routes"));
 app.use("/api/v1/books", require("./routes/books.routes"));
+app.use("/api/v1/book", require("./routes/books.routes"));
 app.use("/api/v1/transactions", require("./routes/transaction.routes"));
 app.use("/api/v1/fines", require("./routes/fine.routes"));
 app.use("/api/v1/payments", require("./routes/payment.routes"));

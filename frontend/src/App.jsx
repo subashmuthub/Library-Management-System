@@ -17,6 +17,7 @@ import EntryLog from './pages/EntryLog';
 import RFIDScanner from './pages/RFIDScanner';
 import Navigation from './pages/Navigation';
 import Profile from './pages/Profile';
+import BeaconManagement from './pages/BeaconManagement';
 
 function App() {
   return (
@@ -45,7 +46,22 @@ function App() {
               <Route path="transactions" element={<Transactions />} />
               <Route path="fines" element={<Fines />} />
               <Route path="reservations" element={<Reservations />} />
-              <Route path="users" element={<UserManagement />} />
+              <Route
+                path="users"
+                element={
+                  <PrivateRoute allowedRoles={["admin"]}>
+                    <UserManagement />
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="beacons"
+                element={
+                  <PrivateRoute allowedRoles={["admin"]}>
+                    <BeaconManagement />
+                  </PrivateRoute>
+                }
+              />
               <Route path="entry" element={<EntryLog />} />
               <Route path="rfid" element={<RFIDScanner />} />
               <Route path="navigation" element={<Navigation />} />

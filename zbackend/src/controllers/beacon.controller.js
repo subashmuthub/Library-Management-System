@@ -6,6 +6,12 @@
 
 const { query } = require('../config/database');
 
+const parseBoolean = (value, fallback = true) => {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'boolean') return value;
+  return String(value).toLowerCase() === 'true';
+};
+
 /**
  * List all beacons
  */
@@ -94,7 +100,89 @@ const getBeaconByZone = async (req, res, next) => {
   }
 };
 
+/**
+ * Create beacon (admin)
+ */
+const createBeacon = async (req, res, next) => {
+  try {
+    const {
+      uuid,
+      beacon_uuid,
+      major,
+      minor,
+      zone,
+      locationDescription,
+      location_description,
+      batteryLevel,
+      battery_level,
+      isActive,
+      is_active,
+    } = req.body;
+
+    const resolvedUuid = (uuid || beacon_uuid || '').trim();
+    const resolvedZone = (zone || '').trim();
+    const resolvedMajor = Number.parseInt(major, 10);
+    const resolvedMinor = Number.parseInt(minor, 10);
+
+    if (!resolvedUuid || !resolvedZone || Number.isNaN(resolvedMajor) || Number.isNaN(resolvedMinor)) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'uuid, major, minor and zone are required'
+      });
+    }
+
+    const [result] = await query(
+      `INSERT INTO beacons (
+        beacon_uuid,
+        major,
+        minor,
+        zone,
+        location_description,
+        battery_level,
+        is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        resolvedUuid,
+        resolvedMajor,
+        resolvedMinor,
+        resolvedZone,
+        (locationDescription || location_description || null),
+        batteryLevel ?? battery_level ?? null,
+        parseBoolean(isActive ?? is_active, true) ? 1 : 0,
+      ]
+    );
+
+    const inserted = await query('SELECT * FROM beacons WHERE id = ?', [result.insertId]);
+    const beacon = inserted[0];
+
+    res.status(201).json({
+      success: true,
+      message: 'Beacon added successfully',
+      beacon: {
+        id: beacon.id,
+        uuid: beacon.beacon_uuid,
+        major: beacon.major,
+        minor: beacon.minor,
+        zone: beacon.zone,
+        locationDescription: beacon.location_description,
+        isActive: beacon.is_active === 1,
+        batteryLevel: beacon.battery_level,
+        lastSeen: beacon.last_seen,
+      },
+    });
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'Beacon with same UUID/major/minor already exists',
+      });
+    }
+    next(error);
+  }
+};
+
 module.exports = {
   listBeacons,
-  getBeaconByZone
+  getBeaconByZone,
+  createBeacon,
 };

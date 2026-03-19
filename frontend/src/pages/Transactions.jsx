@@ -1,35 +1,93 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { transactionService, bookService, userManagementService } from '../services';
-import { BookOpen, User, Calendar, CheckCircle, XCircle, Clock, RefreshCw } from 'lucide-react';
+import { useAuth } from '../contexts';
+import { BookOpen, User, Calendar, CheckCircle, Clock, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 
 const Transactions = () => {
+  const { user } = useAuth();
+  const location = useLocation();
+  const roleName = (user?.role?.role_name || user?.role || '').toLowerCase();
+  const isStaff = roleName === 'admin' || roleName === 'librarian';
+
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState('all'); // all, active, returned, overdue
+  const [filter, setFilter] = useState('all'); // all, in-use, returned, overdue
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [showRenewModal, setShowRenewModal] = useState(false);
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [renewDays, setRenewDays] = useState(14);
+
+  const [availableBooks, setAvailableBooks] = useState([]);
+  const [borrowers, setBorrowers] = useState([]);
+
   const [returnForm, setReturnForm] = useState({
     condition: 'good',
     notes: ''
   });
+
   const [checkoutForm, setCheckoutForm] = useState({
     user_id: '',
     book_id: '',
     loan_days: 14
   });
 
+  const statusForApi = useMemo(() => {
+    if (filter === 'in-use') return 'active';
+    return filter;
+  }, [filter]);
+
   useEffect(() => {
     loadTransactions();
-  }, [filter]);
+  }, [statusForApi, user?.id]);
+
+  useEffect(() => {
+    if (isStaff) {
+      loadCheckoutOptions();
+    }
+  }, [isStaff]);
+
+  useEffect(() => {
+    const prefillBookId = location.state?.prefillBookId;
+    const prefillUserId = location.state?.prefillUserId;
+    if (prefillBookId || prefillUserId) {
+      setCheckoutForm((prev) => ({
+        ...prev,
+        book_id: prefillBookId || prev.book_id,
+        user_id: prefillUserId || prev.user_id,
+      }));
+      if (isStaff) {
+        setShowCheckoutModal(true);
+      }
+    }
+  }, [location.state, isStaff]);
+
+  const loadCheckoutOptions = async () => {
+    try {
+      const [usersResponse, booksResponse] = await Promise.all([
+        userManagementService.getAllUsers({ status: 'active', limit: 200 }),
+        bookService.getAllBooks({ availability: 'available', limit: 200 }),
+      ]);
+
+      const users = usersResponse.users || usersResponse.data || [];
+      const books = booksResponse.data?.books || booksResponse.books || [];
+
+      setBorrowers(users.filter((item) => ['student', 'user'].includes((item.role_name || item.role || '').toLowerCase()) || item.student_id));
+      setAvailableBooks(books);
+    } catch (error) {
+      console.error('Failed to load checkout options:', error);
+    }
+  };
 
   const loadTransactions = async () => {
     setLoading(true);
     try {
-      const params = filter !== 'all' ? { status: filter } : {};
+      const params = {};
+      if (statusForApi !== 'all') params.status = statusForApi;
+      if (!isStaff && user?.id) params.user_id = user.id;
+
       const response = await transactionService.getAllTransactions(params);
       setTransactions(response.transactions || response.data || []);
     } catch (error) {
@@ -47,17 +105,15 @@ const Transactions = () => {
       setShowCheckoutModal(false);
       setCheckoutForm({ user_id: '', book_id: '', loan_days: 14 });
       loadTransactions();
+      loadCheckoutOptions();
     } catch (error) {
-      alert(`Checkout failed: ${error.response?.data?.error || error.message}`);
+      alert(`Checkout failed: ${error.response?.data?.error || error.response?.data?.message || error.message}`);
     }
   };
 
   const handleReturn = (transaction) => {
     setSelectedTransaction(transaction);
-    setReturnForm({
-      condition: 'good',
-      notes: ''
-    });
+    setReturnForm({ condition: 'good', notes: '' });
     setShowReturnModal(true);
   };
 
@@ -72,8 +128,9 @@ const Transactions = () => {
       setShowReturnModal(false);
       setSelectedTransaction(null);
       loadTransactions();
+      loadCheckoutOptions();
     } catch (error) {
-      alert(`Return failed: ${error.response?.data?.error || error.message}`);
+      alert(`Return failed: ${error.response?.data?.error || error.response?.data?.message || error.message}`);
     }
   };
 
@@ -85,13 +142,13 @@ const Transactions = () => {
 
   const confirmRenew = async () => {
     try {
-      await transactionService.renewBook(selectedTransaction.id, { renewDays: renewDays });
+      await transactionService.renewBook(selectedTransaction.id, { renewDays });
       alert('Book renewed successfully!');
       setShowRenewModal(false);
       setSelectedTransaction(null);
       loadTransactions();
     } catch (error) {
-      alert(`Renewal failed: ${error.response?.data?.error || error.message}`);
+      alert(`Renewal failed: ${error.response?.data?.error || error.response?.data?.message || error.message}`);
     }
   };
 
@@ -99,7 +156,7 @@ const Transactions = () => {
     if (!selectedTransaction?.due_date) return '';
     const currentDue = new Date(selectedTransaction.due_date);
     const newDue = new Date(currentDue);
-    newDue.setDate(newDue.getDate() + parseInt(renewDays));
+    newDue.setDate(newDue.getDate() + parseInt(renewDays, 10));
     return format(newDue, 'yyyy-MM-dd');
   };
 
@@ -118,13 +175,13 @@ const Transactions = () => {
       returned: 'bg-green-100 text-green-700',
       overdue: 'bg-red-100 text-red-700',
     };
-    
+
     const labels = {
       active: 'IN USE',
       returned: 'RETURNED',
       overdue: 'OVERDUE'
     };
-    
+
     return <span className={`px-2 py-1 rounded text-xs font-semibold ${styles[status] || 'bg-gray-100 text-gray-700'}`}>
       {labels[status] || status?.toUpperCase()}
     </span>;
@@ -132,39 +189,36 @@ const Transactions = () => {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">Transactions</h1>
-          <p className="text-gray-600">Manage book checkouts and returns</p>
+          <p className="text-gray-600">{isStaff ? 'Manual issue/return management' : 'Book taken details and history'}</p>
         </div>
-        <button
-          onClick={() => setShowCheckoutModal(true)}
-          className="btn btn-primary"
-        >
-          <BookOpen size={20} className="mr-2" />
-          Checkout Book
-        </button>
+        {isStaff && (
+          <button onClick={() => setShowCheckoutModal(true)} className="btn btn-primary">
+            <BookOpen size={20} className="mr-2" />
+            Checkout Book
+          </button>
+        )}
       </div>
 
-      {/* Filters */}
       <div className="card">
         <div className="flex gap-2">
-          {['all', 'active', 'returned', 'overdue'].map(f => {
+          {['all', 'in-use', 'returned', 'overdue'].map((f) => {
             const filterLabels = {
               all: 'All',
-              active: 'In Use',
+              'in-use': 'In Use',
               returned: 'Returned',
               overdue: 'Overdue'
             };
-            
+
             return (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
                 className={`px-4 py-2 rounded font-medium ${
-                  filter === f 
-                    ? 'bg-blue-500 text-white' 
+                  filter === f
+                    ? 'bg-blue-500 text-white'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
@@ -175,7 +229,6 @@ const Transactions = () => {
         </div>
       </div>
 
-      {/* Transactions List */}
       <div className="card">
         {loading ? (
           <div className="text-center py-12">
@@ -188,8 +241,9 @@ const Transactions = () => {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Book</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Borrower</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Book Taken</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ISBN</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Checkout Date</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
@@ -197,28 +251,26 @@ const Transactions = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {transactions.map(transaction => (
+                {transactions.map((transaction) => (
                   <tr key={transaction.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-sm">#{transaction.id}</td>
-                    <td className="px-4 py-3 text-sm">{transaction.user_name || `User #${transaction.user_id}`}</td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="font-medium">{transaction.user_name || `User #${transaction.user_id}`}</div>
+                      <div className="text-xs text-gray-500">Reg: {transaction.student_id || 'N/A'}</div>
+                    </td>
                     <td className="px-4 py-3 text-sm">{transaction.title || `Book #${transaction.book_id}`}</td>
+                    <td className="px-4 py-3 text-sm font-mono">{transaction.isbn || 'N/A'}</td>
                     <td className="px-4 py-3 text-sm">{transaction.checkout_date}</td>
                     <td className="px-4 py-3 text-sm">{transaction.due_date}</td>
                     <td className="px-4 py-3">{getStatusBadge(transaction.status)}</td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex gap-2">
-                        {transaction.status === 'active' && (
+                        {isStaff && transaction.status === 'active' && (
                           <>
-                            <button
-                              onClick={() => handleReturn(transaction)}
-                              className="text-green-600 hover:text-green-700 font-medium"
-                            >
+                            <button onClick={() => handleReturn(transaction)} className="text-green-600 hover:text-green-700 font-medium">
                               Return
                             </button>
-                            <button
-                              onClick={() => handleRenew(transaction)}
-                              className="text-blue-600 hover:text-blue-700 font-medium"
-                            >
+                            <button onClick={() => handleRenew(transaction)} className="text-blue-600 hover:text-blue-700 font-medium">
                               Renew
                             </button>
                           </>
@@ -238,33 +290,42 @@ const Transactions = () => {
         )}
       </div>
 
-      {/* Checkout Modal */}
-      {showCheckoutModal && (
+      {showCheckoutModal && isStaff && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">Checkout Book</h2>
+            <h2 className="text-xl font-bold mb-4">Manual Checkout</h2>
             <form onSubmit={handleCheckout} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">User ID</label>
-                <input
-                  type="number"
+                <label className="block text-sm font-medium mb-1">Borrower</label>
+                <select
                   required
                   className="input w-full"
                   value={checkoutForm.user_id}
                   onChange={(e) => setCheckoutForm({ ...checkoutForm, user_id: e.target.value })}
-                  placeholder="Enter user ID (4-8 for test students)"
-                />
+                >
+                  <option value="">Select user</option>
+                  {borrowers.map((borrower) => (
+                    <option key={borrower.id} value={borrower.id}>
+                      {(borrower.name || `${borrower.first_name || ''} ${borrower.last_name || ''}`.trim())} ({borrower.student_id || `ID ${borrower.id}`})
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Book ID</label>
-                <input
-                  type="number"
+                <label className="block text-sm font-medium mb-1">Available Book</label>
+                <select
                   required
                   className="input w-full"
                   value={checkoutForm.book_id}
                   onChange={(e) => setCheckoutForm({ ...checkoutForm, book_id: e.target.value })}
-                  placeholder="Enter book ID (1-25 available)"
-                />
+                >
+                  <option value="">Select book</option>
+                  {availableBooks.map((book) => (
+                    <option key={book.id} value={book.id}>
+                      {book.title} ({book.isbn || `Book ${book.id}`})
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Loan Days</label>
@@ -286,16 +347,13 @@ const Transactions = () => {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  Checkout
-                </button>
+                <button type="submit" className="btn btn-primary">Checkout</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Renew Modal */}
       {showRenewModal && selectedTransaction && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
@@ -303,9 +361,8 @@ const Transactions = () => {
               <RefreshCw size={24} className="mr-2 text-blue-500" />
               Renew Book
             </h2>
-            
+
             <div className="space-y-4">
-              {/* Transaction Details */}
               <div className="bg-gray-50 p-4 rounded-lg space-y-2">
                 <div className="flex items-start">
                   <BookOpen size={18} className="mr-2 mt-0.5 text-gray-600" />
@@ -330,14 +387,9 @@ const Transactions = () => {
                 </div>
               </div>
 
-              {/* Renewal Options */}
               <div>
                 <label className="block text-sm font-medium mb-2">Extend by (days)</label>
-                <select
-                  className="input w-full"
-                  value={renewDays}
-                  onChange={(e) => setRenewDays(parseInt(e.target.value))}
-                >
+                <select className="input w-full" value={renewDays} onChange={(e) => setRenewDays(parseInt(e.target.value, 10))}>
                   <option value="7">7 days</option>
                   <option value="14">14 days (Standard)</option>
                   <option value="21">21 days</option>
@@ -345,23 +397,11 @@ const Transactions = () => {
                 </select>
               </div>
 
-              {/* New Due Date */}
               <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg">
                 <p className="text-sm text-blue-600 mb-1">New Due Date</p>
                 <p className="text-lg font-bold text-blue-700">{getNewDueDate()}</p>
               </div>
 
-              {/* Renewal Info */}
-              <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-lg text-sm text-yellow-800">
-                <p className="font-medium mb-1">⚠️ Renewal Policy</p>
-                <ul className="list-disc list-inside space-y-1 text-xs">
-                  <li>Maximum 2 renewals per transaction</li>
-                  <li>Cannot renew if book is reserved by others</li>
-                  <li>Late fees must be cleared before renewal</li>
-                </ul>
-              </div>
-
-              {/* Action Buttons */}
               <div className="flex gap-2 justify-end pt-2">
                 <button
                   type="button"
@@ -373,10 +413,7 @@ const Transactions = () => {
                 >
                   Cancel
                 </button>
-                <button 
-                  onClick={confirmRenew} 
-                  className="btn btn-primary flex items-center"
-                >
+                <button onClick={confirmRenew} className="btn btn-primary flex items-center">
                   <RefreshCw size={18} className="mr-2" />
                   Confirm Renewal
                 </button>
@@ -386,7 +423,6 @@ const Transactions = () => {
         </div>
       )}
 
-      {/* Return Modal */}
       {showReturnModal && selectedTransaction && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
@@ -394,9 +430,8 @@ const Transactions = () => {
               <CheckCircle size={24} className="mr-2 text-green-500" />
               Return Book
             </h2>
-            
+
             <div className="space-y-4">
-              {/* Transaction Details */}
               <div className="bg-gray-50 p-4 rounded-lg space-y-2">
                 <div className="flex items-start">
                   <BookOpen size={18} className="mr-2 mt-0.5 text-gray-600" />
@@ -415,20 +450,12 @@ const Transactions = () => {
                 <div className="flex items-start">
                   <Calendar size={18} className="mr-2 mt-0.5 text-gray-600" />
                   <div>
-                    <p className="text-sm text-gray-600">Checkout Date</p>
-                    <p className="font-semibold">{selectedTransaction.checkout_date}</p>
-                  </div>
-                </div>
-                <div className="flex items-start">
-                  <Calendar size={18} className="mr-2 mt-0.5 text-gray-600" />
-                  <div>
                     <p className="text-sm text-gray-600">Due Date</p>
                     <p className="font-semibold">{selectedTransaction.due_date}</p>
                   </div>
                 </div>
               </div>
 
-              {/* Overdue Warning */}
               {getDaysOverdue() > 0 && (
                 <div className="bg-red-50 border border-red-200 p-3 rounded-lg">
                   <p className="text-sm text-red-600 mb-1">⚠️ Overdue by {getDaysOverdue()} day(s)</p>
@@ -436,7 +463,6 @@ const Transactions = () => {
                 </div>
               )}
 
-              {/* Book Condition */}
               <div>
                 <label className="block text-sm font-medium mb-2">Book Condition</label>
                 <select
@@ -451,7 +477,6 @@ const Transactions = () => {
                 </select>
               </div>
 
-              {/* Notes */}
               <div>
                 <label className="block text-sm font-medium mb-2">Notes (Optional)</label>
                 <textarea
@@ -463,7 +488,6 @@ const Transactions = () => {
                 />
               </div>
 
-              {/* Return Info */}
               <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg text-sm text-blue-800">
                 <p className="font-medium mb-1">ℹ️ Return Information</p>
                 <ul className="list-disc list-inside space-y-1 text-xs">
@@ -473,7 +497,6 @@ const Transactions = () => {
                 </ul>
               </div>
 
-              {/* Action Buttons */}
               <div className="flex gap-2 justify-end pt-2">
                 <button
                   type="button"
@@ -485,10 +508,7 @@ const Transactions = () => {
                 >
                   Cancel
                 </button>
-                <button 
-                  onClick={confirmReturn} 
-                  className="btn bg-green-600 hover:bg-green-700 text-white flex items-center"
-                >
+                <button onClick={confirmReturn} className="btn bg-green-600 hover:bg-green-700 text-white flex items-center">
                   <CheckCircle size={18} className="mr-2" />
                   Confirm Return
                 </button>

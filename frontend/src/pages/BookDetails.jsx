@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { bookService, navigationService, transactionService, reservationService } from '../services';
+import { useAuth } from '../contexts';
 import { ArrowLeft, BookOpen, MapPin, Compass, Clock, Tag, CheckCircle, XCircle, User, Calendar, AlertCircle, BookmarkPlus, Users } from 'lucide-react';
 import { format } from 'date-fns';
 
 const BookDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [book, setBook] = useState(null);
   const [locationHistory, setLocationHistory] = useState([]);
   const [transactionHistory, setTransactionHistory] = useState([]);
@@ -15,6 +17,8 @@ const BookDetails = () => {
   const [loading, setLoading] = useState(true);
   const [reserving, setReserving] = useState(false);
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const roleName = (user?.role?.role_name || user?.role || '').toLowerCase();
+  const canViewLocationHistory = roleName !== 'student';
 
   useEffect(() => {
     loadBookDetails();
@@ -182,6 +186,10 @@ const BookDetails = () => {
                   <p className="font-medium">{book.total_copies}</p>
                 </div>
               )}
+              <div>
+                <p className="text-sm text-gray-600">Copies with Same ISBN</p>
+                <p className="font-medium">{book.same_isbn_copies || book.total_copies || 1}</p>
+              </div>
             </div>
 
             {/* Current Borrower Info */}
@@ -212,6 +220,9 @@ const BookDetails = () => {
                 <div>
                   <p className="text-sm text-gray-600">Current Location</p>
                   <p className="font-semibold text-green-700">Shelf {book.current_shelf}</p>
+                  {book.currentLocation?.locationDetails && (
+                    <p className="text-xs text-green-700">{book.currentLocation.locationDetails}</p>
+                  )}
                 </div>
               </div>
             )}
@@ -355,6 +366,7 @@ const BookDetails = () => {
       )}
 
       {/* Location History */}
+      {canViewLocationHistory && (
       <div className="card">
         <div className="flex items-center gap-2 mb-4">
           <Clock className="text-primary-600" size={20} />
@@ -380,6 +392,7 @@ const BookDetails = () => {
           <p className="text-gray-500 text-center py-8">No location history available</p>
         )}
       </div>
+      )}
     </div>
   );
 };

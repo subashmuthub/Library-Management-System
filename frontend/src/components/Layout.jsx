@@ -16,7 +16,8 @@ import {
   DollarSign,
   Bookmark,
   Users,
-  Search
+  Search,
+  Radio
 } from 'lucide-react';
 
 const Layout = () => {
@@ -24,6 +25,8 @@ const Layout = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const roleName = (user?.role?.role_name || user?.role || '').toLowerCase();
+  const isAdmin = roleName === 'admin';
 
   const handleLogout = () => {
     logout();
@@ -37,10 +40,13 @@ const Layout = () => {
     { path: '/transactions', label: 'Transactions', icon: RefreshCw },
     { path: '/fines', label: 'Fines', icon: DollarSign },
     { path: '/reservations', label: 'Reservations', icon: Bookmark },
-    { path: '/users', label: 'Users', icon: Users },
     { path: '/entry', label: 'Entry Log', icon: LogIn },
     { path: '/rfid', label: 'RFID Scanner', icon: Scan },
     { path: '/navigation', label: 'Navigation', icon: NavigationIcon },
+    ...(isAdmin ? [
+      { path: '/users', label: 'Users', icon: Users },
+      { path: '/beacons', label: 'Beacons', icon: Radio },
+    ] : []),
   ];
 
   return (

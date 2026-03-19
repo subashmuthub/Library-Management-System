@@ -7,10 +7,9 @@
 const express = require('express');
 const router = express.Router();
 const FineController = require('../controllers/fine.controller');
-// const { authenticate } = require('../middleware/auth.middleware');
+const { authenticate, authorize } = require('../middleware/auth.middleware');
 
-// Authentication disabled for now
-// router.use(authenticate);
+router.use(authenticate);
 
 /**
  * GET /api/fines
@@ -45,6 +44,19 @@ router.post('/:id/pay', FineController.payFine);
  * Body: { reason }
  */
 router.post('/:id/waive', FineController.waiveFine);
+
+/**
+ * POST /api/fines/:id/waive-request
+ * Student request for waive approval
+ */
+router.post('/:id/waive-request', FineController.requestWaiveFine);
+
+/**
+ * POST /api/fines/:id/waive-approve
+ * Admin/Librarian approval with optional discount
+ * Body: { reason, discount_percent?, discount_amount? }
+ */
+router.post('/:id/waive-approve', authorize(['admin', 'librarian']), FineController.approveWaiveFine);
 
 /**
  * POST /api/fines/manual

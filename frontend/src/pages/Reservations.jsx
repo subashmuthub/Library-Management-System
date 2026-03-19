@@ -11,6 +11,7 @@ import {
 const Reservations = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const registrationNumber = user?.student_id || user?.studentId || '';
 
   const [reservations, setReservations] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -19,12 +20,15 @@ const Reservations = () => {
   // Reserve modal state
   const [showReserveModal, setShowReserveModal] = useState(false);
   const [reserveStep, setReserveStep] = useState('form'); // form | checking | available | confirm | success
-  const [reserveForm, setReserveForm] = useState({ user_id: '', book_id: '' });
+  const [reserveForm, setReserveForm] = useState({ user_id: user?.id || '', book_id: '' });
   const [bookInfo, setBookInfo] = useState(null);
   const [reserveLoading, setReserveLoading] = useState(false);
   const [reserveResult, setReserveResult] = useState(null);
 
   useEffect(() => { loadReservations(); }, [filter]);
+  useEffect(() => {
+    setReserveForm((prev) => ({ ...prev, user_id: user?.id || '' }));
+  }, [user?.id]);
 
   const loadReservations = async () => {
     setLoading(true);
@@ -61,7 +65,7 @@ const Reservations = () => {
     setReserveLoading(true);
     try {
       const response = await reservationService.reserveBook({
-        user_id: reserveForm.user_id || user?.id,
+        user_id: user?.id,
         book_id: reserveForm.book_id
       });
       setReserveResult(response);
@@ -83,7 +87,7 @@ const Reservations = () => {
   const closeReserveModal = () => {
     setShowReserveModal(false);
     setReserveStep('form');
-    setReserveForm({ user_id: '', book_id: '' });
+    setReserveForm({ user_id: user?.id || '', book_id: '' });
     setBookInfo(null);
     setReserveResult(null);
   };
@@ -191,7 +195,7 @@ const Reservations = () => {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {['ID', 'Reserved By', 'Book', 'Currently With', 'Expected Return', 'Queue', 'Reserved On', 'Status', 'Actions'].map(h => (
+                  {['ID', 'Reserved By', 'Book', 'ISBN', 'Currently With', 'Expected Return', 'Queue', 'Reserved On', 'Status', 'Actions'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
                   ))}
                 </tr>
@@ -216,6 +220,10 @@ const Reservations = () => {
                     <td className="px-4 py-3">
                       <p className="font-semibold text-gray-900 max-w-[180px] truncate">{r.title || `Book #${r.book_id}`}</p>
                       {r.author && <p className="text-xs text-gray-500">by {r.author}</p>}
+                    </td>
+
+                    <td className="px-4 py-3 text-xs font-mono text-gray-600">
+                      {r.isbn || '—'}
                     </td>
 
                     <td className="px-4 py-3">
@@ -297,10 +305,8 @@ const Reservations = () => {
               {reserveStep === 'form' && (
                 <form onSubmit={handleCheckAndReserve} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">User ID <span className="text-red-500">*</span></label>
-                    <input type="number" required className="input w-full" value={reserveForm.user_id}
-                      onChange={e => setReserveForm({ ...reserveForm, user_id: e.target.value })}
-                      placeholder="Enter student / user ID" autoFocus />
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Registration Number (From Profile)</label>
+                    <input type="text" className="input w-full bg-gray-100" value={registrationNumber || 'Not available'} disabled />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Book ID <span className="text-red-500">*</span></label>
@@ -337,11 +343,20 @@ const Reservations = () => {
                   <div className="bg-gray-50 border rounded-lg p-3 text-sm">
                     <p className="font-semibold text-gray-900">{bookInfo.title}</p>
                     <p className="text-gray-500 text-xs mt-1">by {bookInfo.author}</p>
+                    <p className="text-gray-500 text-xs mt-1">ISBN: {bookInfo.isbn || 'N/A'}</p>
                     {bookInfo.current_shelf && <p className="text-blue-600 text-xs mt-1">📍 {bookInfo.current_shelf}</p>}
                   </div>
                   <div className="flex gap-3 pt-2">
                     <button onClick={closeReserveModal} className="flex-1 btn btn-outline">Close</button>
-                    <button onClick={() => { closeReserveModal(); navigate('/transactions'); }}
+                    <button onClick={() => {
+                      closeReserveModal();
+                      navigate('/transactions', {
+                        state: {
+                          prefillBookId: reserveForm.book_id,
+                          prefillUserId: user?.id,
+                        },
+                      });
+                    }}
                       className="flex-1 btn bg-green-600 hover:bg-green-700 text-white">
                       <ShoppingCart size={15} className="mr-2" /> Go to Checkout <ArrowRight size={15} className="ml-2" />
                     </button>
@@ -363,6 +378,7 @@ const Reservations = () => {
                   <div className="bg-gray-50 border rounded-lg p-4 text-sm space-y-2">
                     <p className="font-semibold text-gray-900">{bookInfo.title}</p>
                     <p className="text-gray-500 text-xs">by {bookInfo.author}</p>
+                    <p className="text-gray-500 text-xs">ISBN: {bookInfo.isbn || 'N/A'}</p>
                     {bookInfo.borrower_name && (
                       <div className="flex items-center gap-2 text-orange-700 mt-2 pt-2 border-t border-gray-200">
                         <User size={14} className="shrink-0" />

@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { fineService } from '../services';
+import { useAuth } from '../contexts';
 import { DollarSign, CheckCircle, XCircle, Clock, AlertCircle, Receipt, Download } from 'lucide-react';
 import PaymentModal from '../components/PaymentModal';
 
 const Fines = () => {
+  const { user } = useAuth();
+  const roleName = (user?.role?.role_name || user?.role || '').toLowerCase();
+  const isStaff = roleName === 'admin' || roleName === 'librarian';
   const [fines, setFines] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState('pending'); // pending, paid, waived, all
+  const [filter, setFilter] = useState('pending'); // pending, paid, all
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedFine, setSelectedFine] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
@@ -28,6 +32,9 @@ const Fines = () => {
     setLoading(true);
     try {
       const params = filter !== 'all' ? { status: filter } : {};
+      if (!isStaff && user?.id) {
+        params.userId = user.id;
+      }
       const response = await fineService.getPendingFines(params);
       setFines(response.fines || response.data || []);
     } catch (error) {
@@ -87,6 +94,42 @@ const Fines = () => {
       } catch (error) {
         alert(`Waiver failed: ${error.response?.data?.error || error.message}`);
       }
+    }
+  };
+
+  const hasWaiveRequest = (fine) => {
+    return fine.waive_requested === 1 || String(fine.notes || '').includes('[WAIVE_REQUEST]');
+  };
+
+  const handleRequestWaive = async (fineId) => {
+    const reason = prompt('Enter waiver request reason:');
+    if (!reason) return;
+    try {
+      await fineService.requestWaive(fineId, reason);
+      alert('Waive request submitted for approval.');
+      loadFines();
+    } catch (error) {
+      alert(`Request failed: ${error.response?.data?.error || error.message}`);
+    }
+  };
+
+  const handleApproveWaive = async (fine) => {
+    const reason = prompt('Approval reason:');
+    if (!reason) return;
+    const discountPercent = prompt('Discount percentage (0-100):', '0');
+    const discountAmount = prompt('Additional discount amount:', '0');
+
+    try {
+      await fineService.approveWaive(fine.id, {
+        reason,
+        discount_percent: Number(discountPercent || 0),
+        discount_amount: Number(discountAmount || 0),
+      });
+      alert('Waive/discount approved and reflected to student account.');
+      loadFines();
+      loadStats();
+    } catch (error) {
+      alert(`Approval failed: ${error.response?.data?.error || error.message}`);
     }
   };
 
@@ -193,7 +236,7 @@ const Fines = () => {
           <>
             {/* Filters */}
             <div className="flex gap-2 flex-wrap p-4 bg-gray-50 border-b">
-              {['pending', 'paid', 'waived', 'all'].map(f => (
+              {['pending', 'paid', 'all'].map(f => (
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
@@ -247,12 +290,30 @@ const Fines = () => {
                                 >
                                   Pay Now
                                 </button>
-                                <button
-                                  onClick={() => handleWaiveFine(fine.id)}
-                                  className="text-blue-600 hover:text-blue-700 font-medium"
-                                >
-                                  Waive
-                                </button>
+                                {!isStaff && (
+                                  <button
+                                    onClick={() => handleRequestWaive(fine.id)}
+                                    className="text-blue-600 hover:text-blue-700 font-medium"
+                                  >
+                                    Request Waive
+                                  </button>
+                                )}
+                                {isStaff && hasWaiveRequest(fine) && (
+                                  <button
+                                    onClick={() => handleApproveWaive(fine)}
+                                    className="text-indigo-600 hover:text-indigo-700 font-medium"
+                                  >
+                                    Approve Waive/Discount
+                                  </button>
+                                )}
+                                {isStaff && !hasWaiveRequest(fine) && (
+                                  <button
+                                    onClick={() => handleWaiveFine(fine.id)}
+                                    className="text-blue-600 hover:text-blue-700 font-medium"
+                                  >
+                                    Waive
+                                  </button>
+                                )}
                               </>
                             )}
                             {fine.status === 'paid' && (

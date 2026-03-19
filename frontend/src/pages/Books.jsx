@@ -510,7 +510,16 @@ const Books = () => {
 
     setLoading(true);
     try {
-      const response = await bookService.bulkImportBooks(importData);
+      const sanitizedImportData = importData.map((row) => {
+        const sanitized = { ...row };
+        delete sanitized.id;
+        delete sanitized.ID;
+        delete sanitized.book_id;
+        delete sanitized.transaction_id;
+        return sanitized;
+      });
+
+      const response = await bookService.bulkImportBooks(sanitizedImportData);
       setImportResults(response);
 
       if (response.summary.failed === 0) {

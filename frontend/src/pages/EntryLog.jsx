@@ -1,37 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { entryService } from '../services';
 import { useAuth } from '../contexts';
-import { LogIn, MapPin, Wifi, Activity, AlertCircle, CheckCircle } from 'lucide-react';
+import { LogIn, AlertCircle, CheckCircle } from 'lucide-react';
 import { format } from 'date-fns';
 
 const EntryLog = () => {
   const { user } = useAuth();
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [logData, setLogData] = useState({
-    action: 'entry',
-    latitude: '',
-    longitude: '',
-    wifi_ssid: '',
-    motion_speed: '',
-  });
+  const [action, setAction] = useState('entry');
   const [result, setResult] = useState(null);
 
   useEffect(() => {
     loadHistory();
-    // Get current location if available
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setLogData((current) => ({
-            ...current,
-            latitude: position.coords.latitude.toString(),
-            longitude: position.coords.longitude.toString(),
-          }));
-        },
-        (error) => console.error('Location error:', error)
-      );
-    }
   }, []);
 
   const loadHistory = async () => {
@@ -49,26 +30,31 @@ const EntryLog = () => {
     setResult(null);
 
     try {
+      let latitude = 0;
+      let longitude = 0;
+
+      if (navigator.geolocation) {
+        const position = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000 });
+        }).catch(() => null);
+
+        if (position?.coords) {
+          latitude = position.coords.latitude;
+          longitude = position.coords.longitude;
+        }
+      }
+
       const payload = {
-        entryType: logData.action,
-        latitude: parseFloat(logData.latitude),
-        longitude: parseFloat(logData.longitude),
-        wifiSSID: logData.wifi_ssid || undefined,
-        speedKmh: logData.motion_speed ? parseFloat(logData.motion_speed) : undefined,
+        entryType: action,
+        latitude,
+        longitude,
         userId: user?.id,
       };
 
       const response = await entryService.logEntry(payload);
       setResult({ success: true, data: response });
       loadHistory();
-      
-      // Reset form
-      setLogData({
-        ...logData,
-        action: 'entry',
-        wifi_ssid: '',
-        motion_speed: '',
-      });
+      setAction('entry');
     } catch (error) {
       setResult({ 
         success: false, 
@@ -89,7 +75,7 @@ const EntryLog = () => {
     <div className="space-y-6">
       {/* Entry Form */}
       <div className="card">
-        <h2 className="text-xl font-bold mb-4">Log Entry/Exit</h2>
+        <h2 className="text-xl font-bold mb-4">Library Entry Confirmation</h2>
         
         {result && (
           <div className={`mb-4 p-4 rounded-lg flex items-start gap-3 ${
@@ -104,6 +90,7 @@ const EntryLog = () => {
                     Confidence Score: {result.data.confidence?.total ?? result.data.entryLog?.confidenceScore ?? 0}%
                     {result.data.entryLog?.autoLogged && ' (Auto-logged)'}
                   </p>
+                  <p className="text-sm text-green-700 mt-1">Came to library successfully. No manual form details required.</p>
                 </div>
               </>
             ) : (
@@ -117,85 +104,15 @@ const EntryLog = () => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Action
-            </label>
-            <select
-              className="input"
-              value={logData.action}
-              onChange={(e) => setLogData({ ...logData, action: e.target.value })}
-              required
-            >
-              <option value="entry">Entry</option>
-              <option value="exit">Exit</option>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Action</label>
+            <select className="input" value={action} onChange={(e) => setAction(e.target.value)} required>
+              <option value="entry">I came to library</option>
+              <option value="exit">I left library</option>
             </select>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <MapPin size={16} className="inline mr-1" />
-                Latitude
-              </label>
-              <input
-                type="number"
-                step="any"
-                className="input"
-                placeholder="37.7749"
-                value={logData.latitude}
-                onChange={(e) => setLogData({ ...logData, latitude: e.target.value })}
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <MapPin size={16} className="inline mr-1" />
-                Longitude
-              </label>
-              <input
-                type="number"
-                step="any"
-                className="input"
-                placeholder="-122.4194"
-                value={logData.longitude}
-                onChange={(e) => setLogData({ ...logData, longitude: e.target.value })}
-                required
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              <Wifi size={16} className="inline mr-1" />
-              WiFi SSID (Optional)
-            </label>
-            <input
-              type="text"
-              className="input"
-              placeholder="LibraryWiFi"
-              value={logData.wifi_ssid}
-              onChange={(e) => setLogData({ ...logData, wifi_ssid: e.target.value })}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              <Activity size={16} className="inline mr-1" />
-              Motion Speed (km/h, Optional)
-            </label>
-            <input
-              type="number"
-              step="any"
-              className="input"
-              placeholder="3.5"
-              value={logData.motion_speed}
-              onChange={(e) => setLogData({ ...logData, motion_speed: e.target.value })}
-            />
-          </div>
-
           <button type="submit" className="btn btn-primary w-full" disabled={loading}>
-            {loading ? 'Logging...' : 'Log Entry'}
+            {loading ? 'Confirming...' : 'Confirm'}
           </button>
         </form>
       </div>
@@ -215,22 +132,7 @@ const EntryLog = () => {
                   {getConfidenceBadge(entry.confidence_score)}
                 </div>
                 <div className="text-sm text-gray-600 space-y-1">
-                  <p>
-                    <MapPin size={14} className="inline mr-1" />
-                    GPS: {entry.latitude?.toFixed(4)}, {entry.longitude?.toFixed(4)}
-                  </p>
-                  {entry.wifi_ssid && (
-                    <p>
-                      <Wifi size={14} className="inline mr-1" />
-                      WiFi: {entry.wifi_ssid}
-                    </p>
-                  )}
-                  {entry.speed_kmh && (
-                    <p>
-                      <Activity size={14} className="inline mr-1" />
-                      Speed: {entry.speed_kmh} km/h
-                    </p>
-                  )}
+                  <p className="text-green-700">Entry success / came to library</p>
                   <p className="text-xs text-gray-500">
                     {format(new Date(entry.timestamp), 'MMM dd, yyyy h:mm a')}
                   </p>

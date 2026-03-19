@@ -5,6 +5,14 @@
 
 const { pool } = require("../config/database");
 
+const getRoleName = (user) =>
+  String(user?.role?.role_name || user?.role || "").toLowerCase();
+
+const isStaffUser = (user) => {
+  const role = getRoleName(user);
+  return role === "admin" || role === "librarian";
+};
+
 const getParsedInt = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isNaN(parsed) ? fallback : parsed;
@@ -13,10 +21,20 @@ const getParsedInt = (value, fallback) => {
 const getStatusCondition = (status) => {
   const conditions = {
     active: "bt.return_date IS NULL",
+    "in-use": "bt.return_date IS NULL",
+    in_use: "bt.return_date IS NULL",
     returned: "bt.return_date IS NOT NULL",
     overdue: "bt.return_date IS NULL AND bt.due_date < CURDATE()",
   };
   return conditions[status] || null;
+};
+
+const logUserActivity = async (connection, userId, action, details, createdBy) => {
+  await connection.execute(
+    `INSERT INTO user_activity_log (user_id, action, details, created_by)
+     VALUES (?, ?, ?, ?)`,
+    [userId, action, details, createdBy || null],
+  );
 };
 
 const appendTransactionFilters = (baseQuery, filterInput, params) => {
@@ -82,6 +100,13 @@ class TransactionController {
   // Checkout a book
   static async checkoutBook(req, res) {
     try {
+      if (!isStaffUser(req.user)) {
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "Book issue is manual only by librarian/admin",
+        });
+      }
+
       // Accept bookId from either params or body
       const bookId = req.params.bookId || req.body.bookId || req.body.book_id;
       const userId = req.body.userId || req.body.user_id;
@@ -173,6 +198,14 @@ class TransactionController {
           [bookId],
         );
 
+        await logUserActivity(
+          connection,
+          userId,
+          "book_checkout",
+          `Checked out book #${bookId} for ${loanDays} day(s)`,
+          librarianId,
+        );
+
         await connection.commit();
 
         // Get transaction details
@@ -212,6 +245,13 @@ class TransactionController {
   // Return a book
   static async returnBook(req, res) {
     try {
+      if (!isStaffUser(req.user)) {
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "Book return processing is manual only by librarian/admin",
+        });
+      }
+
       const transactionId = req.params.id;
       const { notes = "" } = req.body;
       const librarianId = req.user?.id || req.body.returned_by || null;
@@ -284,6 +324,14 @@ class TransactionController {
           );
         }
 
+        await logUserActivity(
+          connection,
+          transaction.user_id,
+          "book_return",
+          `Returned book #${transaction.book_id}${fineAmount > 0 ? ` with fine $${fineAmount}` : ""}`,
+          librarianId,
+        );
+
         await connection.commit();
 
         // Get updated transaction details
@@ -336,6 +384,13 @@ class TransactionController {
   static async renewBook(req, res) {
     let connection;
     try {
+      if (!isStaffUser(req.user)) {
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "Book renewal is manual only by librarian/admin",
+        });
+      }
+
       const transactionId = req.params.id;
       // Accept both renewDays and renew_days for flexibility
       const renewDays =
@@ -406,6 +461,14 @@ class TransactionController {
         connection,
         newDueDate.toISOString().split("T")[0],
         transactionId,
+      );
+
+      await logUserActivity(
+        connection,
+        currentTransaction.user_id,
+        "book_renew",
+        `Renewed book #${currentTransaction.book_id} by ${getParsedInt(renewDays, 14)} day(s)`,
+        req.user?.id || null,
       );
 
       // Get updated transaction
@@ -650,6 +713,13 @@ class TransactionController {
   // Quick checkout by scanning RFID or barcode
   static async quickCheckout(req, res) {
     try {
+      if (!isStaffUser(req.user)) {
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "Quick issue is manual only by librarian/admin",
+        });
+      }
+
       const { tagId, userId, scanMethod = "rfid" } = req.body;
       const librarianId = req.user?.id;
 

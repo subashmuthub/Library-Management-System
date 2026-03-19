@@ -191,6 +191,63 @@ class EmailService {
             return { success: false, error: error.message };
         }
     }
+
+    /**
+     * Send fine approval/discount decision email
+     */
+    static async sendFineDecisionEmail(userEmail, userName, bookTitle, decision) {
+        try {
+            if (!userEmail) {
+                return { success: false, error: 'Missing user email' };
+            }
+
+            const transporter = createTransporter();
+            const statusLabel = decision.status === 'waived' ? 'Waived' : 'Discount Applied';
+
+            const mailOptions = {
+                from: process.env.SMTP_FROM || '"Library System" <noreply@library.com>',
+                to: userEmail,
+                subject: `Fine Update: ${statusLabel}`,
+                html: `
+                    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:20px;">
+                        <h2 style="color:#4F46E5;">Fine Update Notification</h2>
+                        <p>Dear ${userName},</p>
+                        <p>Your fine request has been reviewed.</p>
+                        <p><strong>Book:</strong> ${bookTitle || 'N/A'}</p>
+                        <p><strong>Fine ID:</strong> #${decision.fineId}</p>
+                        <p><strong>Status:</strong> ${statusLabel}</p>
+                        <p><strong>Original Amount:</strong> $${Number(decision.originalAmount || 0).toFixed(2)}</p>
+                        <p><strong>Discount:</strong> $${Number(decision.discountAmount || 0).toFixed(2)}</p>
+                        <p><strong>Current Amount:</strong> $${Number(decision.finalAmount || 0).toFixed(2)}</p>
+                        <p><strong>Reason:</strong> ${decision.reason || 'N/A'}</p>
+                        <p style="margin-top:16px;">Please check your student fines page for updated details.</p>
+                    </div>
+                `,
+                text: `
+Fine Update Notification
+
+Dear ${userName},
+
+Your fine request has been reviewed.
+Book: ${bookTitle || 'N/A'}
+Fine ID: #${decision.fineId}
+Status: ${statusLabel}
+Original Amount: $${Number(decision.originalAmount || 0).toFixed(2)}
+Discount: $${Number(decision.discountAmount || 0).toFixed(2)}
+Current Amount: $${Number(decision.finalAmount || 0).toFixed(2)}
+Reason: ${decision.reason || 'N/A'}
+
+Please check your student fines page for updated details.
+                `.trim(),
+            };
+
+            const info = await transporter.sendMail(mailOptions);
+            return { success: true, messageId: info.messageId };
+        } catch (error) {
+            console.error('❌ Failed to send fine decision email:', error);
+            return { success: false, error: error.message };
+        }
+    }
 }
 
 module.exports = EmailService;

@@ -7,38 +7,37 @@
 const express = require('express');
 const router = express.Router();
 const TransactionController = require('../controllers/transaction.controller');
-// const { authenticate } = require('../middleware/auth.middleware');
+const { authenticate, authorize } = require('../middleware/auth.middleware');
 
-// Authentication disabled for development
-// router.use(authenticate);
+router.use(authenticate);
 
 /**
  * POST /api/transactions/checkout
  * Checkout a book (regular checkout process)
  * Body: { user_id, book_id, due_date? }
  */
-router.post('/checkout', TransactionController.checkoutBook);
+router.post('/checkout', authorize(['admin', 'librarian']), TransactionController.checkoutBook);
 
 /**
  * POST /api/transactions/quick-checkout
  * Quick checkout by scanning (minimal validation)
  * Body: { user_identifier, book_identifier }
  */
-router.post('/quick-checkout', TransactionController.quickCheckout);
+router.post('/quick-checkout', authorize(['admin', 'librarian']), TransactionController.quickCheckout);
 
 /**
  * POST /api/transactions/:id/return
  * Return a book
  * Body: { condition?, notes? }
  */
-router.post('/:id/return', TransactionController.returnBook);
+router.post('/:id/return', authorize(['admin', 'librarian']), TransactionController.returnBook);
 
 /**
  * POST /api/transactions/:id/renew
  * Renew a book checkout
  * Body: { extend_days? }
  */
-router.post('/:id/renew', TransactionController.renewBook);
+router.post('/:id/renew', authorize(['admin', 'librarian']), TransactionController.renewBook);
 
 /**
  * GET /api/transactions
