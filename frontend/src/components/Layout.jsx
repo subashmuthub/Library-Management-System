@@ -18,7 +18,9 @@ import {
   Users,
   Search,
   CalendarDays,
-  ArrowUpRight
+  ArrowUpRight,
+  BarChart3,
+  PackagePlus,
 } from 'lucide-react';
 
 const Layout = () => {
@@ -54,6 +56,8 @@ const Layout = () => {
     { path: '/entry', label: 'Entry Log', icon: LogIn },
     { path: '/rfid', label: 'RFID Scanner', icon: Scan },
     { path: '/navigation', label: 'Navigation', icon: NavigationIcon },
+    { path: '/student-visualization', label: 'Student Visualization', icon: BarChart3 },
+    { path: '/book-orders', label: 'Book Orders', icon: PackagePlus },
   ];
 
   const currentSection = useMemo(() => {

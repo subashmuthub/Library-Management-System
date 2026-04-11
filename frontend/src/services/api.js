@@ -15,6 +15,17 @@ const api = axios.create({
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    const errorCode = error.response?.data?.code;
+    if (errorCode === "ENTRY_REQUIRED") {
+      const message =
+        error.response?.data?.message ||
+        "Please log your library entry before using this feature.";
+      sessionStorage.setItem("entry_policy_message", message);
+      if (!globalThis.location.pathname.startsWith("/entry")) {
+        globalThis.location.href = "/entry";
+      }
+    }
+
     if (error.response?.status === 401) {
       // Session expired or not found — clear local state and redirect to login.
       // Skip redirect when the request itself IS the login or /auth/me check.

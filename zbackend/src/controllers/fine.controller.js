@@ -600,14 +600,15 @@ class FineController {
                 transaction_id,
                 fine_type = 'other',
                 amount,
+                book_id,
                 description,
                 reason
             } = req.body;
             const librarianId = req.user?.id || null;
 
-            if (!user_id || !amount || amount <= 0) {
+            if (!user_id) {
                 return res.status(400).json({
-                    error: 'User ID and positive amount are required'
+                    error: 'User ID is required'
                 });
             }
 
@@ -620,15 +621,82 @@ class FineController {
 
             const connection = await pool.getConnection();
 
-            // Verify user exists
+            let computedAmount = amount ? parseFloat(amount) : 0;
+            let resolvedTransactionId = transaction_id || null;
+
+            if (fine_type === 'lost_book') {
+                let targetBookId = book_id || null;
+
+                if (resolvedTransactionId) {
+                    const [txRows] = await connection.query(
+                        'SELECT id, book_id FROM book_transactions WHERE id = ?',
+                        [resolvedTransactionId],
+                    );
+                    if (txRows.length > 0) {
+                        targetBookId = txRows[0].book_id;
+                    }
+                }
+
+                if (!targetBookId) {
+                    connection.release();
+                    return res.status(400).json({
+                        error: 'book_id or transaction_id is required for lost_book fine',
+                    });
+                }
+
+                const [bookRows] = await connection.query(
+                    `SELECT id, COALESCE(purchase_price, 0) AS purchase_price
+                     FROM books
+                     WHERE id = ?`,
+                    [targetBookId],
+                );
+
+                if (bookRows.length === 0) {
+                    connection.release();
+                    return res.status(404).json({ error: 'Book not found for lost_book fine' });
+                }
+
+                const price = Number(bookRows[0].purchase_price || 0);
+                if (price <= 0) {
+                    connection.release();
+                    return res.status(400).json({
+                        error: 'Book purchase_price is missing. Update purchase details before generating lost_book fine.',
+                    });
+                }
+
+                // College rule: lost book fine = double purchase price
+                computedAmount = Number((price * 2).toFixed(2));
+            }
+
+            if (!Number.isFinite(computedAmount) || computedAmount <= 0) {
+                connection.release();
+                return res.status(400).json({
+                    error: 'Positive fine amount is required',
+                });
+            }
+
+            // Only student users should receive borrowing-related fines.
             const [users] = await connection.query(
-                'SELECT id, first_name, last_name FROM users WHERE id = ?',
+                `SELECT
+                    u.id,
+                    u.first_name,
+                    u.last_name,
+                    u.status,
+                    LOWER(COALESCE(ur.role_name, 'student')) AS role_name
+                 FROM users u
+                 LEFT JOIN user_roles ur ON u.role_id = ur.id
+                 WHERE u.id = ?`,
                 [user_id]
             );
 
             if (users.length === 0) {
                 connection.release();
                 return res.status(404).json({ error: 'User not found' });
+            }
+
+            if (users[0].status !== 'active' || users[0].role_name !== 'student') {
+                connection.release();
+                return res.status(400).json({ error: 'Fine can only be created for active student users' });
             }
 
             // Create fine record
@@ -638,8 +706,8 @@ class FineController {
                     days_overdue, fine_rate, status, processed_by, notes
                 ) VALUES (?, ?, ?, ?, 0, 0, 'pending', ?, ?)
             `, [
-                user_id, transaction_id || null, fine_type, 
-                parseFloat(amount), librarianId, 
+                user_id, resolvedTransactionId, fine_type,
+                computedAmount, librarianId,
                 description || reason || 'Manual fine'
             ]);
 

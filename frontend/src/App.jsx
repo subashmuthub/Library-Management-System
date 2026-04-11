@@ -17,10 +17,17 @@ import EntryLog from './pages/EntryLog';
 import RFIDScanner from './pages/RFIDScanner';
 import Navigation from './pages/Navigation';
 import Profile from './pages/Profile';
+import StudentVisualization from './pages/StudentVisualization';
+import BookOrderDetails from './pages/BookOrderDetails';
 
 function App() {
   return (
-    <Router>
+    <Router
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true,
+      }}
+    >
       <AuthProvider>
         <ModeProvider>
           <Routes>
@@ -49,6 +56,8 @@ function App() {
               <Route path="entry" element={<EntryLog />} />
               <Route path="rfid" element={<RFIDScanner />} />
               <Route path="navigation" element={<Navigation />} />
+              <Route path="student-visualization" element={<StudentVisualization />} />
+              <Route path="book-orders" element={<BookOrderDetails />} />
               <Route path="profile" element={<Profile />} />
             </Route>
 

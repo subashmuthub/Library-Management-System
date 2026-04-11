@@ -19,7 +19,14 @@ export const AuthProvider = ({ children }) => {
     // If not, clear any stale localStorage data and stay logged out.
     const verifySession = async () => {
       try {
-        const { user: sessionUser } = await authService.me();
+        const { authenticated, user: sessionUser } = await authService.me();
+
+        if (!authenticated || !sessionUser) {
+          localStorage.removeItem("user");
+          setUser(null);
+          return;
+        }
+
         // Build a display-friendly user object (same shape as login response)
         const storedUser = localStorage.getItem("user");
         const localUser = storedUser ? JSON.parse(storedUser) : {};

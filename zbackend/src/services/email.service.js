@@ -263,6 +263,55 @@ class EmailService {
             return { success: false, error: error.message };
         }
     }
+
+    /**
+     * Send active user of the month recognition mail.
+     */
+    static async sendActiveUserAwardEmail(userEmail, userName, payload = {}) {
+        try {
+            const transporter = createTransporter();
+            const {
+                monthLabel = 'this month',
+                borrowCount = 0,
+                visitCount = 0,
+                rank = 1,
+                studentId = 'N/A',
+            } = payload;
+
+            const mailOptions = {
+                from: process.env.SMTP_FROM || '"Library System" <noreply@library.com>',
+                to: userEmail,
+                subject: `Congratulations! Active Library User of ${monthLabel}`,
+                text: `Dear ${userName},\n\nCongratulations! You are ranked #${rank} as Active Library User of ${monthLabel}.\nStudent ID: ${studentId}\nBorrow/Return transactions: ${borrowCount}\nLibrary visits: ${visitCount}\n\nThe Central Library appreciates your consistent use of resources.\n\nRegards,\nCentral Library`,
+                html: `
+                    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 680px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;">
+                        <div style="background:#f8fafc; border-bottom:1px solid #e5e7eb; padding:18px 22px;">
+                            <h2 style="margin:0; color:#0f172a;">Central Library - Certificate of Recognition</h2>
+                        </div>
+                        <div style="padding:22px;">
+                            <p>Dear <strong>${userName}</strong>,</p>
+                            <p>Congratulations! You have been recognized as the <strong>Active Library User of ${monthLabel}</strong>.</p>
+                            <ul>
+                                <li>Rank: <strong>#${rank}</strong></li>
+                                <li>Student ID: <strong>${studentId}</strong></li>
+                                <li>Borrow/Return Transactions: <strong>${borrowCount}</strong></li>
+                                <li>Library Visits: <strong>${visitCount}</strong></li>
+                            </ul>
+                            <p>Your disciplined and consistent use of library resources reflects your academic commitment.</p>
+                            <p style="margin-top:20px;">Regards,<br/>Central Library</p>
+                        </div>
+                    </div>
+                `,
+            };
+
+            const info = await transporter.sendMail(mailOptions);
+            console.log(`📧 Active user award mail sent to ${userEmail}: ${info.messageId}`);
+            return { success: true, messageId: info.messageId };
+        } catch (error) {
+            console.error('❌ Failed to send active user award email:', error);
+            return { success: false, error: error.message };
+        }
+    }
 }
 
 module.exports = EmailService;

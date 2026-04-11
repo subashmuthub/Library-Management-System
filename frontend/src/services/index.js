@@ -323,6 +323,44 @@ export const reservationService = {
   },
 };
 
+// Library dashboard endpoints
+export const dashboardService = {
+  getStats: async (params) => {
+    const response = await api.get("/dashboard/stats", { params });
+    return response.data;
+  },
+
+  getStatus: async () => {
+    const response = await api.get("/dashboard/status");
+    return response.data;
+  },
+
+  getBookAnalytics: async (params) => {
+    const response = await api.get("/dashboard/book-analytics", { params });
+    return response.data;
+  },
+
+  getUserInsights: async (params) => {
+    const response = await api.get("/dashboard/user-insights", { params });
+    return response.data;
+  },
+
+  getTopStudents: async (params) => {
+    const response = await api.get("/dashboard/top-students", { params });
+    return response.data;
+  },
+
+  notifyTopStudentAward: async (payload) => {
+    const response = await api.post("/dashboard/top-students/notify", payload);
+    return response.data;
+  },
+
+  getBookOrderDetails: async (params) => {
+    const response = await api.get("/dashboard/book-order-details", { params });
+    return response.data;
+  },
+};
+
 // User management endpoints
 export const userManagementService = {
   getAllUsers: async (params) => {

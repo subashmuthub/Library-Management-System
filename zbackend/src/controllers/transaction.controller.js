@@ -104,6 +104,33 @@ class TransactionController {
       try {
         await connection.beginTransaction();
 
+        // Only student accounts are allowed to borrow books.
+        const [targetUsers] = await connection.execute(
+          `SELECT u.id, u.status, LOWER(COALESCE(ur.role_name, 'student')) AS role_name
+           FROM users u
+           LEFT JOIN user_roles ur ON u.role_id = ur.id
+           WHERE u.id = ?`,
+          [userId],
+        );
+
+        if (targetUsers.length === 0) {
+          await connection.rollback();
+          connection.release();
+          return res.status(404).json({
+            success: false,
+            message: "User not found",
+          });
+        }
+
+        if (targetUsers[0].status !== "active" || targetUsers[0].role_name !== "student") {
+          await connection.rollback();
+          connection.release();
+          return res.status(400).json({
+            success: false,
+            message: "Only student users can borrow books",
+          });
+        }
+
         // Check if book is available
         const [activeCheckouts] = await connection.execute(
           "SELECT COUNT(*) as count FROM book_transactions WHERE book_id = ? AND status = ?",

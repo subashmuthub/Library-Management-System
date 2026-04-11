@@ -43,4 +43,24 @@ router.get('/book-analytics', LibraryDashboardController.getBookAnalytics);
  */
 router.get('/user-insights', LibraryDashboardController.getUserBehaviorInsights);
 
+/**
+ * GET /api/dashboard/top-students
+ * Get top students by visits and borrow points
+ * Query params: period (days, default: 30), limit (default: 20)
+ */
+router.get('/top-students', LibraryDashboardController.getTopStudentActivity);
+
+/**
+ * GET /api/dashboard/book-order-details
+ * Get book order planning details with agent information
+ * Query params: limit (default: 300)
+ */
+router.get('/book-order-details', LibraryDashboardController.getBookOrderAgentDetails);
+
+/**
+ * POST /api/dashboard/top-students/notify
+ * Trigger recognition email to top student of selected period
+ */
+router.post('/top-students/notify', LibraryDashboardController.notifyTopStudentAward);
+
 module.exports = router;

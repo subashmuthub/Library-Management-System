@@ -5,8 +5,53 @@
 
 const mysql = require('mysql2/promise');
 const { pool } = require('../config/database');
+const EmailService = require('../services/email.service');
 
 class LibraryDashboardController {
+    static buildTopStudentsQuery(usePeriodFilter) {
+        return `
+            SELECT
+                u.id,
+                CONCAT(u.first_name, ' ', u.last_name) AS student_name,
+                u.email,
+                COALESCE(u.student_id, CONCAT('STU-', u.id)) AS student_id,
+                COALESCE(e.entry_count, 0) AS visit_count,
+                COALESCE(e.active_days, 0) AS active_days,
+                COALESCE(b.borrow_count, 0) AS borrow_count,
+                COALESCE(b.return_count, 0) AS return_count,
+                (COALESCE(e.entry_count, 0) * 2 + COALESCE(b.borrow_count, 0) * 5) AS score_points,
+                CASE
+                    WHEN COALESCE(e.entry_count, 0) * 2 + COALESCE(b.borrow_count, 0) * 5 >= 120 THEN 'Platinum'
+                    WHEN COALESCE(e.entry_count, 0) * 2 + COALESCE(b.borrow_count, 0) * 5 >= 80 THEN 'Gold'
+                    WHEN COALESCE(e.entry_count, 0) * 2 + COALESCE(b.borrow_count, 0) * 5 >= 40 THEN 'Silver'
+                    ELSE 'Bronze'
+                END AS points_tier
+            FROM users u
+            LEFT JOIN (
+                SELECT
+                    user_id,
+                    SUM(CASE WHEN entry_type = 'entry' THEN 1 ELSE 0 END) AS entry_count,
+                    COUNT(DISTINCT DATE(timestamp)) AS active_days
+                FROM entry_logs
+                ${usePeriodFilter ? "WHERE timestamp >= DATE_SUB(NOW(), INTERVAL ? DAY)" : ""}
+                GROUP BY user_id
+            ) e ON u.id = e.user_id
+            LEFT JOIN (
+                SELECT
+                    user_id,
+                    COUNT(*) AS borrow_count,
+                    SUM(CASE WHEN return_date IS NOT NULL THEN 1 ELSE 0 END) AS return_count
+                FROM book_transactions
+                ${usePeriodFilter ? "WHERE checkout_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)" : ""}
+                GROUP BY user_id
+            ) b ON u.id = b.user_id
+            WHERE u.status = 'active' AND COALESCE(u.role_id, 3) = 3
+            HAVING visit_count > 0 OR borrow_count > 0
+            ORDER BY score_points DESC, borrow_count DESC, visit_count DESC
+            LIMIT ?
+        `;
+    }
+
     // Get comprehensive dashboard statistics
     static async getDashboardStats(req, res) {
         try {
@@ -296,7 +341,7 @@ class LibraryDashboardController {
                     COUNT(DISTINCT bt.id) as checkout_count,
                     COUNT(DISTINCT r.id) as reservation_count,
                     (COUNT(DISTINCT bt.id) + COUNT(DISTINCT r.id)) as total_demand,
-                    ROUND((COUNT(DISTINCT bt.id) + COUNT(DISTINCT r.id)) / b.total_copies, 2) as demand_ratio
+                    ROUND((COUNT(DISTINCT bt.id) + COUNT(DISTINCT r.id)) / NULLIF(b.total_copies, 0), 2) as demand_ratio
                 FROM books b
                 LEFT JOIN book_transactions bt ON b.id = bt.book_id 
                     AND bt.checkout_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
@@ -307,23 +352,22 @@ class LibraryDashboardController {
                 HAVING total_demand > 0
                 ORDER BY demand_ratio DESC
                 LIMIT 10
-            `, [parseInt(period)]);
+            `, [parseInt(period), parseInt(period)]);
 
-            // Shelf utilization analysis
+            // Shelf utilization analysis aligned with current shelves schema
             const [shelfAnalysis] = await connection.execute(`
                 SELECT 
-                    s.shelf_number,
-                    s.location,
+                    s.shelf_code,
+                    CONCAT('Zone ', s.zone, ' - Floor ', s.floor, COALESCE(CONCAT(' - ', s.section), '')) as location,
                     s.capacity,
                     COUNT(DISTINCT b.id) as current_books,
-                    ROUND((COUNT(DISTINCT b.id) / s.capacity) * 100, 1) as utilization_percent,
+                    ROUND((COUNT(DISTINCT b.id) / NULLIF(s.capacity, 0)) * 100, 1) as utilization_percent,
                     COUNT(DISTINCT bt.id) as checkout_activity
                 FROM shelves s
                 LEFT JOIN books b ON s.id = b.shelf_id AND b.status = 'active'
                 LEFT JOIN book_transactions bt ON b.id = bt.book_id 
                     AND bt.checkout_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-                WHERE s.is_active = TRUE
-                GROUP BY s.id
+                GROUP BY s.id, s.shelf_code, s.zone, s.floor, s.section, s.capacity
                 ORDER BY utilization_percent DESC
             `, [parseInt(period)]);
 
@@ -376,14 +420,14 @@ class LibraryDashboardController {
             // Peak usage hours analysis
             const [hourlyUsage] = await connection.execute(`
                 SELECT 
-                    HOUR(timestamp) as hour_of_day,
-                    COUNT(DISTINCT CASE WHEN entry_type = 'entry' THEN user_id END) as entries,
+                    HOUR(el.timestamp) as hour_of_day,
+                    COUNT(DISTINCT CASE WHEN el.entry_type = 'entry' THEN el.user_id END) as entries,
                     COUNT(DISTINCT bt.id) as checkouts
                 FROM entry_logs el
                 LEFT JOIN book_transactions bt ON DATE(el.timestamp) = bt.checkout_date 
                     AND HOUR(el.timestamp) = HOUR(bt.created_at)
                 WHERE el.timestamp >= DATE_SUB(NOW(), INTERVAL ? DAY)
-                GROUP BY HOUR(timestamp)
+                GROUP BY HOUR(el.timestamp)
                 ORDER BY hour_of_day
             `, [parseInt(period)]);
 
@@ -434,6 +478,196 @@ class LibraryDashboardController {
         } catch (error) {
             console.error('Error fetching user behavior insights:', error);
             res.status(500).json({ error: 'Internal server error' });
+        }
+    }
+
+    // Get top students by visits and borrow activity with points leaderboard
+    static async getTopStudentActivity(req, res) {
+        try {
+            const period = Math.max(1, parseInt(req.query.period || '30', 10));
+            const limit = Math.max(5, Math.min(100, parseInt(req.query.limit || '20', 10)));
+            const connection = await pool.getConnection();
+
+            const [rowsInPeriod] = await connection.query(
+                LibraryDashboardController.buildTopStudentsQuery(true),
+                [period, period, limit],
+            );
+
+            let rows = rowsInPeriod;
+            let fallbackApplied = false;
+            if (!rows.length) {
+                const [allTimeRows] = await connection.query(
+                    LibraryDashboardController.buildTopStudentsQuery(false),
+                    [limit],
+                );
+                rows = allTimeRows;
+                fallbackApplied = true;
+            }
+
+            connection.release();
+
+            const topVisitor = rows.reduce(
+                (best, row) => (row.visit_count > (best?.visit_count || 0) ? row : best),
+                null,
+            );
+            const topBorrower = rows.reduce(
+                (best, row) => (row.borrow_count > (best?.borrow_count || 0) ? row : best),
+                null,
+            );
+
+            res.json({
+                period_days: period,
+                leaderboard: rows,
+                highlights: {
+                    top_visitor: topVisitor,
+                    top_borrower: topBorrower,
+                },
+                fallback_all_time: fallbackApplied,
+            });
+        } catch (error) {
+            console.error('Error fetching top student activity:', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    }
+
+    // Get book order planning list with agent details for all books
+    static async getBookOrderAgentDetails(req, res) {
+        try {
+            const limit = Math.max(20, Math.min(1000, parseInt(req.query.limit || '300', 10)));
+            const connection = await pool.getConnection();
+
+            const [summaryRows] = await connection.query(`
+                SELECT COUNT(*) AS total_books
+                FROM books
+            `);
+
+            const [rows] = await connection.query(`
+                SELECT
+                    b.id,
+                    b.title,
+                    b.author,
+                    b.isbn,
+                    COALESCE(NULLIF(TRIM(b.purchase_source), ''), 'Campus Book Fair') AS purchase_source,
+                    COALESCE(NULLIF(TRIM(b.purchase_vendor), ''), COALESCE(NULLIF(TRIM(b.publisher), ''), 'Campus Supply Hub')) AS purchase_vendor,
+                    COALESCE(b.purchase_price, 250.00) AS purchase_price,
+                    b.purchase_date,
+                    COALESCE(NULLIF(TRIM(b.purchase_invoice_no), ''), CONCAT('INV-', LPAD(b.id, 5, '0'))) AS purchase_invoice_no,
+                    COALESCE(NULLIF(TRIM(b.publisher), ''), 'Campus Supply Hub') AS publisher,
+                    COALESCE(b.total_copies, 0) AS total_copies,
+                    COALESCE(t.active_loans, 0) AS active_loans,
+                    COALESCE(r.active_reservations, 0) AS active_reservations,
+                    GREATEST(COALESCE(b.total_copies, 0) - COALESCE(t.active_loans, 0), 0) AS available_now,
+                    GREATEST(
+                        (COALESCE(t.active_loans, 0) + COALESCE(r.active_reservations, 0)) - COALESCE(b.total_copies, 0) + 2,
+                        0
+                    ) AS suggested_order_qty,
+                    CASE
+                        WHEN (COALESCE(t.active_loans, 0) + COALESCE(r.active_reservations, 0)) >= COALESCE(b.total_copies, 0) + 3 THEN 'High'
+                        WHEN (COALESCE(t.active_loans, 0) + COALESCE(r.active_reservations, 0)) >= COALESCE(b.total_copies, 0) THEN 'Medium'
+                        ELSE 'Low'
+                    END AS priority,
+                    COALESCE(NULLIF(TRIM(b.vendor_agent_name), ''), CONCAT(COALESCE(NULLIF(TRIM(b.purchase_vendor), ''), 'Campus Supply Hub'), ' Agent')) AS agent_name,
+                    CONCAT('agent+', b.id, '@libraryvendor.local') AS agent_email,
+                    COALESCE(NULLIF(TRIM(b.vendor_agent_phone), ''), CONCAT('+91-9000', LPAD(MOD(b.id, 10000), 4, '0'))) AS agent_phone,
+                    CASE
+                        WHEN (COALESCE(t.active_loans, 0) + COALESCE(r.active_reservations, 0)) >= COALESCE(b.total_copies, 0) + 3 THEN 3
+                        WHEN (COALESCE(t.active_loans, 0) + COALESCE(r.active_reservations, 0)) >= COALESCE(b.total_copies, 0) THEN 7
+                        ELSE 14
+                    END AS estimated_delivery_days
+                FROM books b
+                LEFT JOIN (
+                    SELECT book_id, COUNT(*) AS active_loans
+                    FROM book_transactions
+                    WHERE return_date IS NULL
+                    GROUP BY book_id
+                ) t ON b.id = t.book_id
+                LEFT JOIN (
+                    SELECT book_id, COUNT(*) AS active_reservations
+                    FROM reservations
+                    WHERE status IN ('active', 'ready')
+                    GROUP BY book_id
+                ) r ON b.id = r.book_id
+                ORDER BY
+                    CASE
+                        WHEN (COALESCE(t.active_loans, 0) + COALESCE(r.active_reservations, 0)) >= COALESCE(b.total_copies, 0) + 3 THEN 1
+                        WHEN (COALESCE(t.active_loans, 0) + COALESCE(r.active_reservations, 0)) >= COALESCE(b.total_copies, 0) THEN 2
+                        ELSE 3
+                    END,
+                    suggested_order_qty DESC,
+                    b.title ASC
+                LIMIT ${limit}
+            `);
+
+            connection.release();
+
+            const summary = {
+                total_books: Number(summaryRows?.[0]?.total_books || rows.length),
+                high_priority: rows.filter((row) => row.priority === 'High').length,
+                medium_priority: rows.filter((row) => row.priority === 'Medium').length,
+                low_priority: rows.filter((row) => row.priority === 'Low').length,
+                total_suggested_qty: rows.reduce((sum, row) => sum + Number(row.suggested_order_qty || 0), 0),
+            };
+
+            res.json({
+                summary,
+                orders: rows,
+            });
+        } catch (error) {
+            console.error('Error fetching book order agent details:', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    }
+
+    // Notify top student via email for active user recognition
+    static async notifyTopStudentAward(req, res) {
+        try {
+            const period = Math.max(1, parseInt(req.body?.period || req.query?.period || '30', 10));
+            const connection = await pool.getConnection();
+
+            const [rows] = await connection.query(
+                LibraryDashboardController.buildTopStudentsQuery(true),
+                [period, period, 1],
+            );
+
+            connection.release();
+
+            if (!rows.length) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No eligible student found for the selected period',
+                });
+            }
+
+            const winner = rows[0];
+            const monthLabel = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+            const result = await EmailService.sendActiveUserAwardEmail(
+                winner.email,
+                winner.student_name,
+                {
+                    monthLabel,
+                    borrowCount: winner.borrow_count,
+                    visitCount: winner.visit_count,
+                    rank: 1,
+                    studentId: winner.student_id,
+                },
+            );
+
+            if (!result.success) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to send email notification',
+                    error: result.error,
+                });
+            }
+
+            return res.json({
+                success: true,
+                message: 'Recognition email sent to top student',
+                winner,
+            });
+        } catch (error) {
+            console.error('Error sending top student award email:', error);
+            return res.status(500).json({ error: 'Internal server error' });
         }
     }
 }

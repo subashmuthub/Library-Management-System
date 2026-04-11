@@ -6,6 +6,9 @@ import { format } from 'date-fns';
 
 const Transactions = () => {
   const { user } = useAuth();
+  const userRole = String(user?.role || user?.role_name || user?.role?.role_name || '').toLowerCase();
+  const isStudent = userRole === 'student';
+  const studentIdentifier = user?.student_id || user?.studentId || (user?.id ? `UID-${user.id}` : 'N/A');
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('all'); // all, inuse, returned, overdue
@@ -46,7 +49,7 @@ const Transactions = () => {
     try {
       await transactionService.checkoutBook({
         ...checkoutForm,
-        user_id: checkoutForm.user_id || user?.id
+        user_id: isStudent ? user?.id : checkoutForm.user_id
       });
       alert('Book checked out successfully!');
       setShowCheckoutModal(false);
@@ -67,6 +70,10 @@ const Transactions = () => {
   };
 
   const confirmReturn = async () => {
+    if (isStudent) {
+      alert('Students have read-only access to transactions.');
+      return;
+    }
     try {
       const result = await transactionService.returnBook(selectedTransaction.id, returnForm);
       if (result.fine_amount > 0) {
@@ -89,6 +96,10 @@ const Transactions = () => {
   };
 
   const confirmRenew = async () => {
+    if (isStudent) {
+      alert('Students have read-only access to transactions.');
+      return;
+    }
     try {
       await transactionService.renewBook(selectedTransaction.id, { renewDays: renewDays });
       alert('Book renewed successfully!');
@@ -161,10 +172,11 @@ const Transactions = () => {
         </div>
         <button
           onClick={() => {
-            setCheckoutForm((prev) => ({ ...prev, user_id: prev.user_id || (user?.id ? String(user.id) : '') }));
+            setCheckoutForm({ user_id: user?.id ? String(user.id) : '', book_id: '', loan_days: 14 });
             setShowCheckoutModal(true);
           }}
           className="btn btn-primary"
+          title="Checkout a book"
         >
           <BookOpen size={20} className="mr-2" />
           Checkout Book
@@ -246,12 +258,14 @@ const Transactions = () => {
                             <button
                               onClick={() => handleReturn(transaction)}
                               className="text-green-600 hover:text-green-700 font-medium"
+                              disabled={isStudent}
                             >
                               Return
                             </button>
                             <button
                               onClick={() => handleRenew(transaction)}
                               className="text-blue-600 hover:text-blue-700 font-medium"
+                              disabled={isStudent}
                             >
                               Renew
                             </button>
@@ -279,15 +293,21 @@ const Transactions = () => {
             <h2 className="text-xl font-bold mb-4">Checkout Book</h2>
             <form onSubmit={handleCheckout} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">User ID</label>
+                <label className="block text-sm font-medium mb-1">{isStudent ? 'Student ID (Auto Generated)' : 'User ID'}</label>
                 <input
-                  type="number"
+                  type="text"
                   required
                   className="input w-full"
-                  value={checkoutForm.user_id}
-                  onChange={(e) => setCheckoutForm({ ...checkoutForm, user_id: e.target.value })}
-                  placeholder="Enter user ID (4-8 for test students)"
+                  value={isStudent ? studentIdentifier : checkoutForm.user_id}
+                  onChange={(e) => {
+                    if (!isStudent) {
+                      setCheckoutForm({ ...checkoutForm, user_id: e.target.value });
+                    }
+                  }}
+                  readOnly={isStudent}
+                  placeholder={isStudent ? 'Auto' : 'Enter user ID'}
                 />
+                {isStudent && <p className="text-xs text-slate-500 mt-1">User ID is automatically mapped from your student account.</p>}
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Book ID</label>

@@ -11,6 +11,14 @@ const EntryLog = () => {
   const [result, setResult] = useState(null);
 
   useEffect(() => {
+    const policyMessage = sessionStorage.getItem('entry_policy_message');
+    if (policyMessage) {
+      setResult({ success: false, error: policyMessage });
+      sessionStorage.removeItem('entry_policy_message');
+    }
+  }, []);
+
+  useEffect(() => {
     loadHistory();
   }, []);
 

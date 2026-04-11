@@ -7,6 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const TransactionController = require('../controllers/transaction.controller');
+const { requireActiveEntryForStudents } = require('../middleware/entry-policy.middleware');
 // const { authenticate } = require('../middleware/auth.middleware');
 
 // Authentication disabled for development
@@ -17,7 +18,7 @@ const TransactionController = require('../controllers/transaction.controller');
  * Checkout a book (regular checkout process)
  * Body: { user_id, book_id, due_date? }
  */
-router.post('/checkout', TransactionController.checkoutBook);
+router.post('/checkout', requireActiveEntryForStudents, TransactionController.checkoutBook);
 
 
 /**

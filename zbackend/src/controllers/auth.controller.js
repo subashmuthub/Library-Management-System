@@ -495,11 +495,15 @@ const logout = async (req, res, next) => {
 const me = (req, res) => {
   if (req.session?.user) {
     if (req.session.user.email_verified === false) {
-      return res.status(401).json({ error: "Email not verified" });
+      return res.json({
+        authenticated: false,
+        user: null,
+        reason: "email_not_verified",
+      });
     }
-    return res.json({ user: req.session.user });
+    return res.json({ authenticated: true, user: req.session.user });
   }
-  return res.status(401).json({ error: "No active session" });
+  return res.json({ authenticated: false, user: null, reason: "no_active_session" });
 };
 
 /**

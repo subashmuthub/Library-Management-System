@@ -14,6 +14,10 @@ const dbConfig = {
     port: process.env.DB_PORT || 3306
 };
 
+function toSqlDateTime(date) {
+    return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
 async function addMockData() {
     const connection = await mysql.createConnection(dbConfig);
     
@@ -157,6 +161,92 @@ async function addMockData() {
             console.log('✅ Book Transactions added\n');
         }
 
+        // 6b. Add structured activity transactions (fresh each run)
+        console.log('📈 Adding structured checkout patterns...');
+        await connection.query(`DELETE FROM book_transactions WHERE notes LIKE '[MOCK_ACTIVITY]%'`);
+
+        const [allStudents] = await connection.query('SELECT id FROM users WHERE role_id = 3 AND status = "active" ORDER BY id LIMIT 6');
+        const [chartBooks] = await connection.query('SELECT id FROM books ORDER BY id LIMIT 60');
+
+        if (allStudents.length && chartBooks.length) {
+            const activityProfiles = [
+                { weeklyVisits: 6, borrowWeight: 1.0, keepActive: 2 },
+                { weeklyVisits: 5, borrowWeight: 0.85, keepActive: 2 },
+                { weeklyVisits: 4, borrowWeight: 0.7, keepActive: 1 },
+                { weeklyVisits: 3, borrowWeight: 0.55, keepActive: 1 },
+                { weeklyVisits: 2, borrowWeight: 0.35, keepActive: 0 },
+                { weeklyVisits: 1, borrowWeight: 0.2, keepActive: 0 }
+            ];
+
+            let bookCursor = 0;
+            const today = new Date();
+            const horizonDays = 45;
+
+            for (let s = 0; s < allStudents.length; s++) {
+                const studentId = allStudents[s].id;
+                const profile = activityProfiles[Math.min(s, activityProfiles.length - 1)];
+                let activeIssued = 0;
+
+                for (let dayOffset = horizonDays; dayOffset >= 1; dayOffset--) {
+                    const dayDate = new Date(today);
+                    dayDate.setDate(today.getDate() - dayOffset);
+                    const weekday = dayDate.getDay();
+                    const isVisitDay = weekday <= profile.weeklyVisits;
+                    const highDemandWindow = dayOffset <= 20;
+                    const shouldBorrow = isVisitDay && ((dayOffset + s) % 3 === 0 || highDemandWindow) && Math.random() < profile.borrowWeight;
+
+                    if (!shouldBorrow) continue;
+
+                    const bookId = chartBooks[bookCursor % chartBooks.length].id;
+                    bookCursor += 1;
+
+                    const checkoutDate = new Date(dayDate);
+                    checkoutDate.setHours(10 + ((s + dayOffset) % 5), 15, 0, 0);
+
+                    const dueDate = new Date(checkoutDate);
+                    dueDate.setDate(checkoutDate.getDate() + 14);
+
+                    const keepOpen = activeIssued < profile.keepActive && dayOffset <= 12;
+                    const markOverdue = keepOpen && dayOffset >= 9;
+
+                    let returnDate = null;
+                    let status = 'returned';
+
+                    if (keepOpen) {
+                        status = markOverdue ? 'active' : 'active';
+                        activeIssued += 1;
+                    } else {
+                        returnDate = new Date(dueDate);
+                        returnDate.setDate(dueDate.getDate() - (1 + ((dayOffset + s) % 5)));
+                        if (returnDate > today) {
+                            returnDate = new Date(today);
+                        }
+                    }
+
+                    await connection.query(`
+                        INSERT INTO book_transactions
+                        (book_id, user_id, checkout_date, due_date, return_date, status, checked_out_by, returned_by, renewal_count, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `, [
+                        bookId,
+                        studentId,
+                        toSqlDateTime(checkoutDate).slice(0, 10),
+                        toSqlDateTime(dueDate).slice(0, 10),
+                        returnDate ? toSqlDateTime(returnDate).slice(0, 10) : null,
+                        status,
+                        librarianId,
+                        returnDate ? librarianId : null,
+                        dayOffset % 9 === 0 ? 1 : 0,
+                        '[MOCK_ACTIVITY] Structured checkout pattern'
+                    ]);
+                }
+            }
+
+            console.log('✅ Structured checkout patterns added\n');
+        } else {
+            console.log('⚠️ Unable to add structured checkout patterns (missing students/books)\n');
+        }
+
         // 7. Add Fines (for overdue books)
         console.log('💰 Adding Fines...');
         const [overdueTransactions] = await connection.query(`
@@ -210,16 +300,60 @@ async function addMockData() {
         console.log('🚪 Adding Entry Logs...');
         const libraryLat = 11.0168;
         const libraryLng = 76.9558;
-        
-        for (let i = 0; i < Math.min(users.length * 3, 20); i++) {
-            const entryType = i % 2 === 0 ? 'entry' : 'exit';
-            await connection.query(`
-                INSERT INTO entry_logs 
-                (user_id, entry_type, latitude, longitude, wifi_ssid, speed_kmh, confidence_score, gps_confidence, wifi_confidence, motion_confidence, auto_logged, timestamp)
-                VALUES (?, ?, ?, ?, 'Library_WiFi', 0, 95, 90, 85, 80, 1, DATE_SUB(NOW(), INTERVAL ? HOUR))
-            `, [users[i % users.length].id, entryType, libraryLat + (Math.random() - 0.5) * 0.001, libraryLng + (Math.random() - 0.5) * 0.001, i]);
+
+        await connection.query(`DELETE FROM entry_logs WHERE wifi_ssid = 'MockLibraryPattern'`);
+
+        const [activityStudents] = await connection.query('SELECT id FROM users WHERE role_id = 3 AND status = "active" ORDER BY id LIMIT 6');
+        const visitProfiles = [6, 5, 4, 3, 2, 1];
+        const lookbackDays = 30;
+
+        for (let s = 0; s < activityStudents.length; s++) {
+            const userId = activityStudents[s].id;
+            const weeklyVisits = visitProfiles[Math.min(s, visitProfiles.length - 1)];
+
+            for (let dayOffset = lookbackDays; dayOffset >= 0; dayOffset--) {
+                const day = new Date();
+                day.setDate(day.getDate() - dayOffset);
+                const weekday = day.getDay();
+                const baseVisits = weekday <= weeklyVisits ? 1 : 0;
+                const burstVisit = weeklyVisits >= 5 && weekday === 2 ? 1 : 0;
+                const visitsToday = baseVisits + burstVisit;
+
+                for (let v = 0; v < visitsToday; v++) {
+                    const entryTime = new Date(day);
+                    entryTime.setHours(8 + ((s + v) % 5), 20 + ((dayOffset + s) % 30), 0, 0);
+
+                    const exitTime = new Date(entryTime);
+                    exitTime.setHours(entryTime.getHours() + 2 + (v % 2));
+
+                    await connection.query(`
+                        INSERT INTO entry_logs
+                        (user_id, entry_type, latitude, longitude, wifi_ssid, speed_kmh, confidence_score, gps_confidence, wifi_confidence, motion_confidence, auto_logged, manual_confirmed, timestamp)
+                        VALUES (?, 'entry', ?, ?, 'MockLibraryPattern', ?, 95, 35, 40, 20, 1, 0, ?)
+                    `, [
+                        userId,
+                        libraryLat + ((s * 0.00008) + (v * 0.00002)),
+                        libraryLng + ((s * 0.00006) + (v * 0.00003)),
+                        (1.2 + ((s + v) % 3)).toFixed(2),
+                        toSqlDateTime(entryTime)
+                    ]);
+
+                    await connection.query(`
+                        INSERT INTO entry_logs
+                        (user_id, entry_type, latitude, longitude, wifi_ssid, speed_kmh, confidence_score, gps_confidence, wifi_confidence, motion_confidence, auto_logged, manual_confirmed, timestamp)
+                        VALUES (?, 'exit', ?, ?, 'MockLibraryPattern', ?, 93, 34, 39, 20, 1, 0, ?)
+                    `, [
+                        userId,
+                        libraryLat + ((s * 0.00007) + (v * 0.00002)),
+                        libraryLng + ((s * 0.00005) + (v * 0.00002)),
+                        (1.1 + ((s + v + 1) % 3)).toFixed(2),
+                        toSqlDateTime(exitTime)
+                    ]);
+                }
+            }
         }
-        console.log('✅ Entry Logs added\n');
+
+        console.log('✅ Entry Logs added with structured daily patterns\n');
 
         // Get final counts
         console.log('\n📊 Final Database Summary:');

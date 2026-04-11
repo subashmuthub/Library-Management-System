@@ -152,6 +152,58 @@ async function ensureBookTransactionColumns(connection, dbName) {
   }
 }
 
+async function ensureBookProcurementColumns(connection, dbName) {
+  const procurementColumns = [
+    {
+      name: "purchase_source",
+      sql: "ALTER TABLE books ADD COLUMN purchase_source VARCHAR(150) NULL AFTER publisher",
+    },
+    {
+      name: "purchase_vendor",
+      sql: "ALTER TABLE books ADD COLUMN purchase_vendor VARCHAR(200) NULL AFTER purchase_source",
+    },
+    {
+      name: "vendor_agent_name",
+      sql: "ALTER TABLE books ADD COLUMN vendor_agent_name VARCHAR(150) NULL AFTER purchase_vendor",
+    },
+    {
+      name: "vendor_agent_phone",
+      sql: "ALTER TABLE books ADD COLUMN vendor_agent_phone VARCHAR(30) NULL AFTER vendor_agent_name",
+    },
+    {
+      name: "purchase_price",
+      sql: "ALTER TABLE books ADD COLUMN purchase_price DECIMAL(10,2) NULL AFTER pages",
+    },
+    {
+      name: "purchase_date",
+      sql: "ALTER TABLE books ADD COLUMN purchase_date DATE NULL AFTER purchase_price",
+    },
+    {
+      name: "purchase_invoice_no",
+      sql: "ALTER TABLE books ADD COLUMN purchase_invoice_no VARCHAR(100) NULL AFTER purchase_date",
+    },
+  ];
+
+  for (const column of procurementColumns) {
+    const exists = await hasColumn(connection, dbName, "books", column.name);
+    if (!exists) {
+      await connection.query(column.sql);
+    }
+  }
+
+  await connection.query(`
+    UPDATE books
+    SET
+      purchase_source = COALESCE(NULLIF(TRIM(purchase_source), ''), 'Campus Book Fair'),
+      purchase_vendor = COALESCE(NULLIF(TRIM(purchase_vendor), ''), NULLIF(TRIM(publisher), ''), 'Campus Supply Hub'),
+      vendor_agent_name = COALESCE(NULLIF(TRIM(vendor_agent_name), ''), CONCAT('Agent ', id)),
+      vendor_agent_phone = COALESCE(NULLIF(TRIM(vendor_agent_phone), ''), CONCAT('+91-9000', LPAD(MOD(id, 10000), 4, '0'))),
+      purchase_price = COALESCE(purchase_price, (250 + (MOD(id, 10) * 35))),
+      purchase_date = COALESCE(purchase_date, DATE_SUB(CURDATE(), INTERVAL MOD(id, 365) DAY)),
+      purchase_invoice_no = COALESCE(NULLIF(TRIM(purchase_invoice_no), ''), CONCAT('INV-', LPAD(id, 5, '0')))
+  `);
+}
+
 async function ensureDefaultRoles(connection) {
   await connection.query(`
     INSERT IGNORE INTO user_roles (id, role_name, description, permissions)
@@ -206,6 +258,7 @@ async function ensureDatabaseReady() {
 
     await ensureRuntimeTables(connection);
     await ensureBookTransactionColumns(connection, dbName);
+    await ensureBookProcurementColumns(connection, dbName);
     await ensureDefaultRoles(connection);
 
     const existingRuntimeTables = await getExistingTables(

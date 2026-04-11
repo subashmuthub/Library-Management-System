@@ -25,6 +25,7 @@ const app = express();
 // Security headers
 app.use(
   helmet({
+    permissionsPolicy: false,
     contentSecurityPolicy: {
       useDefaults: true,
       directives: {
@@ -140,22 +141,62 @@ app.get("/health", (req, res) => {
 
 // API version 1 routes
 const authRoutes = require("./routes/auth.routes");
+const {
+  requireActiveEntryForStudents,
+} = require("./middleware/entry-policy.middleware");
+
+// Role guard: students can read only (GET/HEAD/OPTIONS).
+app.use("/api/v1", (req, res, next) => {
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    return next();
+  }
+
+  // Keep auth endpoints open for login/session lifecycle.
+  if (req.path.startsWith("/auth")) {
+    return next();
+  }
+
+  // Students must be able to update entry log.
+  if (req.method === "POST" && req.path === "/entry/log") {
+    return next();
+  }
+
+  const sessionUser = req.session?.user;
+  const role = String(
+    sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || "",
+  ).toLowerCase();
+
+  // Student exception: allow self-checkout flow.
+  if (role === "student" && req.method === "POST" && req.path === "/transactions/checkout") {
+    return next();
+  }
+
+  if (role === "student") {
+    return res.status(403).json({
+      error: "Forbidden",
+      message: "Students have read-only access",
+    });
+  }
+
+  return next();
+});
+
 app.use("/api/v1/auth", authRoutes);
 app.use("/auth", authRoutes);
 app.use("/api/v1/users", require("./routes/user.routes"));
 app.use("/api/v1/user-management", require("./routes/user-management.routes"));
 app.use("/api/v1/dashboard", require("./routes/library-dashboard.routes"));
 app.use("/api/v1/entry", require("./routes/entry.routes"));
-app.use("/api/v1/books", require("./routes/books.routes"));
+app.use("/api/v1/books", requireActiveEntryForStudents, require("./routes/books.routes"));
 app.use("/api/v1/transactions", require("./routes/transaction.routes"));
 app.use("/api/v1/fines", require("./routes/fine.routes"));
 app.use("/api/v1/payments", require("./routes/payment.routes"));
-app.use("/api/v1/reservations", require("./routes/reservation.routes"));
+app.use("/api/v1/reservations", requireActiveEntryForStudents, require("./routes/reservation.routes"));
 app.use("/api/v1/rfid", require("./routes/rfid.routes"));
 app.use("/api/v1/readers", require("./routes/reader.routes"));
 app.use("/api/v1/shelves", require("./routes/shelf.routes"));
 app.use("/api/v1/beacons", require("./routes/beacon.routes"));
-app.use("/api/v1/navigation", require("./routes/navigation.routes"));
+app.use("/api/v1/navigation", requireActiveEntryForStudents, require("./routes/navigation.routes"));
 
 // 404 handler
 app.use((req, res) => {
