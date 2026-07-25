@@ -7,11 +7,11 @@ import { format } from 'date-fns';
 const Transactions = () => {
   const { user } = useAuth();
   const userRole = String(user?.role || user?.role_name || user?.role?.role_name || '').toLowerCase();
-  const isStudent = userRole === 'student';
+  const isAdminOrLibrarian = userRole === 'admin' || userRole === 'librarian';
   const studentIdentifier = user?.student_id || user?.studentId || (user?.id ? `UID-${user.id}` : 'N/A');
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState('all'); // all, inuse, returned, overdue
+  const [filter, setFilter] = useState('all'); // all, issued, returned, overdue
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [showRenewModal, setShowRenewModal] = useState(false);
   const [showReturnModal, setShowReturnModal] = useState(false);
@@ -34,11 +34,16 @@ const Transactions = () => {
   const loadTransactions = async () => {
     setLoading(true);
     try {
-      const params = filter !== 'all' ? { status: filter === 'inuse' ? 'inuse' : filter } : {};
+      const params = filter !== 'all' ? { status: filter === 'issued' ? 'issued' : filter } : {};
       const response = await transactionService.getAllTransactions(params);
-      setTransactions(response.transactions || response.data || []);
+      let data = response.transactions || response.data || response;
+      if (!Array.isArray(data)) {
+        data = [];
+      }
+      setTransactions(data);
     } catch (error) {
       console.error('Failed to load transactions:', error);
+      setTransactions([]);
     } finally {
       setLoading(false);
     }
@@ -49,7 +54,7 @@ const Transactions = () => {
     try {
       await transactionService.checkoutBook({
         ...checkoutForm,
-        user_id: isStudent ? user?.id : checkoutForm.user_id
+        user_id: !isAdminOrLibrarian ? user?.id : checkoutForm.user_id
       });
       alert('Book checked out successfully!');
       setShowCheckoutModal(false);
@@ -70,8 +75,8 @@ const Transactions = () => {
   };
 
   const confirmReturn = async () => {
-    if (isStudent) {
-      alert('Students have read-only access to transactions.');
+    if (!isAdminOrLibrarian) {
+      alert('You have read-only access to transactions.');
       return;
     }
     try {
@@ -96,8 +101,8 @@ const Transactions = () => {
   };
 
   const confirmRenew = async () => {
-    if (isStudent) {
-      alert('Students have read-only access to transactions.');
+    if (!isAdminOrLibrarian) {
+      alert('You have read-only access to transactions.');
       return;
     }
     try {
@@ -136,7 +141,7 @@ const Transactions = () => {
     };
     
     const labels = {
-      active: 'IN USE',
+      active: 'ISSUED',
       returned: 'RETURNED',
       overdue: 'OVERDUE'
     };
@@ -170,26 +175,28 @@ const Transactions = () => {
           <h1 className="text-2xl font-bold">Transactions</h1>
           <p className="text-gray-600">Manage book checkouts and returns</p>
         </div>
-        <button
-          onClick={() => {
-            setCheckoutForm({ user_id: user?.id ? String(user.id) : '', book_id: '', loan_days: 14 });
-            setShowCheckoutModal(true);
-          }}
-          className="btn btn-primary"
-          title="Checkout a book"
-        >
-          <BookOpen size={20} className="mr-2" />
-          Checkout Book
-        </button>
+        {isAdminOrLibrarian && (
+          <button
+            onClick={() => {
+              setCheckoutForm({ user_id: user?.id ? String(user.id) : '', book_id: '', loan_days: 14 });
+              setShowCheckoutModal(true);
+            }}
+            className="btn btn-primary"
+            title="Checkout a book"
+          >
+            <BookOpen size={20} className="mr-2" />
+            Checkout Book
+          </button>
+        )}
       </div>
 
       {/* Filters */}
       <div className="card">
         <div className="flex gap-2">
-          {['all', 'inuse', 'returned', 'overdue'].map(f => {
+          {['all', 'issued', 'returned', 'overdue'].map(f => {
             const filterLabels = {
               all: 'All',
-              inuse: 'In Use',
+              issued: 'Issued',
               returned: 'Returned',
               overdue: 'Overdue'
             };
@@ -253,19 +260,17 @@ const Transactions = () => {
                     <td className="px-4 py-3">{getStatusBadge(transaction.status)}</td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex gap-2">
-                        {transaction.status === 'active' && (
+                        {transaction.status === 'active' && isAdminOrLibrarian && (
                           <>
                             <button
                               onClick={() => handleReturn(transaction)}
                               className="text-green-600 hover:text-green-700 font-medium"
-                              disabled={isStudent}
                             >
                               Return
                             </button>
                             <button
                               onClick={() => handleRenew(transaction)}
                               className="text-blue-600 hover:text-blue-700 font-medium"
-                              disabled={isStudent}
                             >
                               Renew
                             </button>
@@ -293,21 +298,15 @@ const Transactions = () => {
             <h2 className="text-xl font-bold mb-4">Checkout Book</h2>
             <form onSubmit={handleCheckout} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">{isStudent ? 'Student ID (Auto Generated)' : 'User ID'}</label>
+                <label className="block text-sm font-medium mb-1">User ID</label>
                 <input
                   type="text"
                   required
                   className="input w-full"
-                  value={isStudent ? studentIdentifier : checkoutForm.user_id}
-                  onChange={(e) => {
-                    if (!isStudent) {
-                      setCheckoutForm({ ...checkoutForm, user_id: e.target.value });
-                    }
-                  }}
-                  readOnly={isStudent}
-                  placeholder={isStudent ? 'Auto' : 'Enter user ID'}
+                  value={checkoutForm.user_id}
+                  onChange={(e) => setCheckoutForm({ ...checkoutForm, user_id: e.target.value })}
+                  placeholder="Enter user ID"
                 />
-                {isStudent && <p className="text-xs text-slate-500 mt-1">User ID is automatically mapped from your student account.</p>}
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Book ID</label>
@@ -317,7 +316,7 @@ const Transactions = () => {
                   className="input w-full"
                   value={checkoutForm.book_id}
                   onChange={(e) => setCheckoutForm({ ...checkoutForm, book_id: e.target.value })}
-                  placeholder="Enter book ID (1-25 available)"
+                  placeholder="Enter book ID"
                 />
               </div>
               <div>

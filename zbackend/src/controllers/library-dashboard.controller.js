@@ -59,50 +59,71 @@ class LibraryDashboardController {
             const connection = await pool.getConnection();
 
             // Today's key metrics
-            const [todayStats] = await connection.execute(`
-                SELECT 
-                    COUNT(DISTINCT CASE 
-                        WHEN el.entry_type = 'entry' AND DATE(el.timestamp) = CURDATE() 
-                        THEN el.user_id 
-                    END) as todays_entries,
-                    COUNT(DISTINCT CASE 
-                        WHEN bt.checkout_date = CURDATE() 
-                        THEN bt.id 
-                    END) as todays_checkouts,
-                    COUNT(DISTINCT CASE 
-                        WHEN bt.return_date = CURDATE() 
-                        THEN bt.id 
-                    END) as todays_returns,
-                    COUNT(DISTINCT CASE 
-                        WHEN r.created_at >= CURDATE() 
-                        THEN r.id 
-                    END) as todays_reservations
-                FROM entry_logs el
-                LEFT JOIN book_transactions bt ON 1=1
-                LEFT JOIN reservations r ON 1=1
-                WHERE el.timestamp >= CURDATE()
-                   OR bt.checkout_date >= CURDATE()
-                   OR bt.return_date >= CURDATE()
-                   OR r.created_at >= CURDATE()
+            const [[{ todays_entries }]] = await connection.execute(`
+                SELECT COUNT(DISTINCT user_id) as todays_entries
+                FROM entry_logs 
+                WHERE entry_type = 'entry' AND DATE(timestamp) = CURDATE()
             `);
+            
+            const [[{ todays_checkouts }]] = await connection.execute(`
+                SELECT COUNT(DISTINCT id) as todays_checkouts
+                FROM book_transactions 
+                WHERE checkout_date = CURDATE()
+            `);
+            
+            const [[{ todays_returns }]] = await connection.execute(`
+                SELECT COUNT(DISTINCT id) as todays_returns
+                FROM book_transactions 
+                WHERE return_date = CURDATE()
+            `);
+            
+            const [[{ todays_reservations }]] = await connection.execute(`
+                SELECT COUNT(DISTINCT id) as todays_reservations
+                FROM reservations 
+                WHERE DATE(created_at) = CURDATE()
+            `);
+            
+            const todayStats = [{ todays_entries, todays_checkouts, todays_returns, todays_reservations }];
 
             // Overall library statistics
-            const [overallStats] = await connection.execute(`
+            const [[{ total_users, active_users }]] = await connection.execute(`
                 SELECT 
-                    COUNT(DISTINCT u.id) as total_users,
-                    COUNT(DISTINCT CASE WHEN u.status = 'active' THEN u.id END) as active_users,
-                    COUNT(DISTINCT b.id) as total_books,
-                    COUNT(DISTINCT CASE WHEN b.status = 'active' THEN b.id END) as available_books,
-                    COUNT(DISTINCT bt_active.id) as current_checkouts,
-                    COUNT(DISTINCT r_active.id) as active_reservations,
-                    COUNT(DISTINCT f_pending.id) as pending_fines,
-                    COALESCE(SUM(CASE WHEN f_pending.status = 'pending' THEN f_pending.amount - f_pending.amount_paid END), 0) as total_outstanding_fines
-                FROM users u
-                LEFT JOIN books b ON 1=1
-                LEFT JOIN book_transactions bt_active ON b.id = bt_active.book_id AND bt_active.return_date IS NULL
-                LEFT JOIN reservations r_active ON u.id = r_active.user_id AND r_active.status IN ('active', 'ready')
-                LEFT JOIN fines f_pending ON u.id = f_pending.user_id AND f_pending.status = 'pending'
+                    COUNT(id) as total_users,
+                    COUNT(CASE WHEN status = 'active' THEN id END) as active_users
+                FROM users
             `);
+            
+            const [[{ total_books, available_books }]] = await connection.execute(`
+                SELECT 
+                    COUNT(id) as total_books,
+                    COUNT(CASE WHEN status = 'active' THEN id END) as available_books
+                FROM books
+            `);
+            
+            const [[{ current_checkouts }]] = await connection.execute(`
+                SELECT COUNT(id) as current_checkouts
+                FROM book_transactions
+                WHERE return_date IS NULL
+            `);
+            
+            const [[{ active_reservations }]] = await connection.execute(`
+                SELECT COUNT(id) as active_reservations
+                FROM reservations
+                WHERE status IN ('active', 'ready')
+            `);
+            
+            const [[{ pending_fines, total_outstanding_fines }]] = await connection.execute(`
+                SELECT 
+                    COUNT(id) as pending_fines,
+                    COALESCE(SUM(amount - amount_paid), 0) as total_outstanding_fines
+                FROM fines
+                WHERE status = 'pending'
+            `);
+            
+            const overallStats = [{
+                total_users, active_users, total_books, available_books, 
+                current_checkouts, active_reservations, pending_fines, total_outstanding_fines
+            }];
 
             // Period-based circulation metrics
             const [circulationStats] = await connection.execute(`
@@ -152,31 +173,52 @@ class LibraryDashboardController {
             // User activity trends (last 7 days)
             const [activityTrends] = await connection.execute(`
                 SELECT 
-                    DATE(el.timestamp) as activity_date,
-                    COUNT(DISTINCT CASE WHEN el.entry_type = 'entry' THEN el.user_id END) as unique_entries,
-                    COUNT(DISTINCT bt.user_id) as unique_borrowers,
-                    COUNT(bt.id) as daily_checkouts,
-                    COUNT(CASE WHEN bt.return_date IS NOT NULL THEN bt.id END) as daily_returns
-                FROM entry_logs el
-                LEFT JOIN book_transactions bt ON DATE(el.timestamp) = bt.checkout_date
-                WHERE el.timestamp >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-                GROUP BY DATE(el.timestamp)
-                ORDER BY activity_date DESC
+                    dates.activity_date,
+                    COALESCE(entries.unique_entries, 0) as unique_entries,
+                    COALESCE(checkouts.unique_borrowers, 0) as unique_borrowers,
+                    COALESCE(checkouts.daily_checkouts, 0) as daily_checkouts,
+                    COALESCE(returns.daily_returns, 0) as daily_returns
+                FROM (
+                    SELECT DISTINCT DATE(timestamp) as activity_date 
+                    FROM entry_logs 
+                    WHERE timestamp >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                ) dates
+                LEFT JOIN (
+                    SELECT DATE(timestamp) as d, COUNT(DISTINCT user_id) as unique_entries
+                    FROM entry_logs
+                    WHERE entry_type = 'entry' AND timestamp >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                    GROUP BY DATE(timestamp)
+                ) entries ON dates.activity_date = entries.d
+                LEFT JOIN (
+                    SELECT checkout_date as d, COUNT(DISTINCT user_id) as unique_borrowers, COUNT(id) as daily_checkouts
+                    FROM book_transactions
+                    WHERE checkout_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                    GROUP BY checkout_date
+                ) checkouts ON dates.activity_date = checkouts.d
+                LEFT JOIN (
+                    SELECT return_date as d, COUNT(id) as daily_returns
+                    FROM book_transactions
+                    WHERE return_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                    GROUP BY return_date
+                ) returns ON dates.activity_date = returns.d
+                ORDER BY dates.activity_date DESC
                 LIMIT 7
             `);
 
             // System health indicators
-            const [healthStats] = await connection.execute(`
-                SELECT 
-                    COUNT(CASE WHEN bt.due_date < CURDATE() AND bt.return_date IS NULL THEN bt.id END) as overdue_count,
-                    COUNT(CASE WHEN r.expiry_date < CURDATE() AND r.status = 'ready' THEN r.id END) as expired_reservations,
-                    COUNT(CASE WHEN f.amount - f.amount_paid > 50 THEN f.id END) as high_value_fines,
-                    COUNT(CASE WHEN u.status = 'suspended' THEN u.id END) as suspended_users
-                FROM book_transactions bt
-                LEFT JOIN reservations r ON 1=1
-                LEFT JOIN fines f ON f.status = 'pending'
-                LEFT JOIN users u ON 1=1
+            const [[{ overdue_count }]] = await connection.execute(`
+                SELECT COUNT(id) as overdue_count FROM book_transactions WHERE due_date < CURDATE() AND return_date IS NULL
             `);
+            const [[{ expired_reservations }]] = await connection.execute(`
+                SELECT COUNT(id) as expired_reservations FROM reservations WHERE expiry_date < CURDATE() AND status = 'ready'
+            `);
+            const [[{ high_value_fines }]] = await connection.execute(`
+                SELECT COUNT(id) as high_value_fines FROM fines WHERE status = 'pending' AND amount - amount_paid > 50
+            `);
+            const [[{ suspended_users }]] = await connection.execute(`
+                SELECT COUNT(id) as suspended_users FROM users WHERE status = 'suspended'
+            `);
+            const healthStats = [{ overdue_count, expired_reservations, high_value_fines, suspended_users }];
 
             connection.release();
 
@@ -317,18 +359,26 @@ class LibraryDashboardController {
             const [categoryStats] = await connection.execute(`
                 SELECT 
                     bc.name as category_name,
-                    COUNT(DISTINCT b.id) as total_books,
-                    COUNT(bt.id) as checkout_count,
-                    COUNT(r.id) as reservation_count,
-                    AVG(DATEDIFF(bt.return_date, bt.checkout_date)) as avg_loan_duration
+                    COUNT(b.id) as total_books,
+                    COALESCE(SUM(tx.checkout_count), 0) as checkout_count,
+                    COALESCE(SUM(res.reservation_count), 0) as reservation_count,
+                    AVG(tx.avg_duration) as avg_loan_duration
                 FROM book_categories bc
                 LEFT JOIN books b ON bc.id = b.category_id
-                LEFT JOIN book_transactions bt ON b.id = bt.book_id 
-                    AND bt.checkout_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-                LEFT JOIN reservations r ON b.id = r.book_id 
-                    AND r.created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                LEFT JOIN (
+                    SELECT book_id, COUNT(id) as checkout_count, AVG(DATEDIFF(return_date, checkout_date)) as avg_duration
+                    FROM book_transactions
+                    WHERE checkout_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    GROUP BY book_id
+                ) tx ON b.id = tx.book_id
+                LEFT JOIN (
+                    SELECT book_id, COUNT(id) as reservation_count
+                    FROM reservations
+                    WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    GROUP BY book_id
+                ) res ON b.id = res.book_id
                 GROUP BY bc.id, bc.name
-                ORDER BY (COUNT(bt.id) + COUNT(r.id)) DESC
+                ORDER BY (COALESCE(SUM(tx.checkout_count), 0) + COALESCE(SUM(res.reservation_count), 0)) DESC
             `, [parseInt(period), parseInt(period)]);
 
             // Books with highest demand but low availability
@@ -338,17 +388,24 @@ class LibraryDashboardController {
                     b.title,
                     b.author,
                     b.total_copies,
-                    COUNT(DISTINCT bt.id) as checkout_count,
-                    COUNT(DISTINCT r.id) as reservation_count,
-                    (COUNT(DISTINCT bt.id) + COUNT(DISTINCT r.id)) as total_demand,
-                    ROUND((COUNT(DISTINCT bt.id) + COUNT(DISTINCT r.id)) / NULLIF(b.total_copies, 0), 2) as demand_ratio
+                    COALESCE(tx.checkout_count, 0) as checkout_count,
+                    COALESCE(res.reservation_count, 0) as reservation_count,
+                    (COALESCE(tx.checkout_count, 0) + COALESCE(res.reservation_count, 0)) as total_demand,
+                    ROUND((COALESCE(tx.checkout_count, 0) + COALESCE(res.reservation_count, 0)) / NULLIF(b.total_copies, 0), 2) as demand_ratio
                 FROM books b
-                LEFT JOIN book_transactions bt ON b.id = bt.book_id 
-                    AND bt.checkout_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-                LEFT JOIN reservations r ON b.id = r.book_id 
-                    AND r.created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                LEFT JOIN (
+                    SELECT book_id, COUNT(id) as checkout_count
+                    FROM book_transactions
+                    WHERE checkout_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    GROUP BY book_id
+                ) tx ON b.id = tx.book_id
+                LEFT JOIN (
+                    SELECT book_id, COUNT(id) as reservation_count
+                    FROM reservations
+                    WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                    GROUP BY book_id
+                ) res ON b.id = res.book_id
                 WHERE b.total_copies > 0
-                GROUP BY b.id
                 HAVING total_demand > 0
                 ORDER BY demand_ratio DESC
                 LIMIT 10

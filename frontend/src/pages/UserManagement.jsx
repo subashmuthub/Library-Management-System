@@ -281,6 +281,9 @@ const UserManagement = () => {
                   <option value={1}>Admin</option>
                   <option value={2}>Librarian</option>
                   <option value={3}>Student</option>
+                  <option value={4}>Faculty</option>
+                  <option value={5}>Staff</option>
+                  <option value={6}>Teacher</option>
                 </select>
               </div>
               <div className="flex gap-2 justify-end">
@@ -339,6 +342,9 @@ const UserManagement = () => {
                   <option value={1}>Admin</option>
                   <option value={2}>Librarian</option>
                   <option value={3}>Student</option>
+                  <option value={4}>Faculty</option>
+                  <option value={5}>Staff</option>
+                  <option value={6}>Teacher</option>
                 </select>
               </div>
               <div className="flex gap-2 justify-end">

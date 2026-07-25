@@ -417,3 +417,86 @@ export const userManagementService = {
     return response.data;
   },
 };
+
+// ── Enhancement Modules ────────────────────────────────────────────────────────
+
+// Book Recommendation Engine
+export const recommendationService = {
+  getForStudent: async (studentId) => {
+    const response = await api.get(`/recommendations/student/${studentId}`);
+    return response.data;
+  },
+  getPopular: async (limit = 10) => {
+    const response = await api.get('/recommendations/popular', { params: { limit } });
+    return response.data;
+  },
+  refreshCache: async () => {
+    const response = await api.post('/recommendations/refresh-cache');
+    return response.data;
+  },
+};
+
+// Overdue Alert System
+export const overdueAlertService = {
+  getSummary: async () => {
+    const response = await api.get('/overdue/summary');
+    return response.data;
+  },
+  getList: async (params) => {
+    const response = await api.get('/overdue/list', { params });
+    return response.data;
+  },
+  runCheck: async () => {
+    const response = await api.post('/overdue/run-check');
+    return response.data;
+  },
+  getUserNotifications: async (userId, params) => {
+    const response = await api.get(`/overdue/notifications/${userId}`, { params });
+    return response.data;
+  },
+  markRead: async (userId, ids) => {
+    const response = await api.patch(`/overdue/notifications/${userId}/mark-read`, { ids });
+    return response.data;
+  },
+  getWeeklyTrend: async () => {
+    const response = await api.get('/overdue/trend/weekly');
+    return response.data;
+  },
+};
+
+// QR Shelf Locator
+export const shelfLocatorService = {
+  locateBook: async (bookId) => {
+    const response = await api.get(`/shelf-locator/book/${bookId}`);
+    return response.data;
+  },
+  getAllShelves: async () => {
+    const response = await api.get('/shelf-locator/shelves');
+    return response.data;
+  },
+  searchBooks: async (q) => {
+    const response = await api.get('/shelf-locator/search', { params: { q } });
+    return response.data;
+  },
+};
+
+// Library Heatmap Analytics
+export const heatmapService = {
+  getHeatmap: async (params) => {
+    const response = await api.get('/heatmap', { params });
+    return response.data;
+  },
+  getPopularShelves: async (params) => {
+    const response = await api.get('/heatmap/popular-shelves', { params });
+    return response.data;
+  },
+  getHourlyStats: async () => {
+    const response = await api.get('/heatmap/hourly');
+    return response.data;
+  },
+  getDailyTrend: async (params) => {
+    const response = await api.get('/heatmap/daily-trend', { params });
+    return response.data;
+  },
+};
+

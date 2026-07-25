@@ -31,6 +31,12 @@ const configService = require('../services/config.service');
  */
 const logEntry = async (req, res, next) => {
   try {
+    console.log("=== ENTRY LOG REQUEST ===");
+    console.log("req.body:", req.body);
+    console.log("req.session.user:", req.session?.user);
+    console.log("req.user:", req.user);
+    console.log("req.query:", req.query);
+    
     const {
       entryType,
       latitude,
@@ -38,15 +44,24 @@ const logEntry = async (req, res, next) => {
       wifiSSID,
       speedKmh,
       manualConfirm,
-      userId: requestUserId
+      userId: requestUserId,
+      user_id: request_user_id
     } = req.body;
 
-    const userId = req.user?.id || requestUserId || req.query.user_id;
+    const userId = req.session?.user?.id || req.user?.id || requestUserId || request_user_id || req.query.user_id;
 
     if (!userId) {
       return res.status(401).json({
         error: 'Authentication required',
-        message: 'User ID not found. Please login or provide userId for development.'
+        message: 'User ID not found. Please login or provide userId for development.',
+        debug: {
+          req_body: req.body,
+          req_session_user: req.session?.user,
+          req_user: req.user,
+          requestUserId,
+          request_user_id,
+          userId
+        }
       });
     }
 

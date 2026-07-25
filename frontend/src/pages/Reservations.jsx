@@ -11,6 +11,8 @@ import {
 const Reservations = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const userRole = String(user?.role || user?.role_name || user?.role?.role_name || '').toLowerCase();
+  const isAdminOrLibrarian = userRole === 'admin' || userRole === 'librarian';
 
   const [reservations, setReservations] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -95,6 +97,10 @@ const Reservations = () => {
   };
 
   const handleFulfill = async (reservationId) => {
+    if (!isAdminOrLibrarian) {
+      alert('Only library staff can fulfill reservations.');
+      return;
+    }
     if (!confirm('Mark as fulfilled? The book will be checked out.')) return;
     try {
       await reservationService.fulfillReservation(reservationId);
@@ -260,7 +266,9 @@ const Reservations = () => {
                     <td className="px-4 py-3">
                       {(r.status === 'active' || r.status === 'ready') ? (
                         <div className="flex gap-2">
-                          <button onClick={() => handleFulfill(r.id)} className="text-xs text-green-600 hover:text-green-800 font-semibold hover:underline">Fulfill</button>
+                          {isAdminOrLibrarian && (
+                            <button onClick={() => handleFulfill(r.id)} className="text-xs text-green-600 hover:text-green-800 font-semibold hover:underline">Fulfill</button>
+                          )}
                           <button onClick={() => handleCancel(r.id)} className="text-xs text-red-500 hover:text-red-700 font-semibold hover:underline">Cancel</button>
                         </div>
                       ) : (

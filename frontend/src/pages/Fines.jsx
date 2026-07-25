@@ -1,9 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { fineService } from '../services';
 import { DollarSign, CheckCircle, XCircle, Clock, AlertCircle, Receipt, Download } from 'lucide-react';
+import { useAuth } from '../contexts';
 import PaymentModal from '../components/PaymentModal';
 
 const Fines = () => {
+  const { user } = useAuth();
+  const userRole = String(user?.role || user?.role_name || user?.role?.role_name || '').toLowerCase();
+  const isAdminOrLibrarian = userRole === 'admin' || userRole === 'librarian';
+
   const [fines, setFines] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('pending'); // pending, paid, all
@@ -258,12 +263,14 @@ const Fines = () => {
                                 >
                                   Pay Now
                                 </button>
-                                <button
-                                  onClick={() => handleWaiveFine(fine.id)}
-                                  className="text-blue-600 hover:text-blue-700 font-medium"
-                                >
-                                  Waive
-                                </button>
+                                {isAdminOrLibrarian && (
+                                  <button
+                                    onClick={() => handleWaiveFine(fine.id)}
+                                    className="text-blue-600 hover:text-blue-700 font-medium"
+                                  >
+                                    Waive
+                                  </button>
+                                )}
                               </>
                             )}
                             {fine.status === 'paid' && (

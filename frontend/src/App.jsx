@@ -19,6 +19,12 @@ import Navigation from './pages/Navigation';
 import Profile from './pages/Profile';
 import StudentVisualization from './pages/StudentVisualization';
 import BookOrderDetails from './pages/BookOrderDetails';
+import QuestionPaperLibrary from './pages/QuestionPaperLibrary';
+import Settings from './pages/Settings';
+import BookRecommendations from './pages/BookRecommendations';
+import LibraryHeatmap from './pages/LibraryHeatmap';
+import OverduePrediction from './pages/OverduePrediction';
+import ShelfLocator from './pages/ShelfLocator';
 
 function App() {
   return (
@@ -58,6 +64,12 @@ function App() {
               <Route path="navigation" element={<Navigation />} />
               <Route path="student-visualization" element={<StudentVisualization />} />
               <Route path="book-orders" element={<BookOrderDetails />} />
+              <Route path="question-papers" element={<QuestionPaperLibrary />} />
+              <Route path="recommendations" element={<BookRecommendations />} />
+              <Route path="heatmap" element={<LibraryHeatmap />} />
+              <Route path="overdue-prediction" element={<OverduePrediction />} />
+              <Route path="shelf-locator" element={<ShelfLocator />} />
+              <Route path="settings" element={<PrivateRoute roles={["admin"]}><Settings /></PrivateRoute>} />
               <Route path="profile" element={<Profile />} />
             </Route>
 

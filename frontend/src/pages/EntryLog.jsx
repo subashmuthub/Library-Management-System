@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { entryService } from '../services';
 import { useAuth } from '../contexts';
-import { LogIn, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import { LogIn, CheckCircle, AlertCircle, Clock, PlayCircle } from 'lucide-react';
 import { format } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 
 const EntryLog = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
   const [result, setResult] = useState(null);
 
   useEffect(() => {
@@ -61,10 +64,28 @@ const EntryLog = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => submitEntry(position.coords.latitude, position.coords.longitude),
-        () => submitEntry()
+        () => submitEntry(),
+        { timeout: 5000 }
       );
     } else {
       submitEntry();
+    }
+  };
+
+  const startDemoMode = async () => {
+    setDemoLoading(true);
+    try {
+      await entryService.logEntry({
+        user_id: user?.id,
+        entryType: 'entry',
+        latitude: 0,
+        longitude: 0,
+        manualConfirm: true
+      });
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Demo mode failed:', error);
+      setDemoLoading(false);
     }
   };
 
@@ -94,10 +115,17 @@ const EntryLog = () => {
           </div>
         )}
 
-        <button onClick={markLibraryEntry} className="btn btn-primary w-full" disabled={loading}>
-          <LogIn size={18} className="inline mr-2" />
-          {loading ? 'Marking entry...' : 'I Came To Library'}
-        </button>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button onClick={markLibraryEntry} className="btn btn-primary flex-1" disabled={loading || demoLoading}>
+            <LogIn size={18} className="inline mr-2" />
+            {loading ? 'Marking entry...' : 'I Came To Library'}
+          </button>
+          
+          <button onClick={startDemoMode} className="btn bg-purple-600 hover:bg-purple-700 text-white flex-1" disabled={loading || demoLoading} title="For mentor presentations">
+            <PlayCircle size={18} className="inline mr-2" />
+            {demoLoading ? 'Starting Demo...' : 'Start Demo Mode'}
+          </button>
+        </div>
       </div>
 
       <div className="card">

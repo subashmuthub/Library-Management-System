@@ -122,12 +122,22 @@ class TransactionController {
           });
         }
 
-        if (targetUsers[0].status !== "active" || targetUsers[0].role_name !== "student") {
+        if (targetUsers[0].status !== "active") {
           await connection.rollback();
           connection.release();
           return res.status(400).json({
             success: false,
-            message: "Only student users can borrow books",
+            message: "User account is not active",
+          });
+        }
+
+        const roleName = targetUsers[0].role_name;
+        if (roleName !== "student" && roleName !== "teacher") {
+          await connection.rollback();
+          connection.release();
+          return res.status(400).json({
+            success: false,
+            message: "Only student and teacher users can borrow books",
           });
         }
 
@@ -152,12 +162,15 @@ class TransactionController {
           [userId, "active"],
         );
 
-        if (userCheckouts[0].count >= 5) {
+        // Determine limit based on role
+        const maxLimit = roleName === "teacher" ? 6 : 4;
+
+        if (userCheckouts[0].count >= maxLimit) {
           await connection.rollback();
           connection.release();
           return res.status(400).json({
             success: false,
-            message: "Maximum checkout limit (5) reached",
+            message: `Maximum checkout limit (${maxLimit}) reached for ${roleName}`,
           });
         }
 

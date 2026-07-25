@@ -189,6 +189,14 @@ app.use("/api/v1/dashboard", require("./routes/library-dashboard.routes"));
 app.use("/api/v1/entry", require("./routes/entry.routes"));
 app.use("/api/v1/books", requireActiveEntryForStudents, require("./routes/books.routes"));
 app.use("/api/v1/transactions", require("./routes/transaction.routes"));
+app.use('/api/v1/navigation', require('./routes/navigation.routes'));
+app.use('/api/v1/settings', require('./routes/settings.routes'));
+
+// ── New modules (enhancement sprint) ────────────────────────────────────────
+app.use('/api/v1/recommendations', require('./routes/recommendation.routes'));
+app.use('/api/v1/overdue',         require('./routes/overdue.routes'));
+app.use('/api/v1/shelf-locator',   require('./routes/shelf-locator.routes'));
+app.use('/api/v1/heatmap',         require('./routes/heatmap.routes'));
 app.use("/api/v1/fines", require("./routes/fine.routes"));
 app.use("/api/v1/payments", require("./routes/payment.routes"));
 app.use("/api/v1/reservations", requireActiveEntryForStudents, require("./routes/reservation.routes"));
@@ -196,7 +204,6 @@ app.use("/api/v1/rfid", require("./routes/rfid.routes"));
 app.use("/api/v1/readers", require("./routes/reader.routes"));
 app.use("/api/v1/shelves", require("./routes/shelf.routes"));
 app.use("/api/v1/beacons", require("./routes/beacon.routes"));
-app.use("/api/v1/navigation", requireActiveEntryForStudents, require("./routes/navigation.routes"));
 
 // 404 handler
 app.use((req, res) => {
@@ -254,6 +261,10 @@ const googleRedirectUri =
   process.env.GOOGLE_REDIRECT_URI ||
   `http://localhost:${PORT}/api/v1/auth/google/callback`;
 
+// Start overdue alert background scheduler
+const OverdueService = require('./services/overdue.service');
+const RecommendationService = require('./services/recommendation.service');
+
 const server = app.listen(PORT, () => {
   console.log("=".repeat(60));
   console.log("  Smart Library Automation System");
@@ -267,6 +278,10 @@ const server = app.listen(PORT, () => {
   console.log(`  API: http://localhost:${PORT}/api/v1`);
   console.log(`  Google Callback: ${googleRedirectUri}`);
   console.log("=".repeat(60));
+  
+  // Start background services
+  OverdueService.startScheduler();
+  RecommendationService.refreshPopularityCache().catch(() => {});
 });
 
 server.on("error", (error) => {

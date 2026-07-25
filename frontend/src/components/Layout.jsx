@@ -1,213 +1,323 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts';
 import { 
-  LayoutDashboard, 
-  BookOpen, 
-  LogIn, 
-  Scan, 
-  MapPin as NavigationIcon, 
-  User, 
-  LogOut,
-  Menu,
-  X,
-  Settings,
-  RefreshCw,
-  DollarSign,
-  Bookmark,
-  Users,
-  Search,
-  CalendarDays,
-  ArrowUpRight,
-  BarChart3,
-  PackagePlus,
+  LayoutDashboard, BookOpen, LogIn, Scan, MapPin, User, LogOut,
+  Menu, X, Settings, RefreshCw, DollarSign, Bookmark, Users,
+  Search, CalendarDays, BarChart3, PackagePlus, FileText, ChevronDown,
+  Sparkles, Clock
 } from 'lucide-react';
+
+// Reusable Dropdown Component
+const DropdownMenu = ({ title, icon: Icon, items, currentPath, closeMobile }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const timeoutRef = useRef(null);
+
+  const handleMouseEnter = () => {
+    clearTimeout(timeoutRef.current);
+    setIsOpen(true);
+  };
+
+  const handleMouseLeave = () => {
+    timeoutRef.current = setTimeout(() => setIsOpen(false), 200);
+  };
+
+  const isActive = items.some(item => currentPath === item.path);
+
+  return (
+    <div 
+      className="relative group"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      <button 
+        className={`flex items-center gap-2 px-4 py-2.5 rounded-lg transition-all duration-200 font-medium text-sm ${
+          isActive || isOpen
+            ? 'bg-primary-50 text-primary-700 shadow-sm border border-primary-100'
+            : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+        }`}
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <Icon size={18} />
+        {title}
+        <ChevronDown size={14} className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {/* Dropdown Content */}
+      <div 
+        className={`absolute top-full left-0 mt-1 w-60 bg-white rounded-xl shadow-lg border border-slate-100 p-2 z-50 transition-all duration-200 origin-top ${
+          isOpen ? 'opacity-100 scale-100 visible' : 'opacity-0 scale-95 invisible'
+        }`}
+      >
+        {items.map((item) => {
+          const ItemIcon = item.icon;
+          const isItemActive = currentPath === item.path;
+          return (
+            <Link
+              key={item.path}
+              to={item.path}
+              onClick={() => { setIsOpen(false); closeMobile && closeMobile(); }}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm ${
+                isItemActive
+                  ? 'bg-slate-50 text-primary-600 font-semibold'
+                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+              }`}
+            >
+              <ItemIcon size={16} className={isItemActive ? 'text-primary-500' : 'text-slate-400'} />
+              {item.label}
+              {item.isNew && (
+                <span className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold bg-primary-100 text-primary-700">NEW</span>
+              )}
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 const Layout = () => {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const roleName = typeof user?.role === 'string' ? user.role : user?.role?.role_name;
   const isAdmin = (roleName || '').toLowerCase() === 'admin';
 
   const todayLabel = useMemo(() => {
     return new Date().toLocaleDateString(undefined, {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
+      weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
     });
   }, []);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
   };
 
-  const navItems = [
-    { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { path: '/books', label: 'Books', icon: BookOpen },
-    { path: '/book-search', label: 'Book Search', icon: Search },
-    { path: '/transactions', label: 'Transactions', icon: RefreshCw },
-    { path: '/fines', label: 'Fines', icon: DollarSign },
-    { path: '/reservations', label: 'Reservations', icon: Bookmark },
-    ...(isAdmin ? [{ path: '/users', label: 'Users', icon: Users }] : []),
-    { path: '/entry', label: 'Entry Log', icon: LogIn },
-    { path: '/rfid', label: 'RFID Scanner', icon: Scan },
-    { path: '/navigation', label: 'Navigation', icon: NavigationIcon },
-    { path: '/student-visualization', label: 'Student Visualization', icon: BarChart3 },
-    { path: '/book-orders', label: 'Book Orders', icon: PackagePlus },
+  // Modern Navigation Structure
+  const navigationConfig = [
+    {
+      type: 'link',
+      path: '/dashboard',
+      label: 'Dashboard',
+      icon: LayoutDashboard,
+    },
+    {
+      type: 'dropdown',
+      title: 'Books',
+      icon: BookOpen,
+      items: [
+        { path: '/books', label: 'All Books', icon: BookOpen },
+        { path: '/book-search', label: 'Advanced Search', icon: Search },
+        { path: '/recommendations', label: 'AI Recommendations', icon: Sparkles, isNew: true },
+        { path: '/shelf-locator', label: 'QR Shelf Locator', icon: MapPin, isNew: true },
+        { path: '/book-orders', label: 'Book Orders', icon: PackagePlus },
+        { path: '/question-papers', label: 'Question Papers', icon: FileText },
+      ]
+    },
+    {
+      type: 'dropdown',
+      title: 'Issue Management',
+      icon: RefreshCw,
+      items: [
+        { path: '/transactions', label: 'Transactions', icon: RefreshCw },
+        { path: '/reservations', label: 'Reservations', icon: Bookmark },
+        { path: '/fines', label: 'Fine Management', icon: DollarSign },
+        { path: '/rfid', label: 'RFID Scanner', icon: Scan },
+      ]
+    },
+    ...(isAdmin ? [{
+      type: 'link',
+      path: '/users',
+      label: 'Users',
+      icon: Users,
+    }] : []),
+    {
+      type: 'dropdown',
+      title: 'Analytics & Reports',
+      icon: BarChart3,
+      items: [
+        { path: '/student-visualization', label: 'Student Visualization', icon: BarChart3 },
+        { path: '/heatmap', label: 'Library Heatmap', icon: MapPin, isNew: true },
+        { path: '/overdue-prediction', label: 'Overdue Predictions', icon: Clock, isNew: true },
+        { path: '/entry', label: 'Entry Log', icon: LogIn },
+        { path: '/navigation', label: 'Navigation', icon: MapPin },
+      ]
+    },
+    ...(isAdmin ? [{
+      type: 'link',
+      path: '/settings',
+      label: 'Settings',
+      icon: Settings,
+    }] : []),
   ];
 
-  const currentSection = useMemo(() => {
-    return navItems.find((item) => item.path === location.pathname)?.label || 'Dashboard';
-  }, [location.pathname, navItems]);
-
-  const selectedPath = useMemo(() => {
-    return navItems.some((item) => item.path === location.pathname)
-      ? location.pathname
-      : '/dashboard';
-  }, [location.pathname, navItems]);
-
   return (
-    <div className="flex h-screen bg-slate-50">
-      {/* Sidebar */}
-      <aside
-        className={`${
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        } fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 shadow-lg transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0`}
-      >
-        <div className="flex flex-col h-full">
-          {/* Logo */}
-          <div className="flex items-center justify-between p-5 border-b border-slate-200">
-            <div>
-              <h1 className="text-2xl font-bold text-primary-600 tracking-tight">Smart Library</h1>
-              <span className="text-xs text-slate-500 font-medium">Modern Library Operations Suite</span>
+    <div className="flex flex-col min-h-screen bg-slate-50">
+      {/* Top Navbar Header */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            {/* Logo */}
+            <div className="flex items-center">
+              <div className="flex-shrink-0 flex items-center gap-2 cursor-pointer" onClick={() => navigate('/dashboard')}>
+                <div className="w-8 h-8 bg-gradient-to-br from-primary-500 to-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-sm">
+                  L
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">Smart Library</h1>
+                  <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">University System</span>
+                </div>
+              </div>
             </div>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="lg:hidden text-gray-500 hover:text-gray-700"
-            >
-              <X size={24} />
-            </button>
-          </div>
 
-          {/* Navigation */}
-          <nav className="flex-1 overflow-y-auto p-4">
-            <ul className="space-y-2">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = location.pathname === item.path;
-                return (
-                  <li key={item.path}>
+            {/* Desktop Navigation */}
+            <nav className="hidden xl:flex items-center gap-1 mx-8">
+              {navigationConfig.map((item, idx) => {
+                if (item.type === 'link') {
+                  const Icon = item.icon;
+                  const isActive = location.pathname === item.path;
+                  return (
                     <Link
+                      key={idx}
                       to={item.path}
-                      onClick={() => setSidebarOpen(false)}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
+                      className={`flex items-center gap-2 px-4 py-2.5 rounded-lg transition-all duration-200 font-medium text-sm ${
                         isActive
                           ? 'bg-primary-50 text-primary-700 shadow-sm border border-primary-100'
-                          : 'text-slate-700 hover:bg-slate-100'
+                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                       }`}
                     >
-                      <Icon size={20} />
-                      <span className="font-medium">{item.label}</span>
+                      <Icon size={18} />
+                      {item.label}
                     </Link>
-                  </li>
-                );
+                  );
+                } else if (item.type === 'dropdown') {
+                  return (
+                    <DropdownMenu 
+                      key={idx} 
+                      title={item.title} 
+                      icon={item.icon} 
+                      items={item.items} 
+                      currentPath={location.pathname} 
+                    />
+                  );
+                }
+                return null;
               })}
-            </ul>
-          </nav>
+            </nav>
 
-          {/* User Profile */}
-          <div className="border-t border-slate-200 p-4">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
-                <User size={20} className="text-primary-600" />
+            {/* Right side - Profile & Actions */}
+            <div className="flex items-center gap-4">
+              <div className="hidden md:flex px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-600 items-center gap-2">
+                <CalendarDays size={14} className="text-slate-400" />
+                {todayLabel}
               </div>
-              <div className="flex-1">
-                <p className="font-medium text-sm">{user?.name}</p>
-                <p className="text-xs text-slate-500 capitalize">{user?.role?.role_name || user?.role}</p>
+
+              {/* Profile Dropdown */}
+              <div className="relative">
+                <button 
+                  onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
+                  onBlur={() => setTimeout(() => setProfileDropdownOpen(false), 200)}
+                  className="flex items-center gap-3 p-1.5 rounded-xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-200 focus:outline-none"
+                >
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-100 to-primary-100 flex items-center justify-center border border-indigo-200">
+                    <User size={18} className="text-indigo-600" />
+                  </div>
+                  <div className="hidden md:block text-left">
+                    <p className="text-sm font-semibold text-slate-700 leading-tight">{user?.name}</p>
+                    <p className="text-[11px] text-slate-500 font-medium uppercase tracking-wider">{user?.role?.role_name || user?.role}</p>
+                  </div>
+                </button>
+
+                {profileDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-slate-100 py-1 z-50">
+                    <Link to="/profile" onMouseDown={() => setProfileDropdownOpen(false)} className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50">
+                      <Settings size={16} className="text-slate-400" />
+                      My Profile
+                    </Link>
+                    <div className="border-t border-slate-100 my-1"></div>
+                    <button onMouseDown={handleLogout} className="flex items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 w-full text-left">
+                      <LogOut size={16} />
+                      Logout
+                    </button>
+                  </div>
+                )}
               </div>
-            </div>
-            <div className="flex gap-2">
-              <Link
-                to="/profile"
-                onClick={() => setSidebarOpen(false)}
-                className="flex-1 btn btn-secondary text-sm py-2"
-              >
-                <Settings size={16} className="inline mr-1" />
-                Profile
-              </Link>
+
+              {/* Mobile menu button */}
               <button
-                onClick={handleLogout}
-                className="flex-1 btn btn-danger text-sm py-2"
+                className="xl:hidden p-2 rounded-lg text-slate-500 hover:bg-slate-100 focus:outline-none"
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               >
-                <LogOut size={16} className="inline mr-1" />
-                Logout
+                {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
               </button>
             </div>
           </div>
         </div>
-      </aside>
+      </header>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Bar */}
-        <header className="bg-white/95 backdrop-blur border-b border-slate-200 shadow-sm">
-          <div className="flex items-center justify-between p-4">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="lg:hidden text-gray-500 hover:text-gray-700"
-            >
-              <Menu size={24} />
-            </button>
-            <div className="lg:ml-0 ml-12 min-w-0">
-              <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Workspace</p>
-              <h2 className="text-xl font-semibold text-slate-800 tracking-tight truncate">
-                {currentSection}
-              </h2>
-            </div>
-
-            <div className="hidden lg:flex items-center gap-3">
-              <label className="sr-only" htmlFor="quick-jump">Quick jump</label>
-              <div className="relative">
-                <select
-                  id="quick-jump"
-                  className="input py-2 pl-3 pr-10 text-sm min-w-[190px]"
-                  value={selectedPath}
-                  onChange={(e) => navigate(e.target.value)}
-                >
-                  {navItems.map((item) => (
-                    <option key={item.path} value={item.path}>{item.label}</option>
-                  ))}
-                </select>
-                <ArrowUpRight size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-              </div>
-
-              <div className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm text-slate-600 flex items-center gap-2 shadow-sm">
-                <CalendarDays size={15} className="text-slate-500" />
-                {todayLabel}
-              </div>
-            </div>
-
-            <div className="lg:hidden w-10"></div>
+      {/* Mobile Navigation Menu */}
+      {mobileMenuOpen && (
+        <div className="xl:hidden bg-white border-b border-slate-200 absolute top-16 left-0 w-full shadow-lg z-30 max-h-[calc(100vh-4rem)] overflow-y-auto">
+          <div className="px-4 py-3 space-y-1">
+            {navigationConfig.map((item, idx) => {
+              if (item.type === 'link') {
+                const Icon = item.icon;
+                const isActive = location.pathname === item.path;
+                return (
+                  <Link
+                    key={idx}
+                    to={item.path}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${
+                      isActive ? 'bg-primary-50 text-primary-700' : 'text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Icon size={18} />
+                    {item.label}
+                  </Link>
+                );
+              } else if (item.type === 'dropdown') {
+                return (
+                  <div key={idx} className="py-2">
+                    <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                      <item.icon size={14} />
+                      {item.title}
+                    </div>
+                    <div className="pl-6 space-y-1 mt-1 border-l-2 border-slate-100 ml-5">
+                      {item.items.map((subItem) => (
+                        <Link
+                          key={subItem.path}
+                          to={subItem.path}
+                          onClick={() => setMobileMenuOpen(false)}
+                          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm ${
+                            location.pathname === subItem.path
+                              ? 'text-primary-600 font-semibold bg-primary-50'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {subItem.label}
+                          {subItem.isNew && (
+                            <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold bg-primary-100 text-primary-700">NEW</span>
+                          )}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })}
           </div>
-        </header>
-
-        {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6 bg-slate-50">
-          <Outlet />
-        </main>
-      </div>
-
-      {/* Overlay for mobile */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        </div>
       )}
+
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-[1600px] w-full mx-auto p-4 sm:p-6 lg:p-8">
+        <Outlet />
+      </main>
     </div>
   );
 };

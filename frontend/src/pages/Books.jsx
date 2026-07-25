@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { bookService } from "../services";
+import { useAuth } from "../contexts";
 import {
   Search,
   BookOpen,
@@ -107,6 +108,10 @@ const rowsToObjects = (rows) => {
 };
 
 const Books = () => {
+  const { user } = useAuth();
+  const roleName = typeof user?.role === 'string' ? user.role : user?.role?.role_name;
+  const isAdminOrLibrarian = (roleName || '').toLowerCase() === 'admin' || (roleName || '').toLowerCase() === 'librarian';
+
   const [books, setBooks] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -148,20 +153,10 @@ const Books = () => {
   const [importResults, setImportResults] = useState(null);
 
   // New feature states - persist viewMode in localStorage
-  const [viewMode, setViewMode] = useState(() => {
-    const saved = localStorage.getItem("booksViewMode");
-    return saved || "grid";
-  }); // 'grid' or 'list'
   const [sortBy, setSortBy] = useState("title");
   const [sortOrder, setSortOrder] = useState("asc");
   const [favorites, setFavorites] = useState(new Set());
   const [recentlyViewed, setRecentlyViewed] = useState([]);
-
-  // Save viewMode preference
-  useEffect(() => {
-    localStorage.setItem("booksViewMode", viewMode);
-    console.log("View mode changed to:", viewMode);
-  }, [viewMode]);
 
   // Reset form
   const resetForm = () => {
@@ -618,8 +613,8 @@ const Books = () => {
             }
           >
             <option value="">All Status</option>
-            <option value="available">✅ Available Only</option>
-            <option value="in-use">🔴 In Use Only</option>
+            <option value="available">✅ Available</option>
+            <option value="in-use">🔴 Issued</option>
           </select>
 
           {/* Clear Button */}
@@ -695,50 +690,20 @@ const Books = () => {
           </div>
 
           {/* Primary Action Button */}
-          <button
-            onClick={handleAddBook}
-            className="btn btn-primary flex items-center gap-2 px-6 py-2.5 shadow-md hover:shadow-lg transition-shadow"
-          >
-            <Plus size={18} />
-            Add Book
-          </button>
+          {isAdminOrLibrarian && (
+            <button
+              onClick={handleAddBook}
+              className="btn btn-primary flex items-center gap-2 px-6 py-2.5 shadow-md hover:shadow-lg transition-shadow"
+            >
+              <Plus size={18} />
+              Add Book
+            </button>
+          )}
         </div>
 
         {/* Controls Bar */}
         <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
-          {/* Left Side - View Controls */}
           <div className="flex items-center gap-3">
-            {/* View Toggle */}
-            <div className="flex border border-gray-300 rounded-lg overflow-hidden shadow-sm bg-white">
-              <button
-                onClick={() => {
-                  console.log("Switching to grid view");
-                  setViewMode("grid");
-                }}
-                className={`p-2 transition-all duration-200 ${
-                  viewMode === "grid"
-                    ? "bg-primary-500 text-white shadow-inner"
-                    : "bg-white text-gray-600 hover:bg-gray-50"
-                }`}
-                title="Grid View"
-              >
-                <Grid size={18} strokeWidth={viewMode === "grid" ? 2.5 : 2} />
-              </button>
-              <button
-                onClick={() => {
-                  console.log("Switching to list view");
-                  setViewMode("list");
-                }}
-                className={`p-2 border-l border-gray-300 transition-all duration-200 ${
-                  viewMode === "list"
-                    ? "bg-primary-500 text-white shadow-inner"
-                    : "bg-white text-gray-600 hover:bg-gray-50"
-                }`}
-                title="List View"
-              >
-                <List size={18} strokeWidth={viewMode === "list" ? 2.5 : 2} />
-              </button>
-            </div>
 
             {/* Sort Controls */}
             <div className="flex items-center gap-2 border border-gray-300 rounded-lg overflow-hidden bg-white">
@@ -780,13 +745,15 @@ const Books = () => {
               <span className="hidden sm:inline">Export</span>
             </button>
 
-            <button
-              onClick={handleOpenImportModal}
-              className="btn bg-green-600 hover:bg-green-700 text-white flex items-center gap-2 px-4 py-2"
-            >
-              <Upload size={16} />
-              <span className="hidden sm:inline">Import</span>
-            </button>
+            {isAdminOrLibrarian && (
+              <button
+                onClick={handleOpenImportModal}
+                className="btn bg-green-600 hover:bg-green-700 text-white flex items-center gap-2 px-4 py-2"
+              >
+                <Upload size={16} />
+                <span className="hidden sm:inline">Import</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -826,188 +793,130 @@ const Books = () => {
               </div>
             )}
 
-            {/* Books Grid/List */}
-            {viewMode === "grid" ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {books.map((book) => (
-                  <div
-                    key={book.id}
-                    className="block p-4 border border-gray-200 rounded-lg hover:shadow-md transition-all relative"
-                  >
-                    {/* Favorite Button */}
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        toggleFavorite(book.id);
-                      }}
-                      className="absolute top-2 right-2 p-1 rounded-full hover:bg-gray-100 transition-colors"
-                    >
-                      <Star
-                        size={16}
-                        className={
-                          favorites.has(book.id)
-                            ? "fill-yellow-400 text-yellow-400"
-                            : "text-gray-400"
-                        }
-                      />
-                    </button>
-
-                    <Link
-                      to={`/books/${book.id}`}
-                      className="block mb-3"
-                      onClick={() => addToRecentlyViewed(book)}
-                    >
-                      <div className="flex gap-3">
-                        <div className="w-16 h-20 bg-primary-100 rounded flex items-center justify-center flex-shrink-0">
-                          <BookOpen size={24} className="text-primary-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-gray-900 truncate mb-1">
-                            {book.title}
-                          </h3>
-                          <p className="text-sm text-gray-600 truncate mb-2">
-                            {book.author}
-                          </p>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="badge badge-info text-xs">
-                              {book.category}
-                            </span>
-                            {book.is_available ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">
-                                <CheckCircle size={12} className="mr-1" />
-                                Available
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">
-                                <XCircle size={12} className="mr-1" />
-                                In Use
-                              </span>
-                            )}
-                            {book.current_shelf && (
-                              <span className="flex items-center gap-1 text-xs text-gray-500">
-                                <MapPin size={12} />
-                                {book.current_shelf}
-                              </span>
-                            )}
-                          </div>
-                          {book.publication_year && (
-                            <div className="text-xs text-gray-500 mt-1">
-                              Published: {book.publication_year}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </Link>
-
-                    {/* Action Buttons */}
-                    <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100">
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          handleEditBook(book);
-                        }}
-                        className="bg-blue-50 hover:bg-blue-100 text-blue-600 flex items-center gap-1 text-xs px-3 py-1 rounded border border-blue-200"
-                      >
-                        <Edit size={14} />
-                        Edit
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          handleDeleteBook(book.id);
-                        }}
-                        className="bg-red-50 hover:bg-red-100 text-red-600 flex items-center gap-1 text-xs px-3 py-1 rounded border border-red-200"
-                      >
-                        <Trash2 size={14} />
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-200">
-                {books.map((book) => (
-                  <div
-                    key={book.id}
-                    className="py-4 flex items-center justify-between hover:bg-gray-50 px-4 rounded transition-colors"
-                  >
-                    <div className="flex items-center gap-4 flex-1">
-                      <div className="w-12 h-16 bg-primary-100 rounded flex items-center justify-center">
-                        <BookOpen size={20} className="text-primary-600" />
-                      </div>
-                      <div className="flex-1">
+            {/* Books Table */}
+            <div className="table-shell mt-4">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ISBN</th>
+                    <th>Book Info</th>
+                    <th>Category</th>
+                    <th>Location</th>
+                    <th>Copies</th>
+                    <th>Status</th>
+                    {isAdminOrLibrarian && <th className="text-right">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {books.map((book) => (
+                    <tr key={book.id}>
+                      <td className="font-mono text-xs">{book.isbn || "-"}</td>
+                      <td>
                         <Link
                           to={`/books/${book.id}`}
                           onClick={() => addToRecentlyViewed(book)}
-                          className="block"
+                          className="group block"
                         >
-                          <h3 className="font-semibold text-gray-900 hover:text-primary-600">
+                          <div className="font-semibold text-gray-900 group-hover:text-primary-600">
                             {book.title}
-                          </h3>
-                          <p className="text-sm text-gray-600">{book.author}</p>
-                          <div className="flex items-center gap-3 mt-1 flex-wrap">
-                            <span className="badge badge-info text-xs">
-                              {book.category}
-                            </span>
-                            {book.is_available ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">
-                                <CheckCircle size={12} className="mr-1" />
-                                Available
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">
-                                <XCircle size={12} className="mr-1" />
-                                In Use
-                              </span>
-                            )}
-                            {book.publication_year && (
-                              <span className="text-xs text-gray-500">
-                                Published: {book.publication_year}
-                              </span>
-                            )}
-                            {book.isbn && (
-                              <span className="text-xs text-gray-500">
-                                ISBN: {book.isbn}
-                              </span>
-                            )}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {book.author}
+                            {book.publisher ? ` • ${book.publisher}` : ""}
                           </div>
                         </Link>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => toggleFavorite(book.id)}
-                        className="p-2 rounded-full hover:bg-gray-100"
-                      >
-                        <Star
-                          size={16}
-                          className={
-                            favorites.has(book.id)
-                              ? "fill-yellow-400 text-yellow-400"
-                              : "text-gray-400"
-                          }
-                        />
-                      </button>
-                      <button
-                        onClick={() => handleEditBook(book)}
-                        className="p-2 rounded-full hover:bg-blue-100 text-blue-600"
-                        title="Edit Book"
-                      >
-                        <Edit size={16} />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteBook(book.id)}
-                        className="p-2 rounded-full hover:bg-red-100 text-red-600"
-                        title="Delete Book"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                      </td>
+                      <td>
+                        <span className="badge badge-info text-xs whitespace-nowrap">
+                          {book.category}
+                        </span>
+                      </td>
+                      <td>
+                        {book.current_shelf ? (
+                          <div className="flex items-center gap-1 text-xs text-gray-600 whitespace-nowrap">
+                            <MapPin size={12} />
+                            {book.current_shelf}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td>
+                        <div className="text-xs">
+                          <span className="font-medium text-gray-900">{book.total_copies}</span> Total
+                        </div>
+                      </td>
+                      <td>
+                        {book.is_available ? (
+                          <span className="badge badge-success whitespace-nowrap">
+                            <CheckCircle size={12} className="mr-1 inline" />
+                            Available
+                          </span>
+                        ) : (
+                          <span className="badge badge-danger whitespace-nowrap">
+                            <XCircle size={12} className="mr-1 inline" />
+                            Issued
+                          </span>
+                        )}
+                      </td>
+                      {isAdminOrLibrarian ? (
+                        <td>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => toggleFavorite(book.id)}
+                              className="p-1.5 rounded hover:bg-gray-200 transition-colors"
+                              title="Favorite"
+                            >
+                              <Star
+                                size={15}
+                                className={
+                                  favorites.has(book.id)
+                                    ? "fill-yellow-400 text-yellow-400"
+                                    : "text-gray-400"
+                                }
+                              />
+                            </button>
+                            <button
+                              onClick={() => handleEditBook(book)}
+                              className="p-1.5 rounded hover:bg-blue-100 text-blue-600 transition-colors"
+                              title="Edit Book"
+                            >
+                              <Edit size={15} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteBook(book.id)}
+                              className="p-1.5 rounded hover:bg-red-100 text-red-600 transition-colors"
+                              title="Delete Book"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </td>
+                      ) : (
+                        <td>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => toggleFavorite(book.id)}
+                              className="p-1.5 rounded hover:bg-gray-200 transition-colors"
+                              title="Favorite"
+                            >
+                              <Star
+                                size={15}
+                                className={
+                                  favorites.has(book.id)
+                                    ? "fill-yellow-400 text-yellow-400"
+                                    : "text-gray-400"
+                                }
+                              />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
         ) : (
           <div className="text-center py-12">
