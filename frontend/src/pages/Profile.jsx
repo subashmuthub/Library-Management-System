@@ -15,6 +15,7 @@ const Profile = () => {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState({ borrowed: 0, visits: 0 });
+  const [avatarFile, setAvatarFile] = useState(null);
   const displayName = user?.name || [user?.first_name || user?.firstName, user?.last_name || user?.lastName].filter(Boolean).join(' ');
   const displayRole = user?.role?.role_name || user?.role;
   const [borrowedBooks, setBorrowedBooks] = useState([]);
@@ -77,6 +78,25 @@ const Profile = () => {
     }
   };
 
+  const handleAvatarChange = (e) => {
+    setAvatarFile(e.target.files?.[0] || null);
+  };
+
+  const handleUploadAvatar = async () => {
+    if (!avatarFile) return setResult({ success: false, message: 'Please select a file to upload' });
+    setLoading(true);
+    try {
+      const response = await authService.uploadAvatar(avatarFile, user?.id);
+      updateUser(response.user);
+      setResult({ success: true, message: 'Avatar uploaded' });
+      setAvatarFile(null);
+    } catch (err) {
+      setResult({ success: false, message: err.response?.data?.message || 'Upload failed' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCancel = () => {
     setFormData({
       first_name: user?.first_name || user?.firstName || '',
@@ -92,8 +112,14 @@ const Profile = () => {
     <div className="max-w-2xl mx-auto space-y-6">
       {/* Profile Header */}
       <div className="card text-center">
-        <div className="w-24 h-24 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <User size={48} className="text-primary-600" />
+        <div className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-4 overflow-hidden bg-white">
+          {user?.profile_image_url ? (
+            <img src={user.profile_image_url} alt="avatar" className="w-24 h-24 object-cover" />
+          ) : (
+            <div className="w-24 h-24 bg-primary-100 rounded-full flex items-center justify-center">
+              <User size={48} className="text-primary-600" />
+            </div>
+          )}
         </div>
         <h1 className="text-2xl font-bold mb-1">{displayName || 'User'}</h1>
         <p className="text-gray-600 capitalize">{displayRole}</p>
@@ -130,6 +156,13 @@ const Profile = () => {
 
         {isEditing ? (
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Avatar</label>
+              <input type="file" accept="image/*" onChange={handleAvatarChange} />
+              <div className="mt-2 flex gap-2">
+                <button type="button" onClick={handleUploadAvatar} className="btn btn-secondary">Upload Avatar</button>
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">

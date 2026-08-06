@@ -79,6 +79,9 @@ if (hasBuiltFrontend) {
   app.use(express.static(frontendDistPath));
 }
 
+// Serve uploaded files (avatars, etc.)
+app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
+
 // Cookie parser middleware
 // Server-side session middleware — replaces the old JWT-in-cookie approach.
 // The session ID is stored in an httpOnly cookie ("library.sid").
@@ -166,8 +169,17 @@ app.use("/api/v1", (req, res, next) => {
     sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || "",
   ).toLowerCase();
 
-  // Student exception: allow self-checkout flow.
-  if (role === "student" && req.method === "POST" && req.path === "/transactions/checkout") {
+  // Student exceptions: allow self-checkout and reservations.
+  if (
+    role === "student" &&
+    req.method === "POST" &&
+    (req.path === "/transactions/checkout" || req.path.startsWith("/reservations"))
+  ) {
+    return next();
+  }
+
+  // Allow students to update their own profile (PUT /users/profile)
+  if (role === "student" && req.method === "PUT" && req.path === "/users/profile") {
     return next();
   }
 

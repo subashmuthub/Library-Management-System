@@ -5,6 +5,8 @@
  */
 
 const { query } = require('../config/database');
+const fs = require('fs');
+const path = require('path');
 
 /**
  * Get current user profile
@@ -100,7 +102,7 @@ const getUserById = async (req, res, next) => {
  */
 const updateProfile = async (req, res, next) => {
   try {
-    const { first_name, last_name, firstName, lastName, phone, email, student_id } = req.body;
+    const { first_name, last_name, firstName, lastName, phone, email, student_id, profile_image_url, profileImageUrl } = req.body;
     
     // SECURITY: Role changes are NOT allowed from profile updates
     // Role can only be changed by admins through user management endpoints
@@ -129,6 +131,19 @@ const updateProfile = async (req, res, next) => {
     if (phone) {
       updates.push('phone = ?');
       values.push(phone);
+    }
+    // profile image URL support (creates column if needed)
+    const profileImageValue = profile_image_url || profileImageUrl;
+    if (profileImageValue) {
+      // ensure column exists
+      const col = await query(
+        `SELECT COUNT(*) as total FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'profile_image_url'`
+      );
+      if (!col[0]?.total) {
+        await query(`ALTER TABLE users ADD COLUMN profile_image_url VARCHAR(500) NULL`);
+      }
+      updates.push('profile_image_url = ?');
+      values.push(profileImageValue);
     }
 
     if (updates.length === 0) {
@@ -175,7 +190,8 @@ const updateProfile = async (req, res, next) => {
         email: users[0].email,
         role: users[0].role,
         student_id: users[0].student_id,
-        phone: users[0].phone
+        phone: users[0].phone,
+        profile_image_url: users[0].profile_image_url || null
       }
     });
 
@@ -241,5 +257,53 @@ module.exports = {
   getProfile,
   getUserById,
   updateProfile,
-  listUsers
+  listUsers,
+  uploadAvatar: async (req, res, next) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded', message: 'Please attach an avatar file under field name "avatar"' });
+      }
+
+      const userId = req.session?.user?.id || req.body.userId;
+      if (!userId) {
+        return res.status(400).json({ error: 'Bad Request', message: 'User ID is required (session or body.userId)' });
+      }
+
+      // Ensure profile_image_url column exists
+      const col = await query(
+        `SELECT COUNT(*) as total FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'profile_image_url'`
+      );
+      if (!col[0]?.total) {
+        await query(`ALTER TABLE users ADD COLUMN profile_image_url VARCHAR(500) NULL`);
+      }
+
+      // Build accessible URL path
+      const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+
+      await query(`UPDATE users SET profile_image_url = ? WHERE id = ?`, [avatarUrl, userId]);
+
+      // Return updated user info
+      const users = await query(
+        `SELECT id, email, first_name, last_name, student_id, phone, u.updated_at, u.created_at, profile_image_url, ur.role_name as role
+         FROM users u LEFT JOIN user_roles ur ON u.role_id = ur.id WHERE u.id = ?`,
+        [userId]
+      );
+
+      res.json({
+        message: 'Avatar uploaded successfully',
+        user: {
+          id: users[0].id,
+          email: users[0].email,
+          first_name: users[0].first_name,
+          last_name: users[0].last_name,
+          student_id: users[0].student_id,
+          phone: users[0].phone,
+          role: users[0].role,
+          profile_image_url: users[0].profile_image_url
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 };

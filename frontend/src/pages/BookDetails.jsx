@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { bookService, navigationService, transactionService, reservationService } from '../services';
-import { ArrowLeft, BookOpen, MapPin, Compass, Clock, Tag, CheckCircle, XCircle, User, Calendar, AlertCircle, BookmarkPlus, Users } from 'lucide-react';
+import { ArrowLeft, BookOpen, MapPin, Compass, Clock, Tag, CheckCircle, XCircle, User, Calendar, AlertCircle, BookmarkPlus, Users, ShoppingCart } from 'lucide-react';
 import { format } from 'date-fns';
 
 const BookDetails = () => {
@@ -15,7 +15,10 @@ const BookDetails = () => {
   const [navigation, setNavigation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reserving, setReserving] = useState(false);
+  const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const [checkoutForm, setCheckoutForm] = useState(() => ({ user_id: currentUser?.id ? String(currentUser.id) : '', loan_days: 14 }));
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
   const isStudent = (currentUser?.role || '').toLowerCase() === 'student';
 
   useEffect(() => {
@@ -102,6 +105,27 @@ const BookDetails = () => {
       setNavigation(navData);
     } catch (error) {
       console.error('Failed to get navigation:', error);
+    }
+  };
+
+  const handleCheckout = async (e) => {
+    e?.preventDefault?.();
+    if (!checkoutForm.user_id) {
+      alert('Please login or provide a valid User ID to checkout');
+      return;
+    }
+    setCheckoutLoading(true);
+    try {
+      await transactionService.checkoutBook({ book_id: id, user_id: checkoutForm.user_id, loan_days: checkoutForm.loan_days });
+      alert('Book checked out successfully!');
+      setShowCheckoutModal(false);
+      // refresh details
+      await loadBookDetails();
+    } catch (error) {
+      const data = error.response?.data;
+      alert(data?.message || data?.error || error.message || 'Checkout failed');
+    } finally {
+      setCheckoutLoading(false);
     }
   };
 
@@ -227,10 +251,23 @@ const BookDetails = () => {
 
             <div className="flex gap-3">
               {book.is_available || book.status === 'available' ? (
-                <button onClick={handleNavigate} className="btn btn-primary">
-                  <Compass size={20} className="inline mr-2" />
-                  Get Directions
-                </button>
+                <>
+                  <button onClick={handleNavigate} className="btn btn-primary">
+                    <Compass size={20} className="inline mr-2" />
+                    Get Directions
+                  </button>
+                  <button
+                    onClick={() => {
+                      setCheckoutForm({ user_id: currentUser?.id ? String(currentUser.id) : '', loan_days: 14 });
+                      setShowCheckoutModal(true);
+                    }}
+                    className="btn btn-success"
+                    title="Checkout This Book"
+                  >
+                    <ShoppingCart size={18} className="inline mr-2" />
+                    Checkout This Book
+                  </button>
+                </>
               ) : (
                 <button 
                   onClick={handleReserveBook} 
@@ -245,6 +282,43 @@ const BookDetails = () => {
           </div>
         </div>
       </div>
+
+      {/* Checkout Modal */}
+      {showCheckoutModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
+            <h2 className="text-xl font-bold mb-4">Checkout Book</h2>
+            <form onSubmit={handleCheckout} className="space-y-4">
+              <p className="font-semibold text-gray-900 text-sm">{book.title}</p>
+              <p className="text-xs text-gray-500">by {book.author}</p>
+              <div>
+                <label className="text-sm text-gray-600">User ID</label>
+                <input
+                  type="text"
+                  value={checkoutForm.user_id}
+                  onChange={(e) => setCheckoutForm((f) => ({ ...f, user_id: e.target.value }))}
+                  className="input w-full mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-600">Loan Days</label>
+                <input
+                  type="number"
+                  value={checkoutForm.loan_days}
+                  onChange={(e) => setCheckoutForm((f) => ({ ...f, loan_days: parseInt(e.target.value || '14') }))}
+                  className="input w-full mt-1"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setShowCheckoutModal(false)} className="btn">Cancel</button>
+                <button type="submit" disabled={checkoutLoading} className="btn btn-primary">
+                  {checkoutLoading ? 'Checking out...' : 'Checkout'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Navigation Instructions */}
       {navigation && (
@@ -371,8 +445,8 @@ const BookDetails = () => {
             <h2 className="text-xl font-bold">Same ISBN Copy Locations</h2>
           </div>
           <div className="space-y-2">
-            {isbnCopies.map((copy) => (
-              <div key={copy.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            {isbnCopies.map((copy, idx) => (
+              <div key={`${copy.id}-${idx}`} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                 <div>
                   <p className="font-medium">Copy ID #{copy.id}</p>
                   <p className="text-sm text-gray-600">Location: {copy.location || 'Unassigned'}</p>

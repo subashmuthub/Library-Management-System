@@ -222,8 +222,14 @@ const Layout = () => {
                   onBlur={() => setTimeout(() => setProfileDropdownOpen(false), 200)}
                   className="flex items-center gap-3 p-1.5 rounded-xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-200 focus:outline-none"
                 >
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-100 to-primary-100 flex items-center justify-center border border-indigo-200">
-                    <User size={18} className="text-indigo-600" />
+                  <div className="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center border border-indigo-200">
+                    {user?.profile_image_url ? (
+                      <img src={user.profile_image_url} alt="avatar" className="w-9 h-9 object-cover" />
+                    ) : (
+                      <div className="w-9 h-9 bg-gradient-to-tr from-indigo-100 to-primary-100 flex items-center justify-center">
+                        <User size={18} className="text-indigo-600" />
+                      </div>
+                    )}
                   </div>
                   <div className="hidden md:block text-left">
                     <p className="text-sm font-semibold text-slate-700 leading-tight">{user?.name}</p>
@@ -232,11 +238,11 @@ const Layout = () => {
                 </button>
 
                 {profileDropdownOpen && (
-                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-slate-100 py-1 z-50">
-                    <Link to="/profile" onMouseDown={() => setProfileDropdownOpen(false)} className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50">
+                  <div onMouseDown={(e) => e.preventDefault()} className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-slate-100 py-1 z-50">
+                    <button onClick={() => { setProfileDropdownOpen(false); navigate('/profile'); }} className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 w-full text-left">
                       <Settings size={16} className="text-slate-400" />
                       My Profile
-                    </Link>
+                    </button>
                     <div className="border-t border-slate-100 my-1"></div>
                     <button onMouseDown={handleLogout} className="flex items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 w-full text-left">
                       <LogOut size={16} />

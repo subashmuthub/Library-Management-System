@@ -119,6 +119,7 @@ class TransactionController {
           return res.status(404).json({
             success: false,
             message: "User not found",
+            error: "User not found",
           });
         }
 
@@ -128,6 +129,7 @@ class TransactionController {
           return res.status(400).json({
             success: false,
             message: "User account is not active",
+            error: "User account is not active",
           });
         }
 
@@ -138,6 +140,7 @@ class TransactionController {
           return res.status(400).json({
             success: false,
             message: "Only student and teacher users can borrow books",
+            error: "Only student and teacher users can borrow books",
           });
         }
 
@@ -153,6 +156,7 @@ class TransactionController {
           return res.status(400).json({
             success: false,
             message: "Book is currently checked out",
+            error: "Book is currently checked out",
           });
         }
 
@@ -171,6 +175,7 @@ class TransactionController {
           return res.status(400).json({
             success: false,
             message: `Maximum checkout limit (${maxLimit}) reached for ${roleName}`,
+            error: `Maximum checkout limit (${maxLimit}) reached for ${roleName}`,
           });
         }
 
@@ -186,6 +191,7 @@ class TransactionController {
           return res.status(400).json({
             success: false,
             message: "Cannot checkout: user has overdue books",
+            error: "Cannot checkout: user has overdue books",
           });
         }
 
@@ -194,6 +200,7 @@ class TransactionController {
         const dueDate = new Date();
         dueDate.setDate(dueDate.getDate() + getParsedInt(loanDays, 14));
 
+        // Insert transaction without `transaction_type` for backwards compatibility
         const [result] = await connection.execute(
           `
                     INSERT INTO book_transactions (
@@ -202,9 +209,8 @@ class TransactionController {
                         checked_out_by,
                         checkout_date,
                         due_date,
-                        transaction_type,
                         status
-                    ) VALUES (?, ?, ?, ?, ?, 'checkout', 'active')
+                    ) VALUES (?, ?, ?, ?, ?, 'active')
                 `,
           [userId, bookId, librarianId, checkoutDate, dueDate],
         );
@@ -253,7 +259,12 @@ class TransactionController {
       }
     } catch (error) {
       console.error("Error during checkout:", error);
-      res.status(500).json({ error: "Internal server error" });
+      const payload = {
+        error: "Internal server error",
+        details: error?.message,
+        stack: error?.stack,
+      };
+      res.status(500).json(payload);
     }
   }
 

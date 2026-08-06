@@ -60,6 +60,15 @@ export const authService = {
     const response = await api.put("/users/profile", userData);
     return response.data;
   },
+  uploadAvatar: async (file, userId) => {
+    const form = new FormData();
+    form.append('avatar', file);
+    if (userId) form.append('userId', String(userId));
+    const response = await api.post('/users/profile/avatar', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
 };
 
 // Entry logging endpoints

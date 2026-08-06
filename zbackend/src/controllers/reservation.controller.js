@@ -461,14 +461,15 @@ class ReservationController {
                 `, [librarianId, id]);
 
                 // Create book checkout transaction
+                // Insert without `transaction_type` to match current schema
                 const [checkoutResult] = await connection.execute(`
                     INSERT INTO book_transactions (
                         user_id, book_id, checkout_date, due_date, 
-                        issued_by, transaction_type, status
+                        issued_by, status
                     ) VALUES (
                         ?, ?, CURDATE(), 
                         DATE_ADD(CURDATE(), INTERVAL 14 DAY),
-                        ?, 'checkout', 'active'
+                        ?, 'active'
                     )
                 `, [
                     reservation.user_id, reservation.book_id, 

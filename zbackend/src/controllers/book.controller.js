@@ -411,7 +411,11 @@ class BookController {
 
             const connection = await pool.getConnection();
 
-            const [history] = await connection.execute(`
+            // Some MySQL servers/drivers don't accept bound parameters for LIMIT/OFFSET.
+            // Safely embed the parsed numeric values directly into the query string.
+            const safeLimit = Number.isFinite(limit) ? limit : 50;
+            const safeOffset = Number.isFinite(offset) ? offset : 0;
+            const historyQuery = `
                 SELECT 
                     blh.id,
                     s.shelf_code,
@@ -426,8 +430,10 @@ class BookController {
                 LEFT JOIN users u ON blh.scanned_by = u.id
                 WHERE blh.book_id = ?
                 ORDER BY blh.timestamp DESC
-                LIMIT ? OFFSET ?
-            `, [bookId, limit, offset]);
+                LIMIT ${safeLimit} OFFSET ${safeOffset}
+            `;
+
+            const [history] = await connection.execute(historyQuery, [bookId]);
 
             // Get total count
             const [countResult] = await connection.execute(

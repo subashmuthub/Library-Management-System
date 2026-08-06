@@ -24,6 +24,9 @@ router.get('/:id', BookController.getBookById);
 // Get all copies sharing the same ISBN as a given book
 router.get('/:id/isbn-copies', BookController.getIsbnCopies);
 
+// Get book location history (kept here for the public books routes)
+router.get('/:id/history', BookController.getBookLocationHistory);
+
 // Add new book (no auth required for now)
 router.post('/', BookController.addBook);
 

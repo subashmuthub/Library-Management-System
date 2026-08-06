@@ -61,7 +61,7 @@ const Transactions = () => {
       setCheckoutForm({ user_id: user?.id ? String(user.id) : '', book_id: '', loan_days: 14 });
       loadTransactions();
     } catch (error) {
-      alert(`Checkout failed: ${error.response?.data?.error || error.message}`);
+      alert(`Checkout failed: ${error.response?.data?.message || error.response?.data?.error || error.message}`);
     }
   };
 
@@ -175,7 +175,7 @@ const Transactions = () => {
           <h1 className="text-2xl font-bold">Transactions</h1>
           <p className="text-gray-600">Manage book checkouts and returns</p>
         </div>
-        {isAdminOrLibrarian && (
+        {(isAdminOrLibrarian || userRole === 'student' || userRole === 'teacher') && (
           <button
             onClick={() => {
               setCheckoutForm({ user_id: user?.id ? String(user.id) : '', book_id: '', loan_days: 14 });
