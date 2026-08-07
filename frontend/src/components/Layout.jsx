@@ -162,10 +162,8 @@ const Layout = () => {
           <div className="flex justify-between h-16">
             {/* Logo */}
             <div className="flex items-center">
-              <div className="flex-shrink-0 flex items-center gap-2 cursor-pointer" onClick={() => navigate('/dashboard')}>
-                <div className="w-8 h-8 bg-gradient-to-br from-primary-500 to-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-sm">
-                  L
-                </div>
+                <div className="flex-shrink-0 flex items-center gap-2 cursor-pointer" onClick={() => navigate('/dashboard')}>
+                <img src="/pic/NEC%20LOGO.png" alt="NEC Logo" className="w-8 h-8 rounded-md shadow-sm object-cover" />
                 <div>
                   <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">Smart Library</h1>
                   <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">University System</span>
