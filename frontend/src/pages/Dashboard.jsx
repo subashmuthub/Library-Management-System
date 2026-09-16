@@ -8,7 +8,7 @@ import {
   BookOpen,
   Bookmark,
   Clock,
-  DollarSign,
+  IndianRupee,
   RefreshCw,
   Scan,
   TrendingUp,
@@ -216,9 +216,9 @@ const Dashboard = () => {
         color: "bg-amber-500",
       },
       {
-        icon: DollarSign,
+        icon: IndianRupee,
         label: "Pending Fines",
-        value: `$${Number(overall.total_outstanding_fines || 0).toFixed(2)}`,
+        value: `₹${Number(overall.total_outstanding_fines || 0).toFixed(2)}`,
         color: "bg-rose-500",
       },
       {
@@ -812,7 +812,7 @@ const Dashboard = () => {
                         {fine.user_name || `User #${fine.user_id}`}
                       </p>
                       <span className="text-sm font-bold text-rose-700">
-                        ${Number(fine.amount || 0).toFixed(2)}
+                        ₹{Number(fine.amount || 0).toFixed(2)}
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 mt-1">
@@ -931,7 +931,7 @@ const Dashboard = () => {
             className="btn btn-secondary py-4"
             onClick={() => navigate("/fines")}
           >
-            <DollarSign size={20} className="inline mb-1" />
+                  <IndianRupee size={20} className="inline mb-1" />
             <br />
             Fines
           </button>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, CreditCard, Smartphone, Wallet, DollarSign, CheckCircle, Printer, Download, Lock, Shield } from 'lucide-react';
+import { X, CreditCard, Smartphone, Wallet, IndianRupee, CheckCircle, Printer, Download, Lock, Shield } from 'lucide-react';
 
 const PaymentModal = ({ fine, onClose, onPaymentSuccess }) => {
   const [step, setStep] = useState('select'); // 'select', 'processing', 'receipt'
@@ -51,7 +51,7 @@ const PaymentModal = ({ fine, onClose, onPaymentSuccess }) => {
     { 
       id: 'cash', 
       name: 'Cash', 
-      icon: DollarSign, 
+      icon: IndianRupee,
       color: 'orange',
       description: 'Pay in cash at library'
     },
@@ -357,7 +357,7 @@ Fine ID: #${receiptData.fine_id}
 Transaction: #${receiptData.transaction_id}
 User: ${receiptData.user_name}
 
-Amount Paid: $${receiptData.amount}
+Amount Paid: ₹${receiptData.amount}
 Payment Method: ${receiptData.payment_method}
 Reference: ${receiptData.payment_reference}
 
@@ -487,16 +487,16 @@ Thank you for your payment!
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between">
                         <span className="text-gray-600">Fine Amount</span>
-                        <span className="font-semibold">${fine.amount}</span>
+                        <span className="font-semibold">₹{fine.amount}</span>
                       </div>
                       <div className="flex justify-between text-green-600">
                         <span>Platform Fee</span>
-                        <span className="font-semibold">$0</span>
+                        <span className="font-semibold">₹0</span>
                       </div>
                       <div className="border-t pt-2 mt-2">
                         <div className="flex justify-between text-base font-bold">
                           <span>Total Amount</span>
-                          <span className="text-blue-600">${fine.amount}</span>
+                          <span className="text-blue-600">₹{fine.amount}</span>
                         </div>
                       </div>
                     </div>
@@ -534,7 +534,7 @@ Thank you for your payment!
                     >
                       {isUpiGateway(selectedGateway) && !upiId.trim() 
                         ? 'Enter UPI ID to Continue' 
-                        : `Pay $${fine.amount}`
+                        : `Pay ₹${fine.amount}`
                       }
                     </button>
                   ) : (

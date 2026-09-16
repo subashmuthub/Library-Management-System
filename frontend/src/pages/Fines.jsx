@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { fineService } from '../services';
-import { DollarSign, CheckCircle, XCircle, Clock, AlertCircle, Receipt, Download } from 'lucide-react';
+import { IndianRupee, CheckCircle, XCircle, Clock, AlertCircle, Receipt, Download } from 'lucide-react';
 import { useAuth } from '../contexts';
 import PaymentModal from '../components/PaymentModal';
 
@@ -131,7 +131,7 @@ const Fines = () => {
           <div className="flex items-start justify-between">
             <div>
               <p className="text-yellow-700 text-xs font-medium">Pending</p>
-              <p className="text-xl font-bold text-yellow-800 mt-1">${stats.total_pending || 0}</p>
+              <p className="text-xl font-bold text-yellow-800 mt-1">₹{stats.total_pending || 0}</p>
               <p className="text-yellow-600 text-xs mt-1">{stats.pending_count || 0} fines</p>
             </div>
             <div className="p-2 bg-yellow-200 rounded-lg">
@@ -144,7 +144,7 @@ const Fines = () => {
           <div className="flex items-start justify-between">
             <div>
               <p className="text-green-700 text-xs font-medium">Paid</p>
-              <p className="text-xl font-bold text-green-800 mt-1">${stats.total_paid || 0}</p>
+              <p className="text-xl font-bold text-green-800 mt-1">₹{stats.total_paid || 0}</p>
             </div>
             <div className="p-2 bg-green-200 rounded-lg">
               <CheckCircle className="text-green-700" size={20} />
@@ -156,7 +156,7 @@ const Fines = () => {
           <div className="flex items-start justify-between">
             <div>
               <p className="text-blue-700 text-xs font-medium">Waived</p>
-              <p className="text-xl font-bold text-blue-800 mt-1">${stats.total_waived || 0}</p>
+              <p className="text-xl font-bold text-blue-800 mt-1">₹{stats.total_waived || 0}</p>
             </div>
             <div className="p-2 bg-blue-200 rounded-lg">
               <XCircle className="text-blue-700" size={20} />
@@ -168,10 +168,10 @@ const Fines = () => {
           <div className="flex items-start justify-between">
             <div>
               <p className="text-purple-700 text-xs font-medium">Total Revenue</p>
-              <p className="text-xl font-bold text-purple-800 mt-1">${(stats.total_paid || 0) + (stats.total_pending || 0)}</p>
+              <p className="text-xl font-bold text-purple-800 mt-1">₹{(stats.total_paid || 0) + (stats.total_pending || 0)}</p>
             </div>
             <div className="p-2 bg-purple-200 rounded-lg">
-              <DollarSign className="text-purple-700" size={20} />
+              <IndianRupee className="text-purple-700" size={20} />
             </div>
           </div>
         </div>
@@ -188,7 +188,7 @@ const Fines = () => {
                 : 'border-transparent text-gray-600 hover:text-gray-800'
             }`}
           >
-            <DollarSign className="inline-block mr-2" size={18} />
+            <IndianRupee className="inline-block mr-2" size={18} />
             Fines List
           </button>
           <button
@@ -285,7 +285,7 @@ const Fines = () => {
               </div>
             ) : (
               <div className="text-center py-12">
-                <DollarSign size={48} className="mx-auto mb-2 text-gray-400" />
+                <IndianRupee size={48} className="mx-auto mb-2 text-gray-400" />
                 <p className="text-gray-500">No fines found</p>
               </div>
             )}
@@ -315,7 +315,7 @@ const Fines = () => {
                       <td className="px-4 py-3 text-sm font-mono text-blue-600">{receipt.receipt_id}</td>
                       <td className="px-4 py-3 text-sm">{receipt.user_name}</td>
                       <td className="px-4 py-3 text-sm">{receipt.book_title || 'N/A'}</td>
-                      <td className="px-4 py-3 text-sm font-semibold text-green-600">${receipt.amount}</td>
+                      <td className="px-4 py-3 text-sm font-semibold text-green-600">₹{receipt.amount}</td>
                       <td className="px-4 py-3 text-sm">
                         <span className="px-2 py-1 rounded text-xs bg-purple-100 text-purple-700">
                           {receipt.payment_gateway || receipt.payment_method}
@@ -338,7 +338,7 @@ Transaction: #${receipt.transaction_id}
 User: ${receipt.user_name}
 Book: ${receipt.book_title || 'N/A'}
 
-Amount Paid: $${receipt.amount}
+Amount Paid: ₹${receipt.amount}
 Payment Method: ${receipt.payment_gateway || receipt.payment_method}
 Reference: ${receipt.payment_reference || 'N/A'}
 
