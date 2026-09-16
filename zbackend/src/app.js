@@ -216,6 +216,7 @@ app.use("/api/v1/rfid", require("./routes/rfid.routes"));
 app.use("/api/v1/readers", require("./routes/reader.routes"));
 app.use("/api/v1/shelves", require("./routes/shelf.routes"));
 app.use("/api/v1/beacons", require("./routes/beacon.routes"));
+app.use("/api/v1/certificates", require("./routes/certificate.routes"));
 
 // 404 handler
 app.use((req, res) => {

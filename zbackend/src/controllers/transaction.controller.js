@@ -106,7 +106,7 @@ class TransactionController {
 
         // Only student accounts are allowed to borrow books.
         const [targetUsers] = await connection.execute(
-          `SELECT u.id, u.status, LOWER(COALESCE(ur.role_name, 'student')) AS role_name
+          `SELECT u.id, u.status, LOWER(COALESCE(ur.role_name, CASE u.role_id WHEN 4 THEN 'staff' WHEN 5 THEN 'staff' WHEN 6 THEN 'staff' ELSE 'student' END)) AS role_name
            FROM users u
            LEFT JOIN user_roles ur ON u.role_id = ur.id
            WHERE u.id = ?`,
@@ -134,13 +134,15 @@ class TransactionController {
         }
 
         const roleName = targetUsers[0].role_name;
-        if (roleName !== "student" && roleName !== "teacher") {
+        const normalizedRoleName = ["teacher", "faculty", "staff"].includes(roleName) ? "staff" : roleName;
+
+        if (normalizedRoleName !== "student" && normalizedRoleName !== "staff") {
           await connection.rollback();
           connection.release();
           return res.status(400).json({
             success: false,
-            message: "Only student and teacher users can borrow books",
-            error: "Only student and teacher users can borrow books",
+            message: "Only student and staff users can borrow books",
+            error: "Only student and staff users can borrow books",
           });
         }
 
@@ -167,15 +169,15 @@ class TransactionController {
         );
 
         // Determine limit based on role
-        const maxLimit = roleName === "teacher" ? 6 : 4;
+        const maxLimit = normalizedRoleName === "staff" ? 6 : 4;
 
         if (userCheckouts[0].count >= maxLimit) {
           await connection.rollback();
           connection.release();
           return res.status(400).json({
             success: false,
-            message: `Maximum checkout limit (${maxLimit}) reached for ${roleName}`,
-            error: `Maximum checkout limit (${maxLimit}) reached for ${roleName}`,
+            message: `Maximum checkout limit (${maxLimit}) reached for ${normalizedRoleName}`,
+            error: `Maximum checkout limit (${maxLimit}) reached for ${normalizedRoleName}`,
           });
         }
 

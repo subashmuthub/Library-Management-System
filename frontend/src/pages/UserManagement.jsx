@@ -3,6 +3,16 @@ import { userManagementService } from '../services';
 import { Users, UserPlus, UserCheck, UserX, Lock, Activity, Edit } from 'lucide-react';
 
 const UserManagement = () => {
+  const normalizeRoleId = (roleId) => {
+    return [4, 5, 6].includes(Number(roleId)) ? 4 : roleId;
+  };
+
+  const roleOptions = [
+    { value: 1, label: 'Admin' },
+    { value: 2, label: 'Librarian' },
+    { value: 3, label: 'Student' },
+    { value: 4, label: 'Staff' },
+  ];
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('all'); // all, active, inactive
@@ -85,7 +95,7 @@ const UserManagement = () => {
     setEditForm({
       name: `${user.first_name} ${user.last_name}`,
       email: user.email,
-      role_id: user.role_id
+      role_id: normalizeRoleId(user.role_id)
     });
     setShowEditModal(true);
   };
@@ -115,8 +125,15 @@ const UserManagement = () => {
       admin: 'bg-purple-100 text-purple-700',
       librarian: 'bg-blue-100 text-blue-700',
       student: 'bg-gray-100 text-gray-700',
+      staff: 'bg-amber-100 text-amber-800',
     };
-    const normalizedRole = (roleName || '').toLowerCase();
+    const normalizedRole = (() => {
+      const value = (roleName || '').toLowerCase();
+      if (['faculty', 'teacher', 'staff'].includes(value)) {
+        return 'staff';
+      }
+      return value;
+    })();
     return <span className={`px-2 py-1 rounded text-xs font-semibold ${styles[normalizedRole] || 'bg-gray-100 text-gray-700'}`}>
       {normalizedRole.toUpperCase()}
     </span>;
@@ -278,12 +295,9 @@ const UserManagement = () => {
                   value={createForm.role_id}
                   onChange={(e) => setCreateForm({ ...createForm, role_id: parseInt(e.target.value) })}
                 >
-                  <option value={1}>Admin</option>
-                  <option value={2}>Librarian</option>
-                  <option value={3}>Student</option>
-                  <option value={4}>Faculty</option>
-                  <option value={5}>Staff</option>
-                  <option value={6}>Teacher</option>
+                  {roleOptions.map(role => (
+                    <option key={role.value} value={role.value}>{role.label}</option>
+                  ))}
                 </select>
               </div>
               <div className="flex gap-2 justify-end">
@@ -339,12 +353,9 @@ const UserManagement = () => {
                   value={editForm.role_id}
                   onChange={(e) => setEditForm({ ...editForm, role_id: parseInt(e.target.value) })}
                 >
-                  <option value={1}>Admin</option>
-                  <option value={2}>Librarian</option>
-                  <option value={3}>Student</option>
-                  <option value={4}>Faculty</option>
-                  <option value={5}>Staff</option>
-                  <option value={6}>Teacher</option>
+                  {roleOptions.map(role => (
+                    <option key={role.value} value={role.value}>{role.label}</option>
+                  ))}
                 </select>
               </div>
               <div className="flex gap-2 justify-end">

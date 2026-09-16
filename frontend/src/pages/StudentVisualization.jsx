@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { dashboardService } from '../services';
 import { Award, BarChart3, BookOpen, Download, Mail, Radar, TrendingUp, UserCheck } from 'lucide-react';
 import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
 import { useAuth } from '../contexts';
 
 const tierClass = {
@@ -80,57 +81,43 @@ const StudentVisualization = () => {
 
   const winner = data.leaderboard[0] || null;
 
-  const reportContent = useMemo(() => {
-    if (!winner) return [];
-    const monthLabel = new Date().toLocaleString('en-US', {
-      month: 'long',
-      year: 'numeric',
-    });
+  const certRef = useRef(null);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
 
-    return [
-      'National Engineering College, Kovilpatti - Central Library',
-      `Certificate of Recognition - ${monthLabel}`,
-      '',
-      `Active Library User of the Month: ${winner.student_name}`,
-      `Student ID: ${winner.student_id || 'N/A'}`,
-      `Email: ${winner.email || 'N/A'}`,
-      `Rank: #1`,
-      `Borrow/Return Transactions: ${winner.borrow_count}`,
-      `Library Visits: ${winner.visit_count}`,
-      `Points: ${winner.score_points}`,
-      `Tier: ${winner.points_tier}`,
-      '',
-      'This report is generated from Smart Library system analytics.',
-      `Generated on: ${new Date().toLocaleString()}`,
-    ];
-  }, [winner]);
+  const downloadPdfReport = async () => {
+    if (!winner) return;
+    setGeneratingPdf(true);
+    try {
+      const el = certRef.current;
+      if (!el) return;
+      el.style.position = 'fixed';
+      el.style.top = '-9999px';
+      el.style.left = '-9999px';
+      el.style.display = 'block';
+      await new Promise(r => setTimeout(r, 120));
 
-  const downloadPdfReport = () => {
-    if (!winner || !reportContent.length) return;
+      const canvas = await html2canvas(el, {
+        scale: 2, useCORS: true, allowTaint: false,
+        backgroundColor: '#ffffff', logging: false,
+        width: 794, height: 1123,
+      });
 
-    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-    const left = 56;
-    let y = 70;
+      el.style.display = 'none';
+      el.style.position = '';
+      el.style.top = '';
+      el.style.left = '';
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(15);
-    doc.text('Central Library Student Recognition Report', left, y);
-    y += 24;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(11);
-
-    reportContent.forEach((line) => {
-      const wrapped = doc.splitTextToSize(line, 480);
-      doc.text(wrapped, left, y);
-      y += wrapped.length * 16;
-      if (y > 760) {
-        doc.addPage();
-        y = 70;
-      }
-    });
-
-    doc.save(`active-library-user-${winner.student_name.replace(/\s+/g, '-').toLowerCase()}.pdf`);
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      pdf.addImage(imgData, 'PNG', 0, 0, 210, 297);
+      const safeName = (winner.student_name || 'student').replace(/\s+/g, '-').toLowerCase();
+      pdf.save(`NEC_Certificate_${safeName}.pdf`);
+    } catch (err) {
+      console.error('PDF error:', err);
+      alert('Failed to generate PDF.');
+    } finally {
+      setGeneratingPdf(false);
+    }
   };
 
   const notifyWinnerByMail = async () => {
@@ -175,8 +162,9 @@ const StudentVisualization = () => {
                 type="button"
                 className="btn btn-primary inline-flex items-center gap-1"
                 onClick={downloadPdfReport}
+                disabled={generatingPdf}
               >
-                <Download size={14} /> Download Report
+                <Download size={14} /> {generatingPdf ? 'Generating…' : 'Download Certificate'}
               </button>
             )}
           </div>
@@ -304,6 +292,60 @@ const StudentVisualization = () => {
           </div>
         )}
       </div>
+      {/* ── Hidden NEC Certificate DOM for PDF capture ── */}
+      {winner && (() => {
+        const monthLabel = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+        const today = (() => { const d = new Date(); return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`; })();
+        const firstName = (winner.student_name || '').split(' ')[0] || '';
+        const femaleNames = ['karthika','priya','kavya','anitha','rekha','sunitha','deepa','meena','nithya','lavanya','divya','sindhu','uma','saranya','pooja','sneha','swathi','anusha','nandini'];
+        const prefix = femaleNames.some(n => firstName.toLowerCase().startsWith(n)) ? 'Ms' : 'Mr';
+        const displayName = `${prefix}.${winner.student_name}`;
+        const pronoun = prefix === 'Ms' ? 'She' : 'He';
+        const poss = prefix === 'Ms' ? 'Her' : 'His';
+        const objPron = prefix === 'Ms' ? 'her' : 'his';
+        const borrows = Number(winner.borrow_count || 0);
+        const imgSrc = winner.profile_image_url
+          ? (winner.profile_image_url.startsWith('http') ? winner.profile_image_url : `http://localhost:3001${winner.profile_image_url}`)
+          : null;
+
+        return (
+          <div ref={certRef} style={{ display: 'none', width: '794px', height: '1123px', background: '#ffffff', fontFamily: '"Times New Roman", Times, serif', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>
+            <div style={{ width: '714px', height: '1043px', margin: '40px auto', position: 'relative', background: '#ffffff', border: '4px double #1a3a6b', boxSizing: 'border-box' }}>
+              <div style={{ position: 'absolute', inset: '9px', border: '1px solid #1a3a6b', pointerEvents: 'none', zIndex: 0 }} />
+              <div style={{ position: 'relative', zIndex: 1, padding: '32px 48px 24px 48px', height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ textAlign: 'center', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#111' }}>National Engineering College<span style={{ fontSize: '12px', fontWeight: 'normal', marginLeft: '5px' }}>, K.R.Nagar, Kovilpatti – 628 503</span></div>
+                  <div style={{ fontSize: '11px', fontStyle: 'italic', color: '#333', marginTop: '2px' }}>(An Autonomous Institution, Affiliated to Anna University, Chennai)</div>
+                  <div style={{ fontSize: '14px', fontWeight: '700', color: '#111', marginTop: '8px' }}>Central Library</div>
+                </div>
+                <hr style={{ border: 'none', borderTop: '1px solid #1a3a6b', margin: '8px 0 6px 0' }} />
+                <div style={{ textAlign: 'right', fontSize: '12px', color: '#333', marginBottom: '4px' }}>{today}</div>
+                <div style={{ textAlign: 'center', marginBottom: '10px' }}>
+                  <div style={{ display: 'inline-block', fontSize: '19px', fontWeight: 'bold', color: '#111', borderBottom: '1.5px solid #1a3a6b', paddingBottom: '5px' }}>Certificate of Recognition</div>
+                </div>
+                <div style={{ textAlign: 'center', marginBottom: '8px' }}><span style={{ fontSize: '16px', fontWeight: 'bold', textDecoration: 'underline', color: '#111' }}>Congratulations</span></div>
+                <div style={{ textAlign: 'center', marginBottom: '20px' }}><span style={{ fontSize: '17px', fontWeight: 'bold', color: '#c0392b', fontStyle: 'italic' }}>'Active Library User of the Month – {monthLabel}'</span></div>
+                <div style={{ textAlign: 'center', marginBottom: '12px' }}>
+                  {imgSrc
+                    ? <img src={imgSrc} alt={winner.student_name} crossOrigin="anonymous" style={{ width: '120px', height: '145px', objectFit: 'cover', border: '2px solid #555', display: 'inline-block' }} />
+                    : <div style={{ width: '120px', height: '145px', border: '2px solid #555', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: '#e8edf5', color: '#1a3a6b', fontSize: '48px', fontWeight: 'bold' }}>{(winner.student_name || 'S').charAt(0).toUpperCase()}</div>
+                  }
+                </div>
+                <div style={{ textAlign: 'center', marginBottom: '18px' }}>
+                  <div style={{ fontSize: '15px', fontWeight: 'bold', color: '#c0392b', marginBottom: '4px' }}>{displayName}</div>
+                  <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#111' }}>Student ID: {winner.student_id || 'N/A'}</div>
+                </div>
+                <div style={{ fontSize: '13px', color: '#222', lineHeight: '1.9', textAlign: 'justify', flex: 1 }}>
+                  <p style={{ margin: '0 0 14px 0' }}>This is to certify that <strong style={{ color: '#c0392b' }}>{displayName}</strong> (Student ID: {winner.student_id || 'N/A'}) has been recognized as the <em><strong>Active Library User of the Month</strong></em> for <strong style={{ color: '#c0392b' }}>{monthLabel}</strong>.</p>
+                  <p style={{ margin: '0 0 14px 0' }}>{pronoun} has actively utilized the Central Library resources by <strong>borrowing</strong> and <strong>returning books</strong> on <strong style={{ color: '#c0392b' }}>{borrows} occasions</strong> for academic purposes, accumulating <strong style={{ color: '#c0392b' }}>{winner.score_points} library points</strong> with a <strong>{winner.points_tier}</strong> tier standing.</p>
+                  <p style={{ margin: '0 0 14px 0' }}>{poss} consistent and disciplined use of library resources reflects {objPron} commitment to knowledge enhancement and academic excellence.</p>
+                  <p style={{ margin: 0 }}>The Director, Principal, and Central Library proudly congratulate and appreciate {objPron} reading habit and effective utilization of the library facilities.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

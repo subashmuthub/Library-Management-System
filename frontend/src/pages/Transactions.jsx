@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 const Transactions = () => {
   const { user } = useAuth();
   const userRole = String(user?.role || user?.role_name || user?.role?.role_name || '').toLowerCase();
+  const normalizedRole = ['faculty', 'teacher', 'staff'].includes(userRole) ? 'staff' : userRole;
   const isAdminOrLibrarian = userRole === 'admin' || userRole === 'librarian';
   const studentIdentifier = user?.student_id || user?.studentId || (user?.id ? `UID-${user.id}` : 'N/A');
   const [transactions, setTransactions] = useState([]);
@@ -175,7 +176,7 @@ const Transactions = () => {
           <h1 className="text-2xl font-bold">Transactions</h1>
           <p className="text-gray-600">Manage book checkouts and returns</p>
         </div>
-        {(isAdminOrLibrarian || userRole === 'student' || userRole === 'teacher') && (
+        {(isAdminOrLibrarian || normalizedRole === 'student' || normalizedRole === 'staff') && (
           <button
             onClick={() => {
               setCheckoutForm({ user_id: user?.id ? String(user.id) : '', book_id: '', loan_days: 14 });

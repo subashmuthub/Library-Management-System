@@ -91,6 +91,9 @@ const getRoleName = (roleId) => {
     1: "admin",
     2: "librarian",
     3: "student",
+    4: "staff",
+    5: "staff",
+    6: "staff",
   };
   return roleMap[roleId] || "student";
 };
@@ -610,7 +613,7 @@ const googleOAuthCallback = async (req, res, next) => {
     // Find or create user (same logic as googleLogin)
     const users = await query(
       `SELECT u.id, u.email, u.first_name, u.last_name, u.role_id,
-              COALESCE(r.role_name, CASE u.role_id WHEN 1 THEN 'admin' WHEN 2 THEN 'librarian' ELSE 'student' END) AS role_name,
+              COALESCE(r.role_name, CASE u.role_id WHEN 1 THEN 'admin' WHEN 2 THEN 'librarian' WHEN 4 THEN 'staff' WHEN 5 THEN 'staff' WHEN 6 THEN 'staff' ELSE 'student' END) AS role_name,
               u.student_id, u.status, COALESCE(u.email_verified, 0) AS email_verified
        FROM users u LEFT JOIN user_roles r ON u.role_id = r.id
        WHERE u.email = ?`,
@@ -628,7 +631,7 @@ const googleOAuthCallback = async (req, res, next) => {
       );
       const created = await query(
         `SELECT u.id, u.email, u.first_name, u.last_name, u.role_id,
-                COALESCE(r.role_name, 'student') AS role_name, u.student_id, u.status,
+                COALESCE(r.role_name, CASE u.role_id WHEN 4 THEN 'staff' WHEN 5 THEN 'staff' WHEN 6 THEN 'staff' ELSE 'student' END) AS role_name, u.student_id, u.status,
                 COALESCE(u.email_verified, 0) AS email_verified
          FROM users u LEFT JOIN user_roles r ON u.role_id = r.id WHERE u.id = ?`,
         [insertResult.insertId],
@@ -677,7 +680,7 @@ const verifyOtp = async (req, res, next) => {
 
     const users = await query(
       `SELECT u.id, u.email, u.first_name, u.last_name, u.role_id, u.student_id,
-              COALESCE(r.role_name, CASE u.role_id WHEN 1 THEN 'admin' WHEN 2 THEN 'librarian' ELSE 'student' END) AS role_name,
+              COALESCE(r.role_name, CASE u.role_id WHEN 1 THEN 'admin' WHEN 2 THEN 'librarian' WHEN 4 THEN 'staff' WHEN 5 THEN 'staff' WHEN 6 THEN 'staff' ELSE 'student' END) AS role_name,
               COALESCE(u.email_verified, 0) AS email_verified
        FROM users u
        LEFT JOIN user_roles r ON u.role_id = r.id

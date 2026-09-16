@@ -25,6 +25,7 @@ import BookRecommendations from './pages/BookRecommendations';
 import LibraryHeatmap from './pages/LibraryHeatmap';
 import OverduePrediction from './pages/OverduePrediction';
 import ShelfLocator from './pages/ShelfLocator';
+import ActiveUserCertificate from './pages/ActiveUserCertificate';
 
 function App() {
   return (
@@ -71,6 +72,7 @@ function App() {
               <Route path="shelf-locator" element={<ShelfLocator />} />
               <Route path="settings" element={<PrivateRoute roles={["admin"]}><Settings /></PrivateRoute>} />
               <Route path="profile" element={<Profile />} />
+              <Route path="active-user-certificate" element={<ActiveUserCertificate />} />
             </Route>
 
             {/* Fallback */}

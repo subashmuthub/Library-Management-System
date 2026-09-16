@@ -1,25 +1,25 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts';
 import { 
   LayoutDashboard, BookOpen, LogIn, Scan, MapPin, User, LogOut,
   Menu, X, Settings, RefreshCw, DollarSign, Bookmark, Users,
   Search, CalendarDays, BarChart3, PackagePlus, FileText, ChevronDown,
-  Sparkles, Clock
+  Sparkles, Clock, Award
 } from 'lucide-react';
 
 // Reusable Dropdown Component
-const DropdownMenu = ({ title, icon: Icon, items, currentPath, closeMobile }) => {
-  const [isOpen, setIsOpen] = useState(false);
+const DropdownMenu = ({ title, icon: Icon, items, currentPath, closeMobile, openKey, setOpenKey, menuKey }) => {
+  const isOpen = openKey === menuKey;
   const timeoutRef = useRef(null);
 
   const handleMouseEnter = () => {
     clearTimeout(timeoutRef.current);
-    setIsOpen(true);
+    setOpenKey(menuKey);
   };
 
   const handleMouseLeave = () => {
-    timeoutRef.current = setTimeout(() => setIsOpen(false), 200);
+    timeoutRef.current = setTimeout(() => setOpenKey(null), 150);
   };
 
   const isActive = items.some(item => currentPath === item.path);
@@ -36,7 +36,7 @@ const DropdownMenu = ({ title, icon: Icon, items, currentPath, closeMobile }) =>
             ? 'bg-primary-50 text-primary-700 shadow-sm border border-primary-100'
             : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
         }`}
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => setOpenKey(isOpen ? null : menuKey)}
       >
         <Icon size={18} />
         {title}
@@ -56,7 +56,7 @@ const DropdownMenu = ({ title, icon: Icon, items, currentPath, closeMobile }) =>
             <Link
               key={item.path}
               to={item.path}
-              onClick={() => { setIsOpen(false); closeMobile && closeMobile(); }}
+              onClick={() => { setOpenKey(null); closeMobile && closeMobile(); }}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm ${
                 isItemActive
                   ? 'bg-slate-50 text-primary-600 font-semibold'
@@ -82,6 +82,20 @@ const Layout = () => {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [openDropdownKey, setOpenDropdownKey] = useState(null);
+  const navRef = useRef(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (navRef.current && !navRef.current.contains(e.target)) {
+        setOpenDropdownKey(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const roleName = typeof user?.role === 'string' ? user.role : user?.role?.role_name;
   const isAdmin = (roleName || '').toLowerCase() === 'admin';
 
@@ -142,6 +156,7 @@ const Layout = () => {
         { path: '/student-visualization', label: 'Student Visualization', icon: BarChart3 },
         { path: '/heatmap', label: 'Library Heatmap', icon: MapPin, isNew: true },
         { path: '/overdue-prediction', label: 'Overdue Predictions', icon: Clock, isNew: true },
+        { path: '/active-user-certificate', label: 'Active User Certificate', icon: Award, isNew: true },
         { path: '/entry', label: 'Entry Log', icon: LogIn },
         { path: '/navigation', label: 'Navigation', icon: MapPin },
       ]
@@ -172,7 +187,7 @@ const Layout = () => {
             </div>
 
             {/* Desktop Navigation */}
-            <nav className="hidden xl:flex items-center gap-1 mx-8">
+            <nav ref={navRef} className="hidden xl:flex items-center gap-1 mx-8">
               {navigationConfig.map((item, idx) => {
                 if (item.type === 'link') {
                   const Icon = item.icon;
@@ -198,7 +213,10 @@ const Layout = () => {
                       title={item.title} 
                       icon={item.icon} 
                       items={item.items} 
-                      currentPath={location.pathname} 
+                      currentPath={location.pathname}
+                      menuKey={idx}
+                      openKey={openDropdownKey}
+                      setOpenKey={setOpenDropdownKey}
                     />
                   );
                 }

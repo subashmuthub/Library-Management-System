@@ -7,6 +7,14 @@ const mysql = require('mysql2/promise');
 const { pool } = require('../config/database');
 const bcrypt = require('bcrypt');
 
+const normalizeRoleName = (roleName, roleId) => {
+    const normalized = String(roleName || '').toLowerCase();
+    if (['faculty', 'teacher', 'staff'].includes(normalized) || [4, 5, 6].includes(Number(roleId))) {
+        return 'staff';
+    }
+    return normalized || 'student';
+};
+
 class UserManagementController {
     // Get all users with library statistics
     static async getAllUsers(req, res) {
@@ -45,6 +53,7 @@ class UserManagementController {
             // Format users with full name for frontend
             const formattedUsers = users.map(u => ({
                 ...u,
+                role_name: normalizeRoleName(u.role_name, u.role_id),
                 name: `${u.first_name} ${u.last_name}`
             }));
 
@@ -87,7 +96,10 @@ class UserManagementController {
                 return res.status(404).json({ error: 'User not found' });
             }
 
-            const user = users[0];
+            const user = {
+                ...users[0],
+                role_name: normalizeRoleName(users[0].role_name, users[0].role_id)
+            };
 
             // Get active checkouts
             const [activeCheckouts] = await connection.execute(`
@@ -254,12 +266,17 @@ class UserManagementController {
                 WHERE u.id = ?
             `, [result.insertId]);
 
+            const createdUser = {
+                ...newUser[0],
+                role_name: normalizeRoleName(newUser[0]?.role_name, role_id)
+            };
+
             connection.release();
 
             res.status(201).json({
                 success: true,
                 message: 'User created successfully',
-                user: newUser[0]
+                user: createdUser
             });
 
         } catch (error) {
@@ -384,12 +401,17 @@ class UserManagementController {
                 WHERE u.id = ?
             `, [userId]);
 
+            const normalizedUpdatedUser = {
+                ...updatedUser[0],
+                role_name: normalizeRoleName(updatedUser[0]?.role_name, updatedUser[0]?.role_id)
+            };
+
             connection.release();
 
             res.json({
                 success: true,
                 message: 'User updated successfully',
-                user: updatedUser[0]
+                user: normalizedUpdatedUser
             });
 
         } catch (error) {
