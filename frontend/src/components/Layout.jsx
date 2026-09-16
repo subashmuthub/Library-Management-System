@@ -1,345 +1,156 @@
-import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
+import React, { useMemo, useState } from 'react';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts';
-import { 
-  LayoutDashboard, BookOpen, LogIn, Scan, MapPin, User, LogOut,
-  Menu, X, Settings, RefreshCw, DollarSign, Bookmark, Users,
-  Search, CalendarDays, BarChart3, PackagePlus, FileText, ChevronDown,
-  Sparkles, Clock, Award
+import {
+  Award, BarChart3, Bell, BookOpen, Bookmark, CalendarDays, ChevronDown,
+  Clock3, DollarSign, FileText, LayoutDashboard, LogIn, LogOut, MapPin,
+  Menu, PackagePlus, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Scan,
+  Settings, Sparkles, User, Users, X,
 } from 'lucide-react';
 
-// Reusable Dropdown Component
-const DropdownMenu = ({ title, icon: Icon, items, currentPath, closeMobile, openKey, setOpenKey, menuKey }) => {
-  const isOpen = openKey === menuKey;
-  const timeoutRef = useRef(null);
+const navigation = [
+  { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
+  {
+    label: 'Books', icon: BookOpen, items: [
+      { label: 'All Books', path: '/books', icon: BookOpen },
+      { label: 'Advanced Search', path: '/book-search', icon: Search },
+      { label: 'AI Recommendations', path: '/recommendations', icon: Sparkles, tag: 'New' },
+      { label: 'QR Shelf Locator', path: '/shelf-locator', icon: MapPin, tag: 'New' },
+      { label: 'Book Orders', path: '/book-orders', icon: PackagePlus },
+      { label: 'Question Papers', path: '/question-papers', icon: FileText },
+    ],
+  },
+  {
+    label: 'Issue Management', icon: RefreshCw, items: [
+      { label: 'Transactions', path: '/transactions', icon: RefreshCw },
+      { label: 'Reservations', path: '/reservations', icon: Bookmark },
+      { label: 'Fine Management', path: '/fines', icon: DollarSign },
+      { label: 'RFID Scanner', path: '/rfid', icon: Scan },
+    ],
+  },
+  { label: 'Users', path: '/users', icon: Users, adminOnly: true },
+  {
+    label: 'Analytics & Reports', icon: BarChart3, items: [
+      { label: 'Student Visualization', path: '/student-visualization', icon: BarChart3 },
+      { label: 'Library Heatmap', path: '/heatmap', icon: MapPin, tag: 'New' },
+      { label: 'Overdue Predictions', path: '/overdue-prediction', icon: Clock3, tag: 'New' },
+      { label: 'Active User Certificate', path: '/active-user-certificate', icon: Award, tag: 'New' },
+      { label: 'Entry Log', path: '/entry', icon: LogIn },
+      { label: 'Navigation', path: '/navigation', icon: MapPin },
+    ],
+  },
+  { label: 'Settings', path: '/settings', icon: Settings, adminOnly: true },
+];
 
-  const handleMouseEnter = () => {
-    clearTimeout(timeoutRef.current);
-    setOpenKey(menuKey);
-  };
-
-  const handleMouseLeave = () => {
-    timeoutRef.current = setTimeout(() => setOpenKey(null), 150);
-  };
-
-  const isActive = items.some(item => currentPath === item.path);
-
-  return (
-    <div 
-      className="relative group"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-    >
-      <button 
-        className={`flex items-center gap-2 px-4 py-2.5 rounded-lg transition-all duration-200 font-medium text-sm ${
-          isActive || isOpen
-            ? 'bg-primary-50 text-primary-700 shadow-sm border border-primary-100'
-            : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-        }`}
-        onClick={() => setOpenKey(isOpen ? null : menuKey)}
-      >
-        <Icon size={18} />
-        {title}
-        <ChevronDown size={14} className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
-
-      {/* Dropdown Content */}
-      <div 
-        className={`absolute top-full left-0 mt-1 w-60 bg-white rounded-xl shadow-lg border border-slate-100 p-2 z-50 transition-all duration-200 origin-top ${
-          isOpen ? 'opacity-100 scale-100 visible' : 'opacity-0 scale-95 invisible'
-        }`}
-      >
-        {items.map((item) => {
-          const ItemIcon = item.icon;
-          const isItemActive = currentPath === item.path;
-          return (
-            <Link
-              key={item.path}
-              to={item.path}
-              onClick={() => { setOpenKey(null); closeMobile && closeMobile(); }}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm ${
-                isItemActive
-                  ? 'bg-slate-50 text-primary-600 font-semibold'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-              }`}
-            >
-              <ItemIcon size={16} className={isItemActive ? 'text-primary-500' : 'text-slate-400'} />
-              {item.label}
-              {item.isNew && (
-                <span className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold bg-primary-100 text-primary-700">NEW</span>
-              )}
-            </Link>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
+const flattenNavigation = (items) => items.flatMap((item) => item.items || item);
 
 const Layout = () => {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
-  const [openDropdownKey, setOpenDropdownKey] = useState(null);
-  const navRef = useRef(null);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (navRef.current && !navRef.current.contains(e.target)) {
-        setOpenDropdownKey(null);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [expanded, setExpanded] = useState({ Books: true, 'Issue Management': true, 'Analytics & Reports': true });
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [search, setSearch] = useState('');
 
   const roleName = typeof user?.role === 'string' ? user.role : user?.role?.role_name;
   const isAdmin = (roleName || '').toLowerCase() === 'admin';
-
-  const todayLabel = useMemo(() => {
-    return new Date().toLocaleDateString(undefined, {
-      weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
-    });
-  }, []);
+  const visibleNavigation = navigation.filter((item) => !item.adminOnly || isAdmin);
+  const currentPage = useMemo(() => {
+    const page = flattenNavigation(visibleNavigation).find((item) => location.pathname === item.path);
+    return page?.label || 'Dashboard';
+  }, [location.pathname, visibleNavigation]);
+  const todayLabel = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const searchResults = search.trim()
+    ? flattenNavigation(visibleNavigation).filter((item) => item.label.toLowerCase().includes(search.toLowerCase()))
+    : [];
 
   const handleLogout = async () => {
     await logout();
     navigate('/login');
   };
 
-  // Modern Navigation Structure
-  const navigationConfig = [
-    {
-      type: 'link',
-      path: '/dashboard',
-      label: 'Dashboard',
-      icon: LayoutDashboard,
-    },
-    {
-      type: 'dropdown',
-      title: 'Books',
-      icon: BookOpen,
-      items: [
-        { path: '/books', label: 'All Books', icon: BookOpen },
-        { path: '/book-search', label: 'Advanced Search', icon: Search },
-        { path: '/recommendations', label: 'AI Recommendations', icon: Sparkles, isNew: true },
-        { path: '/shelf-locator', label: 'QR Shelf Locator', icon: MapPin, isNew: true },
-        { path: '/book-orders', label: 'Book Orders', icon: PackagePlus },
-        { path: '/question-papers', label: 'Question Papers', icon: FileText },
-      ]
-    },
-    {
-      type: 'dropdown',
-      title: 'Issue Management',
-      icon: RefreshCw,
-      items: [
-        { path: '/transactions', label: 'Transactions', icon: RefreshCw },
-        { path: '/reservations', label: 'Reservations', icon: Bookmark },
-        { path: '/fines', label: 'Fine Management', icon: DollarSign },
-        { path: '/rfid', label: 'RFID Scanner', icon: Scan },
-      ]
-    },
-    ...(isAdmin ? [{
-      type: 'link',
-      path: '/users',
-      label: 'Users',
-      icon: Users,
-    }] : []),
-    {
-      type: 'dropdown',
-      title: 'Analytics & Reports',
-      icon: BarChart3,
-      items: [
-        { path: '/student-visualization', label: 'Student Visualization', icon: BarChart3 },
-        { path: '/heatmap', label: 'Library Heatmap', icon: MapPin, isNew: true },
-        { path: '/overdue-prediction', label: 'Overdue Predictions', icon: Clock, isNew: true },
-        { path: '/active-user-certificate', label: 'Active User Certificate', icon: Award, isNew: true },
-        { path: '/entry', label: 'Entry Log', icon: LogIn },
-        { path: '/navigation', label: 'Navigation', icon: MapPin },
-      ]
-    },
-    ...(isAdmin ? [{
-      type: 'link',
-      path: '/settings',
-      label: 'Settings',
-      icon: Settings,
-    }] : []),
-  ];
+  const renderNavItem = (item, isChild = false) => {
+    const Icon = item.icon;
+    const active = location.pathname === item.path;
+    return (
+      <Link
+        key={item.path}
+        to={item.path}
+        onClick={() => setSidebarOpen(false)}
+        className={`app-nav-link ${active ? 'app-nav-link-active' : ''} ${isChild ? 'app-nav-link-child' : ''}`}
+        aria-current={active ? 'page' : undefined}
+      >
+        <Icon size={18} strokeWidth={active ? 2.3 : 1.9} />
+        <span className="app-nav-label">{item.label}</span>
+        {item.tag && <span className="app-nav-tag">{item.tag}</span>}
+      </Link>
+    );
+  };
 
   return (
-    <div className="flex flex-col min-h-screen bg-slate-50">
-      {/* Top Navbar Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
-        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            {/* Logo */}
-            <div className="flex items-center">
-                <div className="flex-shrink-0 flex items-center gap-2 cursor-pointer" onClick={() => navigate('/dashboard')}>
-                <img src="/pic/NEC%20LOGO.png" alt="NEC Logo" className="w-8 h-8 rounded-md shadow-sm object-cover" />
-                <div>
-                  <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">Smart Library</h1>
-                  <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">University System</span>
-                </div>
-              </div>
-            </div>
+    <div className="app-shell">
+      {sidebarOpen && <button className="app-sidebar-backdrop" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
+      <aside className={`app-sidebar ${sidebarOpen ? 'app-sidebar-mobile-open' : ''} ${collapsed ? 'app-sidebar-collapsed' : ''}`}>
+        <div className="app-brand">
+          <button className="app-brand-mark" onClick={() => navigate('/dashboard')} aria-label="Go to dashboard">
+            <img src="/pic/NEC%20LOGO.png" alt="NEC" />
+          </button>
+          <div className="app-brand-copy"><strong>Smart Library</strong><span>University System</span></div>
+          <button className="app-sidebar-close" onClick={() => setSidebarOpen(false)} aria-label="Close navigation"><X size={19} /></button>
+        </div>
 
-            {/* Desktop Navigation */}
-            <nav ref={navRef} className="hidden xl:flex items-center gap-1 mx-8">
-              {navigationConfig.map((item, idx) => {
-                if (item.type === 'link') {
-                  const Icon = item.icon;
-                  const isActive = location.pathname === item.path;
-                  return (
-                    <Link
-                      key={idx}
-                      to={item.path}
-                      className={`flex items-center gap-2 px-4 py-2.5 rounded-lg transition-all duration-200 font-medium text-sm ${
-                        isActive
-                          ? 'bg-primary-50 text-primary-700 shadow-sm border border-primary-100'
-                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                      }`}
-                    >
-                      <Icon size={18} />
-                      {item.label}
-                    </Link>
-                  );
-                } else if (item.type === 'dropdown') {
-                  return (
-                    <DropdownMenu 
-                      key={idx} 
-                      title={item.title} 
-                      icon={item.icon} 
-                      items={item.items} 
-                      currentPath={location.pathname}
-                      menuKey={idx}
-                      openKey={openDropdownKey}
-                      setOpenKey={setOpenDropdownKey}
-                    />
-                  );
-                }
-                return null;
-              })}
-            </nav>
-
-            {/* Right side - Profile & Actions */}
-            <div className="flex items-center gap-4">
-              <div className="hidden md:flex px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-600 items-center gap-2">
-                <CalendarDays size={14} className="text-slate-400" />
-                {todayLabel}
-              </div>
-
-              {/* Profile Dropdown */}
-              <div className="relative">
-                <button 
-                  onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
-                  onBlur={() => setTimeout(() => setProfileDropdownOpen(false), 200)}
-                  className="flex items-center gap-3 p-1.5 rounded-xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-200 focus:outline-none"
-                >
-                  <div className="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center border border-indigo-200">
-                    {user?.profile_image_url ? (
-                      <img src={user.profile_image_url} alt="avatar" className="w-9 h-9 object-cover" />
-                    ) : (
-                      <div className="w-9 h-9 bg-gradient-to-tr from-indigo-100 to-primary-100 flex items-center justify-center">
-                        <User size={18} className="text-indigo-600" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="hidden md:block text-left">
-                    <p className="text-sm font-semibold text-slate-700 leading-tight">{user?.name}</p>
-                    <p className="text-[11px] text-slate-500 font-medium uppercase tracking-wider">{user?.role?.role_name || user?.role}</p>
-                  </div>
+        <nav className="app-sidebar-nav" aria-label="Primary navigation">
+          {visibleNavigation.map((item) => {
+            if (!item.items) return renderNavItem(item);
+            const active = item.items.some((child) => location.pathname === child.path);
+            const isExpanded = expanded[item.label] || active;
+            const Icon = item.icon;
+            return (
+              <div className="app-nav-group" key={item.label}>
+                <button className={`app-nav-group-button ${active ? 'app-nav-group-active' : ''}`} onClick={() => setExpanded((state) => ({ ...state, [item.label]: !isExpanded }))} aria-expanded={isExpanded}>
+                  <Icon size={18} /><span className="app-nav-label">{item.label}</span><ChevronDown size={15} className={`app-nav-chevron ${isExpanded ? 'is-open' : ''}`} />
                 </button>
-
-                {profileDropdownOpen && (
-                  <div onMouseDown={(e) => e.preventDefault()} className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-slate-100 py-1 z-50">
-                    <button onClick={() => { setProfileDropdownOpen(false); navigate('/profile'); }} className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 w-full text-left">
-                      <Settings size={16} className="text-slate-400" />
-                      My Profile
-                    </button>
-                    <div className="border-t border-slate-100 my-1"></div>
-                    <button onMouseDown={handleLogout} className="flex items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 w-full text-left">
-                      <LogOut size={16} />
-                      Logout
-                    </button>
-                  </div>
-                )}
+                {isExpanded && <div className="app-nav-children">{item.items.map((child) => renderNavItem(child, true))}</div>}
               </div>
+            );
+          })}
+        </nav>
 
-              {/* Mobile menu button */}
-              <button
-                className="xl:hidden p-2 rounded-lg text-slate-500 hover:bg-slate-100 focus:outline-none"
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              >
-                {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+        <div className="app-sidebar-footer">
+          <div className="app-status-dot"><span />System operational</div>
+          <button className="app-collapse-button" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+            {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}<span className="app-nav-label">Collapse menu</span>
+          </button>
+        </div>
+      </aside>
+
+      <div className="app-main">
+        <header className="app-header">
+          <div className="app-header-left">
+            <button className="app-menu-button" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Menu size={21} /></button>
+            <div className="app-breadcrumb"><span>Workspace</span><span>/</span><strong>{currentPage}</strong></div>
+          </div>
+          <div className="app-header-actions">
+            <div className="app-search-wrap">
+              <Search size={17} />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search pages" aria-label="Search pages" />
+              {searchResults.length > 0 && <div className="app-search-results">{searchResults.slice(0, 6).map((result) => <Link key={result.path} to={result.path} onClick={() => setSearch('')}>{result.label}</Link>)}</div>}
+            </div>
+            <div className="app-date"><CalendarDays size={16} /><span>{todayLabel}</span></div>
+            <button className="app-icon-button" aria-label="Notifications"><Bell size={18} /><span className="app-notification-badge">3</span></button>
+            <div className="app-profile-wrap">
+              <button className="app-profile-button" onClick={() => setProfileOpen((value) => !value)} aria-expanded={profileOpen}>
+                <span className="app-avatar">{user?.profile_image_url ? <img src={user.profile_image_url} alt="" /> : <User size={17} />}</span>
+                <span className="app-profile-copy"><strong>{user?.name || 'Library user'}</strong><small>{roleName || 'Staff'}</small></span><ChevronDown size={15} />
               </button>
+              {profileOpen && <div className="app-profile-menu"><button onClick={() => { setProfileOpen(false); navigate('/profile'); }}><User size={16} /> My profile</button><button onClick={handleLogout} className="app-logout"><LogOut size={16} /> Sign out</button></div>}
             </div>
           </div>
-        </div>
-      </header>
-
-      {/* Mobile Navigation Menu */}
-      {mobileMenuOpen && (
-        <div className="xl:hidden bg-white border-b border-slate-200 absolute top-16 left-0 w-full shadow-lg z-30 max-h-[calc(100vh-4rem)] overflow-y-auto">
-          <div className="px-4 py-3 space-y-1">
-            {navigationConfig.map((item, idx) => {
-              if (item.type === 'link') {
-                const Icon = item.icon;
-                const isActive = location.pathname === item.path;
-                return (
-                  <Link
-                    key={idx}
-                    to={item.path}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${
-                      isActive ? 'bg-primary-50 text-primary-700' : 'text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Icon size={18} />
-                    {item.label}
-                  </Link>
-                );
-              } else if (item.type === 'dropdown') {
-                return (
-                  <div key={idx} className="py-2">
-                    <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                      <item.icon size={14} />
-                      {item.title}
-                    </div>
-                    <div className="pl-6 space-y-1 mt-1 border-l-2 border-slate-100 ml-5">
-                      {item.items.map((subItem) => (
-                        <Link
-                          key={subItem.path}
-                          to={subItem.path}
-                          onClick={() => setMobileMenuOpen(false)}
-                          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm ${
-                            location.pathname === subItem.path
-                              ? 'text-primary-600 font-semibold bg-primary-50'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          {subItem.label}
-                          {subItem.isNew && (
-                            <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold bg-primary-100 text-primary-700">NEW</span>
-                          )}
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                );
-              }
-              return null;
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-[1600px] w-full mx-auto p-4 sm:p-6 lg:p-8">
-        <Outlet />
-      </main>
+        </header>
+        <main className="app-content"><Outlet /></main>
+      </div>
     </div>
   );
 };

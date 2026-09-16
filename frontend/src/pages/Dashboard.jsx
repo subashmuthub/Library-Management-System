@@ -195,31 +195,31 @@ const Dashboard = () => {
         icon: Users,
         label: "Current Occupancy",
         value: Number(statusOccupancy.current_occupancy || 0),
-        color: "bg-blue-500",
+        color: "bg-blue-50 text-blue-700",
       },
       {
         icon: BookOpen,
         label: "Total Books",
         value: Number(overall.total_books || 0),
-        color: "bg-emerald-500",
+        color: "bg-emerald-50 text-emerald-700",
       },
       {
         icon: RefreshCw,
         label: "Active Checkouts",
         value: Number(overall.current_checkouts || 0),
-        color: "bg-indigo-500",
+        color: "bg-indigo-50 text-indigo-700",
       },
       {
         icon: Bookmark,
         label: "Active Reservations",
         value: Number(overall.active_reservations || 0),
-        color: "bg-amber-500",
+        color: "bg-amber-50 text-amber-700",
       },
       {
         icon: IndianRupee,
         label: "Pending Fines",
         value: `₹${Number(overall.total_outstanding_fines || 0).toFixed(2)}`,
-        color: "bg-rose-500",
+        color: "bg-rose-50 text-rose-700",
       },
       {
         icon: TrendingUp,
@@ -229,7 +229,7 @@ const Dashboard = () => {
             transactionStats?.overall_statistics?.overdue_books ||
             0,
         ),
-        color: "bg-orange-500",
+        color: "bg-orange-50 text-orange-700",
       },
     ];
   }, [dashboardStats, libraryStatus, transactionStats]);
@@ -341,7 +341,7 @@ const Dashboard = () => {
         <div
           className={`w-11 h-11 rounded-xl flex items-center justify-center ${color} shadow-sm`}
         >
-          <Icon size={20} className="text-white" />
+          <Icon size={20} className="text-current" />
         </div>
       </div>
     </div>
