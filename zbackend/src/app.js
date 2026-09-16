@@ -103,8 +103,9 @@ app.use(
 );
 
 // Body parsing middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+const requestBodyLimit = process.env.REQUEST_BODY_LIMIT || "50mb";
+app.use(express.json({ limit: requestBodyLimit }));
+app.use(express.urlencoded({ extended: true, limit: requestBodyLimit }));
 
 // Rate limiting
 const limiter = rateLimit({
