@@ -33,6 +33,9 @@ router.post('/', BookController.addBook);
 // Bulk import books (no auth required for now)
 router.post('/bulk-import', BookController.bulkImportBooks);
 
+// Batch checkout books
+router.post('/checkout-batch', BookController.checkoutBatch);
+
 // Update book (no auth required for now)
 router.put('/:id', BookController.updateBook);
 

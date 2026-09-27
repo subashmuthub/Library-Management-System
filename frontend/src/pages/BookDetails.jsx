@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { bookService, navigationService, transactionService, reservationService } from '../services';
 import { ArrowLeft, BookOpen, MapPin, Compass, Clock, Tag, CheckCircle, XCircle, User, Calendar, AlertCircle, BookmarkPlus, Users, ShoppingCart } from 'lucide-react';
 import { format } from 'date-fns';
+import MultiBookCheckoutModal from '../components/MultiBookCheckoutModal';
 
 const BookDetails = () => {
   const { id } = useParams();
@@ -283,42 +284,16 @@ const BookDetails = () => {
         </div>
       </div>
 
-      {/* Checkout Modal */}
-      {showCheckoutModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
-            <h2 className="text-xl font-bold mb-4">Checkout Book</h2>
-            <form onSubmit={handleCheckout} className="space-y-4">
-              <p className="font-semibold text-gray-900 text-sm">{book.title}</p>
-              <p className="text-xs text-gray-500">by {book.author}</p>
-              <div>
-                <label className="text-sm text-gray-600">User ID</label>
-                <input
-                  type="text"
-                  value={checkoutForm.user_id}
-                  onChange={(e) => setCheckoutForm((f) => ({ ...f, user_id: e.target.value }))}
-                  className="input w-full mt-1"
-                />
-              </div>
-              <div>
-                <label className="text-sm text-gray-600">Loan Days</label>
-                <input
-                  type="number"
-                  value={checkoutForm.loan_days}
-                  onChange={(e) => setCheckoutForm((f) => ({ ...f, loan_days: parseInt(e.target.value || '14') }))}
-                  className="input w-full mt-1"
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => setShowCheckoutModal(false)} className="btn">Cancel</button>
-                <button type="submit" disabled={checkoutLoading} className="btn btn-primary">
-                  {checkoutLoading ? 'Checking out...' : 'Checkout'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Multi-Book Cart Checkout Modal */}
+      <MultiBookCheckoutModal
+        isOpen={showCheckoutModal}
+        onClose={() => setShowCheckoutModal(false)}
+        onSuccess={() => {
+          loadBookDetails();
+        }}
+        initialUserId={currentUser?.id ? String(currentUser.id) : ''}
+        initialBook={book}
+      />
 
       {/* Navigation Instructions */}
       {navigation && (

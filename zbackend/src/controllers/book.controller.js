@@ -801,6 +801,251 @@ class BookController {
             });
         }
     }
+
+    // Batch checkout multiple books
+    static async checkoutBatch(req, res) {
+        let connection = null;
+        try {
+            const userId = req.body.userId || req.body.user_id;
+            const rawBookIds = req.body.bookIds || req.body.book_ids;
+            const rawLoanDays = req.body.loanDays || req.body.loan_days || 14;
+            const librarianId = req.user?.id || req.body.librarianId || null;
+
+            if (!userId) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'User ID is required',
+                    message: 'User ID is required'
+                });
+            }
+
+            if (!Array.isArray(rawBookIds) || rawBookIds.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'bookIds must be a non-empty array of book IDs',
+                    message: 'At least one book must be selected for checkout'
+                });
+            }
+
+            // Deduplicate and parse IDs
+            const parsedBookIds = [...new Set(rawBookIds.map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0))];
+
+            if (parsedBookIds.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'No valid numeric book IDs provided',
+                    message: 'Please provide valid book IDs'
+                });
+            }
+
+            const loanDays = Math.max(1, parseInt(rawLoanDays, 10) || 14);
+
+            connection = await pool.getConnection();
+
+            // 1. Verify user exists and status
+            const [targetUsers] = await connection.execute(
+                `SELECT u.id, u.status, u.first_name, u.last_name,
+                        LOWER(COALESCE(ur.role_name, CASE u.role_id WHEN 4 THEN 'staff' WHEN 5 THEN 'staff' WHEN 6 THEN 'staff' ELSE 'student' END)) AS role_name
+                 FROM users u
+                 LEFT JOIN user_roles ur ON u.role_id = ur.id
+                 WHERE u.id = ?`,
+                [userId]
+            );
+
+            if (targetUsers.length === 0) {
+                connection.release();
+                return res.status(404).json({
+                    success: false,
+                    error: 'User not found',
+                    message: `User with ID ${userId} does not exist.`
+                });
+            }
+
+            const borrower = targetUsers[0];
+
+            if (borrower.status !== 'active') {
+                connection.release();
+                return res.status(400).json({
+                    success: false,
+                    error: 'User account is not active',
+                    message: `User account is ${borrower.status}. Checkout cannot proceed.`
+                });
+            }
+
+            const roleName = borrower.role_name;
+            const normalizedRole = ['teacher', 'faculty', 'staff'].includes(roleName) ? 'staff' : roleName;
+
+            // 2. Check overdue books
+            const [overdueCheck] = await connection.execute(
+                `SELECT COUNT(*) as count 
+                 FROM book_transactions 
+                 WHERE user_id = ? AND status = 'active' AND due_date < CURDATE()`,
+                [userId]
+            );
+
+            if (overdueCheck[0].count > 0) {
+                connection.release();
+                return res.status(400).json({
+                    success: false,
+                    error: 'User has overdue books',
+                    message: `Cannot checkout: user has ${overdueCheck[0].count} overdue book(s) that must be returned first.`
+                });
+            }
+
+            // 3. Check active borrowing limit
+            const [activeLoans] = await connection.execute(
+                `SELECT COUNT(*) as count 
+                 FROM book_transactions 
+                 WHERE user_id = ? AND status = 'active'`,
+                [userId]
+            );
+
+            const currentActiveLoans = activeLoans[0].count;
+            const maxLimit = normalizedRole === 'staff' ? 6 : 4;
+            const totalRequested = parsedBookIds.length;
+
+            if (currentActiveLoans + totalRequested > maxLimit) {
+                connection.release();
+                return res.status(400).json({
+                    success: false,
+                    error: 'Borrowing limit exceeded',
+                    message: `Borrowing limit exceeded: ${normalizedRole} maximum is ${maxLimit} books. User already has ${currentActiveLoans} active book(s) and requested ${totalRequested} more.`,
+                    currentActiveLoans,
+                    requestedCount: totalRequested,
+                    maxLimit
+                });
+            }
+
+            // 4. Validate each book and check availability
+            const placeholders = parsedBookIds.map(() => '?').join(',');
+            const [existingBooks] = await connection.execute(
+                `SELECT b.id, b.title, b.author, b.is_available,
+                        (SELECT COUNT(*) FROM book_transactions bt WHERE bt.book_id = b.id AND bt.status = 'active') as active_transactions
+                 FROM books b 
+                 WHERE b.id IN (${placeholders})`,
+                parsedBookIds
+            );
+
+            const bookMap = new Map();
+            existingBooks.forEach(b => bookMap.set(b.id, b));
+
+            const bookEvaluation = [];
+            let hasUnavailableBooks = false;
+
+            for (const bookId of parsedBookIds) {
+                const book = bookMap.get(bookId);
+                if (!book) {
+                    hasUnavailableBooks = true;
+                    bookEvaluation.push({
+                        bookId,
+                        available: false,
+                        reason: 'Book does not exist in catalog'
+                    });
+                } else if (!book.is_available || book.active_transactions > 0) {
+                    hasUnavailableBooks = true;
+                    bookEvaluation.push({
+                        bookId,
+                        title: book.title,
+                        author: book.author,
+                        available: false,
+                        reason: 'Book is currently checked out or unavailable'
+                    });
+                } else {
+                    bookEvaluation.push({
+                        bookId,
+                        title: book.title,
+                        author: book.author,
+                        available: true
+                    });
+                }
+            }
+
+            if (hasUnavailableBooks) {
+                connection.release();
+                return res.status(400).json({
+                    success: false,
+                    error: 'One or more books are not available for checkout',
+                    message: 'One or more books in the cart are currently unavailable or invalid.',
+                    books: bookEvaluation
+                });
+            }
+
+            // 5. Execute transaction inserting multiple checkout records
+            await connection.beginTransaction();
+
+            const checkoutDate = new Date();
+            const dueDate = new Date();
+            dueDate.setDate(dueDate.getDate() + loanDays);
+
+            const checkoutResults = [];
+
+            for (const item of bookEvaluation) {
+                const [insertResult] = await connection.execute(
+                    `INSERT INTO book_transactions (
+                        user_id,
+                        book_id,
+                        checked_out_by,
+                        checkout_date,
+                        due_date,
+                        status
+                     ) VALUES (?, ?, ?, ?, ?, 'active')`,
+                    [userId, item.bookId, librarianId, checkoutDate, dueDate]
+                );
+
+                await connection.execute(
+                    `UPDATE books SET is_available = FALSE WHERE id = ?`,
+                    [item.bookId]
+                );
+
+                checkoutResults.push({
+                    transactionId: insertResult.insertId,
+                    bookId: item.bookId,
+                    title: item.title,
+                    author: item.author,
+                    checkoutDate,
+                    dueDate,
+                    status: 'active'
+                });
+            }
+
+            await connection.execute(
+                `UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+                [userId]
+            );
+
+            await connection.commit();
+            connection.release();
+
+            return res.status(201).json({
+                success: true,
+                message: `Successfully checked out ${checkoutResults.length} book(s)`,
+                checkoutCount: checkoutResults.length,
+                due_date: dueDate.toISOString(),
+                user: {
+                    id: borrower.id,
+                    name: `${borrower.first_name} ${borrower.last_name}`,
+                    role: roleName
+                },
+                transactions: checkoutResults
+            });
+
+        } catch (error) {
+            if (connection) {
+                try {
+                    await connection.rollback();
+                } catch (rbErr) {
+                    console.error('Rollback error:', rbErr);
+                }
+                connection.release();
+            }
+            console.error('Error in checkoutBatch:', error);
+            return res.status(500).json({
+                success: false,
+                error: 'Internal server error during batch checkout',
+                message: error.message
+            });
+        }
+    }
 }
 
 module.exports = {
@@ -814,6 +1059,7 @@ module.exports = {
     getIsbnCopies: BookController.getIsbnCopies,
     getBookLocationHistory: BookController.getBookLocationHistory,
     bulkImportBooks: BookController.bulkImportBooks,
+    checkoutBatch: BookController.checkoutBatch,
     
     // Legacy methods for backward compatibility
     searchBooks: BookController.searchBooks

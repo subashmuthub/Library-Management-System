@@ -64,7 +64,7 @@ function App() {
               <Route path="rfid" element={<RFIDScanner />} />
               <Route path="navigation" element={<Navigation />} />
               <Route path="student-visualization" element={<StudentVisualization />} />
-              <Route path="book-orders" element={<BookOrderDetails />} />
+              <Route path="book-orders" element={<PrivateRoute roles={["admin"]}><BookOrderDetails /></PrivateRoute>} />
               <Route path="question-papers" element={<QuestionPaperLibrary />} />
               <Route path="recommendations" element={<BookRecommendations />} />
               <Route path="heatmap" element={<LibraryHeatmap />} />

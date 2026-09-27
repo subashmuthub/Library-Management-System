@@ -3,6 +3,7 @@ import { transactionService, bookService, userManagementService } from '../servi
 import { useAuth } from '../contexts';
 import { BookOpen, User, Calendar, CheckCircle, XCircle, Clock, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
+import MultiBookCheckoutModal from '../components/MultiBookCheckoutModal';
 
 const Transactions = () => {
   const { user } = useAuth();
@@ -178,15 +179,12 @@ const Transactions = () => {
         </div>
         {(isAdminOrLibrarian || normalizedRole === 'student' || normalizedRole === 'staff') && (
           <button
-            onClick={() => {
-              setCheckoutForm({ user_id: user?.id ? String(user.id) : '', book_id: '', loan_days: 14 });
-              setShowCheckoutModal(true);
-            }}
+            onClick={() => setShowCheckoutModal(true)}
             className="btn btn-primary"
-            title="Checkout a book"
+            title="Checkout books"
           >
             <BookOpen size={20} className="mr-2" />
-            Checkout Book
+            Checkout Books
           </button>
         )}
       </div>
@@ -292,62 +290,15 @@ const Transactions = () => {
         )}
       </div>
 
-      {/* Checkout Modal */}
-      {showCheckoutModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4">Checkout Book</h2>
-            <form onSubmit={handleCheckout} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">User ID</label>
-                <input
-                  type="text"
-                  required
-                  className="input w-full"
-                  value={checkoutForm.user_id}
-                  onChange={(e) => setCheckoutForm({ ...checkoutForm, user_id: e.target.value })}
-                  placeholder="Enter user ID"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Book ID</label>
-                <input
-                  type="number"
-                  required
-                  className="input w-full"
-                  value={checkoutForm.book_id}
-                  onChange={(e) => setCheckoutForm({ ...checkoutForm, book_id: e.target.value })}
-                  placeholder="Enter book ID"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Loan Days</label>
-                <input
-                  type="number"
-                  required
-                  min="1"
-                  max="30"
-                  className="input w-full"
-                  value={checkoutForm.loan_days}
-                  onChange={(e) => setCheckoutForm({ ...checkoutForm, loan_days: e.target.value })}
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowCheckoutModal(false)}
-                  className="btn bg-gray-200 hover:bg-gray-300"
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Checkout
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Multi-Book Cart Checkout Modal */}
+      <MultiBookCheckoutModal
+        isOpen={showCheckoutModal}
+        onClose={() => setShowCheckoutModal(false)}
+        onSuccess={() => {
+          loadTransactions();
+        }}
+        initialUserId={user?.id ? String(user.id) : ''}
+      />
 
       {/* Renew Modal */}
       {showRenewModal && selectedTransaction && (

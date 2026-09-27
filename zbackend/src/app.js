@@ -174,7 +174,7 @@ app.use("/api/v1", (req, res, next) => {
   if (
     role === "student" &&
     req.method === "POST" &&
-    (req.path === "/transactions/checkout" || req.path.startsWith("/reservations"))
+    (req.path === "/transactions/checkout" || req.path === "/books/checkout-batch" || req.path.startsWith("/reservations"))
   ) {
     return next();
   }
@@ -201,6 +201,7 @@ app.use("/api/v1/user-management", require("./routes/user-management.routes"));
 app.use("/api/v1/dashboard", require("./routes/library-dashboard.routes"));
 app.use("/api/v1/entry", require("./routes/entry.routes"));
 app.use("/api/v1/books", requireActiveEntryForStudents, require("./routes/books.routes"));
+app.use("/api/books", requireActiveEntryForStudents, require("./routes/books.routes"));
 app.use("/api/v1/transactions", require("./routes/transaction.routes"));
 app.use('/api/v1/navigation', require('./routes/navigation.routes'));
 app.use('/api/v1/settings', require('./routes/settings.routes'));

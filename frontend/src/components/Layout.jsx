@@ -16,7 +16,7 @@ const navigation = [
       { label: 'Advanced Search', path: '/book-search', icon: Search },
       { label: 'AI Recommendations', path: '/recommendations', icon: Sparkles, tag: 'New' },
       { label: 'QR Shelf Locator', path: '/shelf-locator', icon: MapPin, tag: 'New' },
-      { label: 'Book Orders', path: '/book-orders', icon: PackagePlus },
+      { label: 'Book Orders', path: '/book-orders', icon: PackagePlus, adminOnly: true },
       { label: 'Question Papers', path: '/question-papers', icon: FileText },
     ],
   },
@@ -56,7 +56,15 @@ const Layout = () => {
 
   const roleName = typeof user?.role === 'string' ? user.role : user?.role?.role_name;
   const isAdmin = (roleName || '').toLowerCase() === 'admin';
-  const visibleNavigation = navigation.filter((item) => !item.adminOnly || isAdmin);
+  const visibleNavigation = navigation
+    .filter((item) => !item.adminOnly || isAdmin)
+    .map((item) => {
+      if (!item.items) return item;
+      return {
+        ...item,
+        items: item.items.filter((child) => !child.adminOnly || isAdmin),
+      };
+    });
   const currentPage = useMemo(() => {
     const page = flattenNavigation(visibleNavigation).find((item) => location.pathname === item.path);
     return page?.label || 'Dashboard';

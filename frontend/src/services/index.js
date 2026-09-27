@@ -143,6 +143,11 @@ export const bookService = {
     const response = await api.post("/books/bulk-import", { books });
     return response.data;
   },
+
+  checkoutBatch: async (batchData) => {
+    const response = await api.post("/books/checkout-batch", batchData);
+    return response.data;
+  },
 };
 
 // RFID scanning endpoints
@@ -206,6 +211,11 @@ export const beaconService = {
 export const transactionService = {
   checkoutBook: async (checkoutData) => {
     const response = await api.post("/transactions/checkout", checkoutData);
+    return response.data;
+  },
+
+  checkoutBatch: async (batchData) => {
+    const response = await api.post("/books/checkout-batch", batchData);
     return response.data;
   },
 

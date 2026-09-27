@@ -257,12 +257,14 @@ const Fines = () => {
                           <div className="flex gap-2">
                             {fine.status === 'pending' && (
                               <>
-                                <button
-                                  onClick={() => handlePayFine(fine)}
-                                  className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 font-medium"
-                                >
-                                  Pay Now
-                                </button>
+                                {!isAdminOrLibrarian && (
+                                  <button
+                                    onClick={() => handlePayFine(fine)}
+                                    className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 font-medium"
+                                  >
+                                    Pay Now
+                                  </button>
+                                )}
                                 {isAdminOrLibrarian && (
                                   <button
                                     onClick={() => handleWaiveFine(fine.id)}
