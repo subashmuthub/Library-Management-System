@@ -1,0 +1,44 @@
+import axios from "axios";
+
+const API_URL = import.meta.env.VITE_API_URL || "/api/v1";
+
+// Create axios instance with default config
+const api = axios.create({
+  baseURL: API_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
+  withCredentials: true, // Send cookies with requests
+});
+
+// Response interceptor for error handling
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const errorCode = error.response?.data?.code;
+    if (errorCode === "ENTRY_REQUIRED") {
+      const message =
+        error.response?.data?.message ||
+        "Please log your library entry before using this feature.";
+      sessionStorage.setItem("entry_policy_message", message);
+      if (!globalThis.location.pathname.startsWith("/entry")) {
+        globalThis.location.href = "/entry";
+      }
+    }
+
+    if (error.response?.status === 401) {
+      // Session expired or not found — clear local state and redirect to login.
+      // Skip redirect when the request itself IS the login or /auth/me check.
+      const url = error.config?.url || "";
+      const isAuthCheck =
+        url.includes("/auth/login") || url.includes("/auth/me");
+      if (!isAuthCheck) {
+        localStorage.removeItem("user");
+        globalThis.location.href = "/login";
+      }
+    }
+    return Promise.reject(error);
+  },
+);
+
+export default api;
