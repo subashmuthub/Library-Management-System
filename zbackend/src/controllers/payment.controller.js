@@ -37,6 +37,17 @@ const createPaymentOrder = async (req, res) => {
 
     const fine = fines[0];
 
+    const sessionUser = req.user || req.session?.user;
+    const role = String(
+      sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || "",
+    ).toLowerCase();
+    if (role === 'student' && sessionUser?.id && fine.user_id !== sessionUser.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are only authorized to pay your own fines'
+      });
+    }
+
     // Create Razorpay order
     const orderOptions = {
       amount: Math.round(parseFloat(fine.amount) * 100), // Amount in paise (INR)
@@ -139,6 +150,17 @@ const verifyPayment = async (req, res) => {
     }
 
     const fine = fines[0];
+
+    const sessionUser = req.user || req.session?.user;
+    const role = String(
+      sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || "",
+    ).toLowerCase();
+    if (role === 'student' && sessionUser?.id && fine.user_id !== sessionUser.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are only authorized to pay your own fines'
+      });
+    }
 
     // Start transaction
     const connection = await db.getConnection();

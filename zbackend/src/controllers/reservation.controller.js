@@ -6,21 +6,24 @@
 const mysql = require('mysql2/promise');
 const { pool } = require('../config/database');
 const EmailService = require('../services/email.service');
+const { hasDirectResearchAccess } = require('../utils/access-control.helper');
 
 class ReservationController {
     // Reserve a book
     static async reserveBook(req, res) {
         try {
-            const { book_id, user_id } = req.body;
-            // For development without auth: accept userId from body or from auth
-            const userId = req.user?.id || user_id;
+            const currentUserRole = String(
+                req.user?.role || req.user?.role_name || req.user?.role?.role_name || ''
+            ).toLowerCase();
+            const isAdminOrLibrarian = ['admin', 'librarian'].includes(currentUserRole);
+            const userId = isAdminOrLibrarian ? (user_id || req.user?.id) : (req.user?.id || user_id);
 
             if (!book_id) {
                 return res.status(400).json({ error: 'Book ID is required' });
             }
             
             if (!userId) {
-                return res.status(400).json({ error: 'User ID is required (include user_id in request body for testing)' });
+                return res.status(400).json({ error: 'User ID is required' });
             }
 
             const connection = await pool.getConnection();
@@ -43,6 +46,27 @@ class ReservationController {
             }
 
             const book = books[0];
+
+            // Restricted Research & ME Thesis Gatekeeper
+            if (book.is_restricted_research) {
+                const [userRoleRows] = await connection.execute(
+                    `SELECT u.id, u.degree_type, u.department, u.academic_year, ur.role_name 
+                     FROM users u 
+                     LEFT JOIN user_roles ur ON u.role_id = ur.id 
+                     WHERE u.id = ?`,
+                    [userId]
+                );
+                const isDirectAccess = hasDirectResearchAccess(userRoleRows[0]);
+
+                if (!isDirectAccess) {
+                    connection.release();
+                    return res.status(403).json({
+                        success: false,
+                        error: 'RESTRICTED_RESEARCH_TITLE',
+                        message: 'Restricted: This title is reserved for Research Scholars and ME Students. Normal students require prior Librarian approval.'
+                    });
+                }
+            }
 
             // Check if user already has this book reserved
             const [existingReservations] = await connection.execute(`
@@ -234,28 +258,21 @@ class ReservationController {
         }
     }
 
-    // Get all reservations (admin/librarian view)
+    // Get all reservations (admin/librarian view or student isolated view)
     static async getAllReservations(req, res) {
         try {
-            const { status, book_id, page = 1, limit = 20 } = req.query;
+            const { status, book_id, page = 1, limit = 20, user_id } = req.query;
             
+            // Check authenticated user role and identity
+            const currentUserId = req.user?.id;
+            const currentUserRole = String(
+                req.user?.role || req.user?.role_name || req.user?.role?.role_name || ''
+            ).toLowerCase();
+            const isAdminOrLibrarian = ['admin', 'librarian'].includes(currentUserRole);
+
             // Parse and validate pagination parameters
             const parsedPage = Math.max(1, parseInt(page) || 1);
             const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 20));
-
-            // Check if table has any data first
-            const [countCheck] = await pool.query('SELECT COUNT(*) as total FROM reservations');
-            if (countCheck[0].total === 0) {
-                return res.json({
-                    reservations: [],
-                    pagination: {
-                        page: parsedPage,
-                        limit: parsedLimit,
-                        total: 0,
-                        totalPages: 0
-                    }
-                });
-            }
 
             let query = `
                 SELECT 
@@ -278,6 +295,17 @@ class ReservationController {
             `;
 
             let params = [];
+
+            // Strict Data Isolation:
+            // If student (or non-admin/librarian), strictly filter by req.user.id
+            if (!isAdminOrLibrarian) {
+                query += ` AND r.user_id = ?`;
+                params.push(currentUserId);
+            } else if (user_id) {
+                // Admin or librarian can optionally filter by a specific student/user
+                query += ` AND r.user_id = ?`;
+                params.push(user_id);
+            }
 
             if (status) {
                 query += ` AND r.status = ?`;
@@ -302,9 +330,18 @@ class ReservationController {
 
             const [reservations] = await pool.query(query, params);
 
-            // Get total count
+            // Get total count matching the same strict filter criteria
             let countQuery = `SELECT COUNT(*) as total FROM reservations r WHERE 1=1`;
             let countParams = [];
+
+            if (!isAdminOrLibrarian) {
+                countQuery += ` AND r.user_id = ?`;
+                countParams.push(currentUserId);
+            } else if (user_id) {
+                countQuery += ` AND r.user_id = ?`;
+                countParams.push(user_id);
+            }
+
             if (status) {
                 countQuery += ` AND r.status = ?`;
                 countParams.push(status);
@@ -315,9 +352,10 @@ class ReservationController {
             }
 
             const [countResult] = await pool.query(countQuery, countParams);
+            const total = countResult[0]?.total || 0;
 
             // Format reservations with proper field names for frontend
-            const formattedReservations = reservations.map(r => ({
+            const formattedReservations = (reservations || []).map(r => ({
                 ...r,
                 book_title: r.title,
                 queue_position: r.position_in_queue || r.queue_position
@@ -328,8 +366,8 @@ class ReservationController {
                 pagination: {
                     page: parsedPage,
                     limit: parsedLimit,
-                    total: countResult[0].total,
-                    totalPages: Math.ceil(countResult[0].total / parsedLimit)
+                    total,
+                    totalPages: Math.ceil(total / parsedLimit)
                 }
             });
 
@@ -344,7 +382,10 @@ class ReservationController {
         try {
             const { id } = req.params;
             const userId = req.user?.id;
-            const userRole = req.user?.role?.role_name || req.user?.role;
+            const userRole = String(
+                req.user?.role || req.user?.role_name || req.user?.role?.role_name || ''
+            ).toLowerCase();
+            const isAdminOrLibrarian = ['admin', 'librarian'].includes(userRole);
 
             const connection = await pool.getConnection();
 
@@ -368,8 +409,7 @@ class ReservationController {
             const reservation = reservations[0];
 
             // Check permissions - user can cancel their own, librarian/admin can cancel any
-            if (userId && reservation.user_id !== userId && 
-                !['admin', 'librarian'].includes(userRole)) {
+            if (!isAdminOrLibrarian && String(reservation.user_id) !== String(userId)) {
                 connection.release();
                 return res.status(403).json({ 
                     error: 'You can only cancel your own reservations' 
@@ -680,6 +720,237 @@ class ReservationController {
         } catch (error) {
             console.error('Error fetching reservation statistics:', error);
             res.status(500).json({ error: 'Internal server error' });
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // RESTRICTED RESEARCH & ME THESIS APPROVAL WORKFLOW
+    // ------------------------------------------------------------------------
+
+    // Submit an access request for a restricted research title (UG Students)
+    static async requestAccess(req, res) {
+        let connection;
+        try {
+            const { book_id, reason } = req.body;
+            const sessionUser = req.user || req.session?.user;
+            const userId = sessionUser?.id || req.body.user_id;
+
+            if (!book_id) {
+                return res.status(400).json({ success: false, message: 'Book ID is required' });
+            }
+            if (!reason || !reason.trim()) {
+                return res.status(400).json({ success: false, message: 'Academic statement of purpose / project topic is required' });
+            }
+            if (!userId) {
+                return res.status(401).json({ success: false, message: 'Authentication required' });
+            }
+
+            connection = await pool.getConnection();
+
+            // Check if book exists and is restricted
+            const [bookRows] = await connection.execute(
+                `SELECT id, title, author, isbn, is_restricted_research, available_copies FROM books WHERE id = ?`,
+                [book_id]
+            );
+
+            if (!bookRows.length) {
+                connection.release();
+                return res.status(404).json({ success: false, message: 'Book not found' });
+            }
+
+            const book = bookRows[0];
+
+            // Validate that student has not exceeded checkout limits (max 6 for regular students)
+            const [activeCheckouts] = await connection.execute(
+                `SELECT COUNT(*) as count FROM book_transactions WHERE user_id = ? AND return_date IS NULL`,
+                [userId]
+            );
+
+            if (activeCheckouts[0]?.count >= 6) {
+                connection.release();
+                return res.status(400).json({
+                    success: false,
+                    message: 'Maximum checkout limit reached. You must return existing loans before requesting access.'
+                });
+            }
+
+            // Check if user already has an active PENDING or APPROVED request for this book
+            const [existingRequests] = await connection.execute(
+                `SELECT id, status FROM book_reservations 
+                 WHERE book_id = ? AND user_id = ? AND status IN ('PENDING', 'APPROVED')`,
+                [book_id, userId]
+            );
+
+            if (existingRequests.length > 0) {
+                connection.release();
+                const existingStatus = existingRequests[0].status;
+                return res.status(400).json({
+                    success: false,
+                    message: existingStatus === 'APPROVED'
+                        ? 'Your access request has already been approved! You can check out this title at the desk.'
+                        : 'You already have an active request pending review by the Librarian.'
+                });
+            }
+
+            // Insert pending request
+            const [result] = await connection.execute(
+                `INSERT INTO book_reservations (book_id, user_id, status, reason)
+                 VALUES (?, ?, 'PENDING', ?)`,
+                [book_id, userId, reason.trim()]
+            );
+
+            connection.release();
+
+            return res.status(201).json({
+                success: true,
+                message: 'Request submitted successfully. Awaiting Librarian approval.',
+                data: {
+                    id: result.insertId,
+                    book_id,
+                    user_id: userId,
+                    status: 'PENDING',
+                }
+            });
+        } catch (error) {
+            if (connection) connection.release();
+            console.error('Error in requestAccess:', error);
+            return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        }
+    }
+
+    // Get all pending research access requests (Librarian/Admin only)
+    static async getPendingRequests(req, res) {
+        let connection;
+        try {
+            connection = await pool.getConnection();
+
+            const [rows] = await connection.execute(`
+                SELECT 
+                    br.id,
+                    br.book_id,
+                    br.user_id,
+                    br.status,
+                    br.reason,
+                    br.created_at,
+                    br.updated_at,
+                    CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS student_name,
+                    u.email AS student_email,
+                    u.student_id,
+                    u.department,
+                    u.degree_type,
+                    u.academic_year,
+                    ur.role_name,
+                    b.title AS book_title,
+                    b.author AS book_author,
+                    b.isbn,
+                    b.is_restricted_research
+                FROM book_reservations br
+                JOIN users u ON br.user_id = u.id
+                LEFT JOIN user_roles ur ON u.role_id = ur.id
+                JOIN books b ON br.book_id = b.id
+                WHERE br.status = 'PENDING'
+                ORDER BY br.created_at DESC
+            `);
+
+            connection.release();
+
+            return res.json({
+                success: true,
+                count: rows.length,
+                requests: rows
+            });
+        } catch (error) {
+            if (connection) connection.release();
+            console.error('Error fetching pending requests:', error);
+            return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        }
+    }
+
+    // Review access request: approve or reject (Librarian/Admin only)
+    static async reviewRequest(req, res) {
+        let connection;
+        try {
+            const { id } = req.params;
+            const { status, rejection_reason } = req.body;
+            const reviewerId = req.user?.id || req.session?.user?.id;
+
+            if (!['APPROVED', 'REJECTED'].includes(status)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Status must be either 'APPROVED' or 'REJECTED'"
+                });
+            }
+
+            connection = await pool.getConnection();
+
+            const [requestRows] = await connection.execute(
+                `SELECT * FROM book_reservations WHERE id = ?`,
+                [id]
+            );
+
+            if (!requestRows.length) {
+                connection.release();
+                return res.status(404).json({ success: false, message: 'Reservation request not found' });
+            }
+
+            await connection.execute(
+                `UPDATE book_reservations 
+                 SET status = ?, reviewed_by = ?, rejection_reason = ?, updated_at = NOW()
+                 WHERE id = ?`,
+                [status, reviewerId || null, rejection_reason || null, id]
+            );
+
+            connection.release();
+
+            return res.json({
+                success: true,
+                message: `Request has been ${status === 'APPROVED' ? 'approved' : 'rejected'} successfully.`,
+                data: {
+                    id: Number(id),
+                    status,
+                    reviewed_by: reviewerId
+                }
+            });
+        } catch (error) {
+            if (connection) connection.release();
+            console.error('Error reviewing request:', error);
+            return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+        }
+    }
+
+    // Check student's latest request status for a specific book
+    static async getMyRequestStatus(req, res) {
+        let connection;
+        try {
+            const { bookId } = req.params;
+            const sessionUser = req.user || req.session?.user;
+            const userId = sessionUser?.id || req.query.userId;
+
+            if (!userId) {
+                return res.status(401).json({ success: false, message: 'Authentication required' });
+            }
+
+            connection = await pool.getConnection();
+
+            const [rows] = await connection.execute(
+                `SELECT id, book_id, user_id, status, reason, rejection_reason, created_at, updated_at
+                 FROM book_reservations
+                 WHERE book_id = ? AND user_id = ?
+                 ORDER BY created_at DESC
+                 LIMIT 1`,
+                [bookId, userId]
+            );
+
+            connection.release();
+
+            return res.json({
+                success: true,
+                request: rows[0] || null
+            });
+        } catch (error) {
+            if (connection) connection.release();
+            console.error('Error fetching request status:', error);
+            return res.status(500).json({ success: false, message: error.message || 'Internal server error' });
         }
     }
 }

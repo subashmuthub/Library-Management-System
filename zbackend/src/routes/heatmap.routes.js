@@ -6,6 +6,9 @@
 const express = require('express');
 const router = express.Router();
 const HeatmapController = require('../controllers/heatmap.controller');
+const { authenticate, authorize } = require('../middleware/auth.middleware');
+
+router.use(authenticate, authorize(['admin', 'librarian']));
 
 /**
  * GET /api/v1/heatmap

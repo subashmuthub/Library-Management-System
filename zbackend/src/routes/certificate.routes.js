@@ -6,6 +6,9 @@
 const express = require('express');
 const router = express.Router();
 const CertificateController = require('../controllers/certificate.controller');
+const { authenticate, authorize } = require('../middleware/auth.middleware');
+
+router.use(authenticate, authorize(['admin', 'librarian']));
 
 /**
  * GET /api/v1/certificates/active-user

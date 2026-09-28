@@ -4,6 +4,7 @@
  */
 
 const { pool } = require("../config/database");
+const { hasDirectResearchAccess } = require("../utils/access-control.helper");
 
 const getParsedInt = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
@@ -104,9 +105,10 @@ class TransactionController {
       try {
         await connection.beginTransaction();
 
-        // Only student accounts are allowed to borrow books.
+        // Verify borrower account and role
         const [targetUsers] = await connection.execute(
-          `SELECT u.id, u.status, LOWER(COALESCE(ur.role_name, CASE u.role_id WHEN 4 THEN 'staff' WHEN 5 THEN 'staff' WHEN 6 THEN 'staff' ELSE 'student' END)) AS role_name
+          `SELECT u.id, u.status, u.degree_type, u.department, u.academic_year,
+                  LOWER(COALESCE(ur.role_name, CASE u.role_id WHEN 4 THEN 'staff' WHEN 5 THEN 'me_student' WHEN 6 THEN 'research_scholar' ELSE 'student' END)) AS role_name
            FROM users u
            LEFT JOIN user_roles ur ON u.role_id = ur.id
            WHERE u.id = ?`,
@@ -135,16 +137,19 @@ class TransactionController {
 
         const roleName = targetUsers[0].role_name;
         const normalizedRoleName = ["teacher", "faculty", "staff"].includes(roleName) ? "staff" : roleName;
+        const allowedBorrowRoles = ["student", "staff", "me_student", "research_scholar", "admin", "librarian"];
 
-        if (normalizedRoleName !== "student" && normalizedRoleName !== "staff") {
+        if (!allowedBorrowRoles.includes(normalizedRoleName)) {
           await connection.rollback();
           connection.release();
           return res.status(400).json({
             success: false,
-            message: "Only student and staff users can borrow books",
-            error: "Only student and staff users can borrow books",
+            message: "This account type cannot borrow books",
+            error: "This account type cannot borrow books",
           });
         }
+
+        const isDirectResearch = hasDirectResearchAccess(targetUsers[0]);
 
         // Check if book is available
         const [activeCheckouts] = await connection.execute(
@@ -168,16 +173,14 @@ class TransactionController {
           [userId, "active"],
         );
 
-        // Determine limit based on role
-        const maxLimit = normalizedRoleName === "staff" ? 6 : 4;
+        // Determine limit based on role and academic program: Staff: 10, ME/Research: 8, UG Students: 6
+        const maxLimit = normalizedRoleName === "staff" ? 10 : (isDirectResearch ? 8 : 6);
 
         if (userCheckouts[0].count >= maxLimit) {
           await connection.rollback();
           connection.release();
           return res.status(400).json({
-            success: false,
-            message: `Maximum checkout limit (${maxLimit}) reached for ${normalizedRoleName}`,
-            error: `Maximum checkout limit (${maxLimit}) reached for ${normalizedRoleName}`,
+            message: "Maximum checkout limit reached",
           });
         }
 
@@ -197,23 +200,67 @@ class TransactionController {
           });
         }
 
-        // Create checkout transaction
-        const checkoutDate = new Date();
-        const dueDate = new Date();
-        dueDate.setDate(dueDate.getDate() + getParsedInt(loanDays, 14));
+        // --------------------------------------------------------------------
+        // Restricted Research & ME Thesis Gatekeeper
+        // --------------------------------------------------------------------
+        try {
+          const [bookRows] = await connection.execute(
+            "SELECT id, title, is_restricted_research FROM books WHERE id = ?",
+            [bookId],
+          );
+          if (bookRows.length > 0 && Boolean(bookRows[0].is_restricted_research)) {
+            const isDirectAccess = hasDirectResearchAccess(targetUsers[0]);
 
-        // Insert transaction without `transaction_type` for backwards compatibility
+            if (!isDirectAccess) {
+              // Regular UG student: check if they have an APPROVED reservation in book_reservations
+              const [approvedReservations] = await connection.execute(
+                `SELECT id, status FROM book_reservations 
+                 WHERE book_id = ? AND user_id = ? AND status = 'APPROVED'
+                 ORDER BY created_at DESC LIMIT 1`,
+                [bookId, userId],
+              );
+
+              if (approvedReservations.length === 0) {
+                await connection.rollback();
+                connection.release();
+                return res.status(403).json({
+                  success: false,
+                  message: "Restricted: This title is reserved for Research Scholars and ME Students. Normal students require prior Librarian approval.",
+                });
+              }
+
+              // Fulfill the approved reservation
+              await connection.execute(
+                `UPDATE book_reservations SET status = 'FULFILLED', updated_at = NOW() WHERE id = ?`,
+                [approvedReservations[0].id],
+              );
+            }
+          }
+        } catch (researchErr) {
+          console.warn("Restricted research check warning:", researchErr.message);
+        }
+
+        // Calculate loan duration:
+        // Staff = 60 days, ME Students / Research Scholars = 30 days, Regular UG Students = 14 days
+        const checkoutDate = new Date();
+        const defaultLoanDays = normalizedRoleName === "staff" ? 60 : (isDirectResearch ? 30 : 14);
+        const requestedLoanDays = req.body.loanDays || req.body.loan_days;
+        const effectiveLoanDays = requestedLoanDays ? getParsedInt(requestedLoanDays, defaultLoanDays) : defaultLoanDays;
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + effectiveLoanDays);
+
+        // Insert transaction record
         const [result] = await connection.execute(
           `
-                    INSERT INTO book_transactions (
-                        user_id, 
-                        book_id, 
-                        checked_out_by,
-                        checkout_date,
-                        due_date,
-                        status
-                    ) VALUES (?, ?, ?, ?, ?, 'active')
-                `,
+            INSERT INTO book_transactions (
+                user_id, 
+                book_id, 
+                checked_out_by,
+                checkout_date,
+                due_date,
+                status
+            ) VALUES (?, ?, ?, ?, ?, 'active')
+          `,
           [userId, bookId, librarianId, checkoutDate, dueDate],
         );
 
@@ -270,6 +317,262 @@ class TransactionController {
     }
   }
 
+  // Batch Checkout multiple books in a single transaction
+  static async checkoutBatch(req, res) {
+    let connection;
+    try {
+      const userId = req.body.userId || req.body.user_id;
+      const rawBookIds = req.body.bookIds || req.body.book_ids || (req.body.bookId ? [req.body.bookId] : []);
+      const requestedLoanDays = req.body.loanDays || req.body.loan_days;
+      const librarianId = req.user?.id || req.body.librarianId || null;
+
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: "User ID is required",
+          message: "User ID is required",
+        });
+      }
+
+      if (!Array.isArray(rawBookIds) || rawBookIds.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: "At least one Book ID is required",
+          message: "Cart is empty. Please add at least one book to checkout.",
+        });
+      }
+
+      // Filter and deduplicate book IDs
+      const bookIds = [...new Set(rawBookIds.map((id) => Number(id)).filter((id) => !Number.isNaN(id) && id > 0))];
+
+      if (bookIds.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid Book IDs provided",
+          message: "Please provide valid numeric Book IDs.",
+        });
+      }
+
+      connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      // 1. Verify borrower account and role
+      const [targetUsers] = await connection.execute(
+        `SELECT u.id, u.first_name, u.last_name, u.status, u.degree_type, u.department, u.academic_year,
+                LOWER(COALESCE(ur.role_name, CASE u.role_id WHEN 4 THEN 'staff' WHEN 5 THEN 'me_student' WHEN 6 THEN 'research_scholar' ELSE 'student' END)) AS role_name
+         FROM users u
+         LEFT JOIN user_roles ur ON u.role_id = ur.id
+         WHERE u.id = ? OR u.student_id = ? OR u.email = ?`,
+        [userId, userId, userId],
+      );
+
+      if (targetUsers.length === 0) {
+        await connection.rollback();
+        connection.release();
+        return res.status(404).json({
+          success: false,
+          error: "User not found",
+          message: `User '${userId}' not found`,
+        });
+      }
+
+      const borrower = targetUsers[0];
+      const actualUserId = borrower.id;
+
+      if (borrower.status !== "active") {
+        await connection.rollback();
+        connection.release();
+        return res.status(400).json({
+          success: false,
+          error: "User account is not active",
+          message: "User account is suspended or inactive.",
+        });
+      }
+
+      const roleName = borrower.role_name;
+      const normalizedRoleName = ["teacher", "faculty", "staff"].includes(roleName) ? "staff" : roleName;
+      const allowedBorrowRoles = ["student", "staff", "me_student", "research_scholar", "admin", "librarian"];
+
+      if (!allowedBorrowRoles.includes(normalizedRoleName)) {
+        await connection.rollback();
+        connection.release();
+        return res.status(400).json({
+          success: false,
+          error: "This account type cannot borrow books",
+          message: "This account type cannot borrow books",
+        });
+      }
+
+      const isDirectResearch = hasDirectResearchAccess(borrower);
+
+      // 2. Check overdue books
+      const [overdueRows] = await connection.execute(
+        "SELECT COUNT(*) as count FROM book_transactions WHERE user_id = ? AND status = 'active' AND due_date < CURDATE()",
+        [actualUserId],
+      );
+      if (overdueRows[0].count > 0) {
+        await connection.rollback();
+        connection.release();
+        return res.status(400).json({
+          success: false,
+          error: "Cannot checkout: user has overdue books",
+          message: `Cannot checkout: ${borrower.first_name} has ${overdueRows[0].count} overdue book(s).`,
+        });
+      }
+
+      // 3. Check active checkouts count and borrowing limit
+      const [activeRows] = await connection.execute(
+        "SELECT COUNT(*) as count FROM book_transactions WHERE user_id = ? AND status = 'active'",
+        [actualUserId],
+      );
+      const currentActiveCount = activeRows[0].count;
+      const maxLimit = normalizedRoleName === "staff" ? 10 : (isDirectResearch ? 8 : 6);
+
+      if (currentActiveCount + bookIds.length > maxLimit) {
+        await connection.rollback();
+        connection.release();
+        const availableSlots = Math.max(0, maxLimit - currentActiveCount);
+        return res.status(400).json({
+          success: false,
+          error: "Checkout limit exceeded",
+          message: `Borrowing limit exceeded: User can only checkout ${availableSlots} more book(s). (Active: ${currentActiveCount}, Selected: ${bookIds.length}, Max allowance: ${maxLimit})`,
+        });
+      }
+
+      // 4. Calculate loan period and due date
+      const defaultLoanDays = normalizedRoleName === "staff" ? 60 : (isDirectResearch ? 30 : 14);
+      const effectiveLoanDays = requestedLoanDays ? getParsedInt(requestedLoanDays, defaultLoanDays) : defaultLoanDays;
+      const checkoutDate = new Date();
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + effectiveLoanDays);
+
+      const insertedTransactions = [];
+
+      for (const bId of bookIds) {
+        // Fetch book info
+        const [bookRows] = await connection.execute(
+          "SELECT id, title, author, is_available, is_restricted_research FROM books WHERE id = ?",
+          [bId],
+        );
+
+        if (bookRows.length === 0) {
+          await connection.rollback();
+          connection.release();
+          return res.status(404).json({
+            success: false,
+            error: "Book not found",
+            message: `Book #${bId} not found in library catalog.`,
+          });
+        }
+
+        const book = bookRows[0];
+
+        // Check if currently checked out or unavailable
+        const [bookActiveCheckouts] = await connection.execute(
+          "SELECT COUNT(*) as count FROM book_transactions WHERE book_id = ? AND status = 'active'",
+          [bId],
+        );
+
+        if (bookActiveCheckouts[0].count > 0 || !book.is_available) {
+          await connection.rollback();
+          connection.release();
+          return res.status(400).json({
+            success: false,
+            error: "Book unavailable",
+            message: `"${book.title}" (ID: ${bId}) is currently checked out or unavailable.`,
+          });
+        }
+
+        // Restricted Research & ME Thesis check
+        if (Boolean(book.is_restricted_research) && !isDirectResearch) {
+          // Regular UG student: check approved reservation
+          const [approvedReservations] = await connection.execute(
+            `SELECT id, status FROM book_reservations 
+             WHERE book_id = ? AND user_id = ? AND status = 'APPROVED'
+             ORDER BY created_at DESC LIMIT 1`,
+            [bId, actualUserId],
+          );
+
+          if (approvedReservations.length === 0) {
+            await connection.rollback();
+            connection.release();
+            return res.status(403).json({
+              success: false,
+              error: "Restricted Book",
+              message: `Restricted: "${book.title}" is reserved for Research Scholars and ME Students. Normal students require prior Librarian approval.`,
+            });
+          }
+
+          // Fulfill reservation
+          await connection.execute(
+            `UPDATE book_reservations SET status = 'FULFILLED', updated_at = NOW() WHERE id = ?`,
+            [approvedReservations[0].id],
+          );
+        }
+
+        // Insert into book_transactions
+        const [insertResult] = await connection.execute(
+          `INSERT INTO book_transactions (
+            user_id, book_id, checked_out_by, checkout_date, due_date, status
+          ) VALUES (?, ?, ?, ?, ?, 'active')`,
+          [actualUserId, bId, librarianId, checkoutDate, dueDate],
+        );
+
+        // Mark book unavailable
+        await connection.execute(
+          "UPDATE books SET is_available = FALSE WHERE id = ?",
+          [bId],
+        );
+
+        insertedTransactions.push({
+          transaction_id: insertResult.insertId,
+          book_id: bId,
+          title: book.title,
+          author: book.author,
+          due_date: dueDate,
+        });
+      }
+
+      // Update user updated_at
+      await connection.execute(
+        "UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [actualUserId],
+      );
+
+      await connection.commit();
+      connection.release();
+
+      return res.status(200).json({
+        success: true,
+        message: `Successfully checked out ${insertedTransactions.length} book(s) for ${borrower.first_name} ${borrower.last_name}`,
+        count: insertedTransactions.length,
+        due_date: dueDate,
+        loan_days: effectiveLoanDays,
+        borrower: {
+          id: actualUserId,
+          name: `${borrower.first_name} ${borrower.last_name}`,
+          role: normalizedRoleName,
+        },
+        transactions: insertedTransactions,
+      });
+    } catch (error) {
+      if (connection) {
+        try {
+          await connection.rollback();
+          connection.release();
+        } catch (connErr) {
+          console.error("Error releasing connection:", connErr);
+        }
+      }
+      console.error("Error during batch checkout:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Internal server error",
+        details: error?.message,
+      });
+    }
+  }
+
   // Return a book
   static async returnBook(req, res) {
     try {
@@ -301,13 +604,23 @@ class TransactionController {
         const returnDate = new Date();
         const dueDate = new Date(transaction.due_date);
 
-        // Calculate fine if overdue
+        // Calculate fine if overdue (staff and Book Bank loans are fine-exempt)
+        const [borrowers] = await connection.execute(
+          `SELECT u.id, LOWER(COALESCE(ur.role_name, 'student')) AS role_name
+           FROM users u
+           LEFT JOIN user_roles ur ON u.role_id = ur.id
+           WHERE u.id = ?`,
+          [transaction.user_id],
+        );
+        const isStaff = borrowers.length > 0 && ["staff", "teacher", "faculty"].includes(borrowers[0].role_name);
+        const isFineExempt = isStaff;
+
         const daysOverdue = Math.max(
           0,
           Math.floor((returnDate - dueDate) / (1000 * 60 * 60 * 24)),
         );
         const finePerDay = 1;
-        const fineAmount = daysOverdue * finePerDay;
+        const fineAmount = isFineExempt ? 0 : daysOverdue * finePerDay;
 
         // Update transaction
         await connection.execute(
@@ -335,8 +648,8 @@ class TransactionController {
           [transaction.user_id],
         );
 
-        // Create fine record if overdue
-        if (daysOverdue > 0) {
+        // Create fine record if overdue and user is not fine-exempt
+        if (daysOverdue > 0 && !isFineExempt) {
           await connection.execute(
             `
                         INSERT INTO fines (
@@ -396,6 +709,124 @@ class TransactionController {
     } catch (error) {
       console.error("Error during return:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
+  // Quick return by scanning RFID tag, barcode, ISBN, bookId, or transactionId
+  static async quickReturn(req, res) {
+    let connection;
+    try {
+      const { identifier, condition = "good", notes = "" } = req.body;
+      const librarianId = req.user?.id || null;
+
+      if (!identifier) {
+        return res.status(400).json({ error: "Identifier (barcode, RFID tag, ISBN, or transaction ID) is required" });
+      }
+
+      connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      // Find active transaction matching identifier by:
+      // 1. Transaction ID
+      // 2. Book ID
+      // 3. Book ISBN
+      // 4. RFID tag
+      const [matchedTransactions] = await connection.execute(
+        `SELECT bt.*, b.title, b.author, b.isbn,
+                u.id as user_id, u.first_name, u.last_name, u.student_id,
+                LOWER(COALESCE(ur.role_name, 'student')) as user_role
+         FROM book_transactions bt
+         JOIN books b ON bt.book_id = b.id
+         JOIN users u ON bt.user_id = u.id
+         LEFT JOIN user_roles ur ON u.role_id = ur.id
+         LEFT JOIN rfid_tags rt ON b.id = rt.book_id
+         WHERE bt.status = 'active' AND bt.return_date IS NULL
+           AND (
+             bt.id = ? 
+             OR b.id = ? 
+             OR b.isbn = ? 
+             OR rt.tag_id = ?
+           )
+         LIMIT 1`,
+        [identifier, identifier, identifier, identifier]
+      );
+
+      if (matchedTransactions.length === 0) {
+        await connection.rollback();
+        connection.release();
+        return res.status(404).json({
+          success: false,
+          error: `No active checkout transaction found for: "${identifier}"`,
+          message: `No active checkout transaction found for: "${identifier}"`,
+        });
+      }
+
+      const tx = matchedTransactions[0];
+      const returnDate = new Date();
+      const dueDate = new Date(tx.due_date);
+
+      // Check if user is staff (staff members are fine-exempt)
+      const isStaff = ["staff", "teacher", "faculty"].includes(tx.user_role);
+      const isFineExempt = isStaff;
+
+      const daysOverdue = Math.max(0, Math.floor((returnDate - dueDate) / (1000 * 60 * 60 * 24)));
+      const finePerDay = 1.0;
+      const fineAmount = isFineExempt ? 0 : daysOverdue * finePerDay;
+
+      // Update book transaction
+      await connection.execute(
+        `UPDATE book_transactions
+         SET return_date = ?, returned_by = ?, notes = ?, return_condition = ?, status = 'returned'
+         WHERE id = ?`,
+        [returnDate, librarianId, notes, condition, tx.id]
+      );
+
+      // Mark book available
+      await connection.execute(`UPDATE books SET is_available = TRUE WHERE id = ?`, [tx.book_id]);
+
+      // Create fine record if overdue and not exempt
+      if (daysOverdue > 0 && !isFineExempt) {
+        await connection.execute(
+          `INSERT INTO fines (user_id, transaction_id, amount, days_overdue, status)
+           VALUES (?, ?, ?, ?, 'pending')`,
+          [tx.user_id, tx.id, fineAmount, daysOverdue]
+        );
+      }
+
+      await connection.commit();
+
+      // Trigger reservation queue if someone is waiting
+      const ReservationController = require("./reservation.controller");
+      ReservationController.processReservationQueue(tx.book_id).catch((err) => {
+        console.error("Queue processing error after quick-return:", err);
+      });
+
+      connection.release();
+
+      return res.json({
+        success: true,
+        message: `"${tx.title}" returned successfully`,
+        returned_book: {
+          transaction_id: tx.id,
+          book_id: tx.book_id,
+          title: tx.title,
+          author: tx.author,
+          isbn: tx.isbn,
+          borrower_name: `${tx.first_name} ${tx.last_name}`,
+          student_id: tx.student_id,
+          return_date: returnDate.toISOString(),
+          days_overdue: daysOverdue,
+          fine_amount: fineAmount,
+          is_fine_exempt: isFineExempt
+        }
+      });
+    } catch (error) {
+      if (connection) {
+        await connection.rollback().catch(() => {});
+        connection.release();
+      }
+      console.error("Error in quickReturn:", error);
+      res.status(500).json({ error: "Internal server error", message: error.message });
     }
   }
 
@@ -516,6 +947,15 @@ class TransactionController {
   static async getUserCheckouts(req, res) {
     try {
       const { userId } = req.params;
+      const sessionUser = req.user || req.session?.user;
+      const role = String(
+        sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || "",
+      ).toLowerCase();
+
+      if (role === "student" && sessionUser?.id && String(sessionUser.id) !== String(userId)) {
+        return res.status(403).json({ error: "Access denied to other user's checkouts" });
+      }
+
       const connection = await pool.getConnection();
 
       const [checkouts] = await connection.execute(
@@ -560,9 +1000,15 @@ class TransactionController {
   // Get overdue books
   static async getOverdueBooks(req, res) {
     try {
+      const sessionUser = req.user || req.session?.user;
+      const role = String(
+        sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || "",
+      ).toLowerCase();
+      const isAdminOrLibrarian = ["admin", "librarian"].includes(role);
+
       const connection = await pool.getConnection();
 
-      const [overdueBooks] = await connection.execute(`
+      let query = `
                 SELECT 
                     bt.*,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
@@ -580,9 +1026,19 @@ class TransactionController {
                 JOIN books b ON bt.book_id = b.id
                 LEFT JOIN fines f ON bt.id = f.transaction_id
                 WHERE bt.return_date IS NULL AND bt.due_date < CURDATE()
-                ORDER BY bt.due_date ASC, u.last_name, u.first_name
-            `);
+      `;
+      let params = [];
+      if (!isAdminOrLibrarian) {
+        if (!sessionUser?.id) {
+          connection.release();
+          return res.status(401).json({ error: "Authentication required" });
+        }
+        query += ` AND bt.user_id = ?`;
+        params.push(sessionUser.id);
+      }
+      query += ` ORDER BY bt.due_date ASC, u.last_name, u.first_name`;
 
+      const [overdueBooks] = await connection.execute(query, params);
       connection.release();
 
       res.json({
@@ -840,7 +1296,21 @@ class TransactionController {
         });
       }
 
-      const filterInput = { status, user_id, book_id, date_from, date_to };
+      const sessionUser = req.user || req.session?.user;
+      const role = String(
+        sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || "",
+      ).toLowerCase();
+      const isAdminOrLibrarian = ["admin", "librarian"].includes(role);
+
+      let effectiveUserId = user_id;
+      if (!isAdminOrLibrarian) {
+        if (!sessionUser?.id) {
+          return res.status(401).json({ error: "Authentication required" });
+        }
+        effectiveUserId = sessionUser.id;
+      }
+
+      const filterInput = { status, user_id: effectiveUserId, book_id, date_from, date_to };
 
       let query = `
                 SELECT 
@@ -857,12 +1327,22 @@ class TransactionController {
                         WHEN bt.return_date IS NULL AND bt.due_date < CURDATE() THEN 'overdue'
                         WHEN bt.return_date IS NULL THEN 'active'
                         ELSE 'returned'
-                    END as transaction_status
+                    END as transaction_status,
+                    COALESCE(fine_info.pending_fine, 0) as pending_fine,
+                    COALESCE(fine_info.paid_fine, 0) as paid_fine
                 FROM book_transactions bt
                 JOIN books b ON bt.book_id = b.id
                 JOIN users u ON bt.user_id = u.id
                 LEFT JOIN users checkout_lib ON bt.checked_out_by = checkout_lib.id
                 LEFT JOIN users return_lib ON bt.returned_by = return_lib.id
+                LEFT JOIN (
+                    SELECT 
+                        transaction_id,
+                        SUM(CASE WHEN status = 'pending' THEN amount - amount_paid ELSE 0 END) as pending_fine,
+                        SUM(CASE WHEN status = 'paid' THEN amount ELSE amount_paid END) as paid_fine
+                    FROM fines
+                    GROUP BY transaction_id
+                ) fine_info ON bt.id = fine_info.transaction_id
                 WHERE 1=1
             `;
 
@@ -980,6 +1460,15 @@ class TransactionController {
       if (transactions.length === 0) {
         connection.release();
         return res.status(404).json({ error: "Transaction not found" });
+      }
+
+      const sessionUser = req.user || req.session?.user;
+      const role = String(
+        sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || "",
+      ).toLowerCase();
+      if (role === "student" && sessionUser?.id && transactions[0].user_id !== sessionUser.id) {
+        connection.release();
+        return res.status(403).json({ error: "Access denied to transaction details" });
       }
 
       // Get fines for this transaction if any

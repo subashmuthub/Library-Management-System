@@ -13,7 +13,7 @@ require("dotenv").config({ path: path.resolve(__dirname, "../../.env") });
 // WHY POOL: Connection pooling reuses connections instead of creating
 // new ones for each query, significantly improving performance.
 const pool = mysql.createPool({
-  host: process.env.DB_HOST || "localhost",
+  host: process.env.DB_HOST || "127.0.0.1",
   port: Number.parseInt(process.env.DB_PORT, 10) || 3306,
   user: process.env.DB_USER || "root",
   password: process.env.DB_PASSWORD || "",
@@ -23,17 +23,25 @@ const pool = mysql.createPool({
   queueLimit: 0, // Unlimited queue
   enableKeepAlive: true,
   keepAliveInitialDelay: 0,
+  connectTimeout: 20000,
 });
 
-// Test database connection
-const checkDatabaseConnection = async () => {
-  try {
-    const connection = await pool.getConnection();
-    console.log("✓ Database connected successfully");
-    connection.release();
-  } catch (err) {
-    console.error("✗ Database connection failed:", err.message);
-    process.exit(1);
+// Test database connection with retry
+const checkDatabaseConnection = async (retries = 3) => {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const connection = await pool.getConnection();
+      console.log("✓ Database connected successfully");
+      connection.release();
+      return;
+    } catch (err) {
+      console.warn(`Database connection attempt ${attempt}/${retries}: ${err.message}`);
+      if (attempt === retries) {
+        console.error("✗ Database connection failed after retries:", err.message);
+        process.exit(1);
+      }
+      await new Promise((res) => setTimeout(res, 1500));
+    }
   }
 };
 

@@ -24,21 +24,21 @@ const storage = multer.diskStorage({
 	}
 });
 const upload = multer({ storage });
-// const { authenticate, authorize } = require('../middleware/auth.middleware');
+const { authenticate, authorize } = require('../middleware/auth.middleware');
 
 // Get current user profile
-router.get('/profile', userController.getProfile);
+router.get('/profile', authenticate, userController.getProfile);
 
 // Update user profile
-router.put('/profile', userController.updateProfile);
+router.put('/profile', authenticate, userController.updateProfile);
 
 // Upload profile avatar
-router.post('/profile/avatar', upload.single('avatar'), userController.uploadAvatar);
+router.post('/profile/avatar', authenticate, upload.single('avatar'), userController.uploadAvatar);
 
-// List all users (must come before /:id to avoid route collision)
-router.get('/', userController.listUsers);
+// List all users (admin & librarian only)
+router.get('/', authenticate, authorize(['admin', 'librarian']), userController.listUsers);
 
 // Get user by ID (must come after / to avoid matching everything)
-router.get('/:id', userController.getUserById);
+router.get('/:id', authenticate, userController.getUserById);
 
 module.exports = router;

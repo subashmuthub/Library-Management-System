@@ -48,6 +48,12 @@ class OverdueController {
   static async getUserNotifications(req, res) {
     try {
       const userId = parseInt(req.params.userId, 10);
+      const requester = req.user || req.session?.user;
+      const role = String(requester?.role || requester?.role_name || '').toLowerCase();
+      if (role === 'student' && requester?.id && requester.id !== userId) {
+        return res.status(403).json({ error: 'Forbidden', message: 'You are only authorized to view your own notifications' });
+      }
+
       const unreadOnly = req.query.unread_only === 'true';
       const limit = parseInt(req.query.limit, 10) || 20;
       const result = await OverdueService.getUserNotifications(userId, { limit, unreadOnly });
@@ -62,6 +68,12 @@ class OverdueController {
   static async markRead(req, res) {
     try {
       const userId = parseInt(req.params.userId, 10);
+      const requester = req.user || req.session?.user;
+      const role = String(requester?.role || requester?.role_name || '').toLowerCase();
+      if (role === 'student' && requester?.id && requester.id !== userId) {
+        return res.status(403).json({ error: 'Forbidden', message: 'You are only authorized to modify your own notifications' });
+      }
+
       const { ids } = req.body; // optional array of notification IDs
       const result = await OverdueService.markRead(userId, ids);
       return res.json({ success: true, ...result });

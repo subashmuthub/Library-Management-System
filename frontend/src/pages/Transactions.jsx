@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { transactionService, bookService, userManagementService, feedbackService } from '../services';
+import React, { useState, useEffect, useRef } from 'react';
+import { transactionService, bookService, userManagementService } from '../services';
 import { useAuth } from '../contexts';
-import { BookOpen, User, Calendar, CheckCircle, XCircle, Clock, RefreshCw } from 'lucide-react';
+import { BookOpen, User, Calendar, CheckCircle, XCircle, Clock, RefreshCw, Scan, Zap, CheckCheck, Trash2, X, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import MultiBookCheckoutModal from '../components/MultiBookCheckoutModal';
 
@@ -17,45 +17,31 @@ const Transactions = () => {
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [showRenewModal, setShowRenewModal] = useState(false);
   const [showReturnModal, setShowReturnModal] = useState(false);
+  const [showScannerModal, setShowScannerModal] = useState(false);
+  const [scannerInput, setScannerInput] = useState('');
+  const [scannedReturns, setScannedReturns] = useState([]);
+  const [scannerLoading, setScannerLoading] = useState(false);
+  const [scannerError, setScannerError] = useState('');
+  const [scannerSuccessMsg, setScannerSuccessMsg] = useState('');
+  const scannerInputRef = useRef(null);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [renewDays, setRenewDays] = useState(14);
   const [returnForm, setReturnForm] = useState({
     condition: 'good',
     notes: ''
   });
-  const [checkoutForm, setCheckoutForm] = useState({
-    user_id: '',
-    book_id: '',
-    loan_days: 14
-  });
-  const [disputes, setDisputes] = useState([]);
 
   useEffect(() => {
     loadTransactions();
-    feedbackService.getDisputes().then((response) => setDisputes(response.disputes || [])).catch(() => setDisputes([]));
   }, [filter]);
-
-  const raiseDispute = async (transactionId) => {
-    const reason = window.prompt('Describe the transaction dispute:');
-    if (!reason?.trim()) return;
-    try {
-      await feedbackService.createDispute({ transaction_id: transactionId, reason });
-      const response = await feedbackService.getDisputes();
-      setDisputes(response.disputes || []);
-    } catch (error) { alert(error.response?.data?.error || 'Unable to raise dispute.'); }
-  };
-
-  const updateDispute = async (id, status) => {
-    try {
-      await feedbackService.updateDispute(id, { status, resolution_notes: status === 'resolved' ? 'Resolved by library staff.' : '' });
-      setDisputes((items) => items.map((item) => item.id === id ? { ...item, status } : item));
-    } catch (error) { alert(error.response?.data?.error || 'Unable to update dispute.'); }
-  };
 
   const loadTransactions = async () => {
     setLoading(true);
     try {
       const params = filter !== 'all' ? { status: filter === 'issued' ? 'issued' : filter } : {};
+      if (userRole === 'student' && user?.id) {
+        params.user_id = user.id;
+      }
       const response = await transactionService.getAllTransactions(params);
       let data = response.transactions || response.data || response;
       if (!Array.isArray(data)) {
@@ -70,19 +56,49 @@ const Transactions = () => {
     }
   };
 
-  const handleCheckout = async (e) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (showScannerModal) {
+      const timer = setTimeout(() => {
+        scannerInputRef.current?.focus();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [showScannerModal]);
+
+  const handleScanSubmit = async (e) => {
+    if (e) e.preventDefault();
+    const identifier = scannerInput.trim();
+    if (!identifier) return;
+
+    setScannerLoading(true);
+    setScannerError('');
+    setScannerSuccessMsg('');
+
     try {
-      await transactionService.checkoutBook({
-        ...checkoutForm,
-        user_id: !isAdminOrLibrarian ? user?.id : checkoutForm.user_id
-      });
-      alert('Book checked out successfully!');
-      setShowCheckoutModal(false);
-      setCheckoutForm({ user_id: user?.id ? String(user.id) : '', book_id: '', loan_days: 14 });
+      const response = await transactionService.quickReturn({ identifier });
+      const returnedBook = response.returned_book || {
+        title: response.book_title || `Item ${identifier}`,
+        return_date: new Date().toISOString(),
+        fine_amount: response.fine_amount || 0,
+        borrower_name: response.borrower_name || 'Borrower',
+        is_fine_exempt: response.is_staff || false,
+      };
+
+      setScannedReturns((prev) => [returnedBook, ...prev]);
+      setScannerSuccessMsg(`"${returnedBook.title}" returned successfully!`);
+      setScannerInput('');
       loadTransactions();
-    } catch (error) {
-      alert(`Checkout failed: ${error.response?.data?.message || error.response?.data?.error || error.message}`);
+    } catch (err) {
+      console.error('Scan return failed:', err);
+      setScannerError(
+        err.response?.data?.message || err.response?.data?.error || `No active checkout found for "${identifier}"`
+      );
+      setScannerInput('');
+    } finally {
+      setScannerLoading(false);
+      setTimeout(() => {
+        scannerInputRef.current?.focus();
+      }, 50);
     }
   };
 
@@ -193,19 +209,37 @@ const Transactions = () => {
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold">Transactions</h1>
-          <p className="text-gray-600">Manage book checkouts and returns</p>
+          <h1 className="text-2xl font-bold">{userRole === 'student' ? 'My Borrowing History' : 'Transactions'}</h1>
+          <p className="text-gray-600">
+            {userRole === 'student' ? 'Track your borrowed books, return dates, and fine statuses' : 'Manage book checkouts and returns'}
+          </p>
         </div>
-        {(isAdminOrLibrarian || normalizedRole === 'student' || normalizedRole === 'staff') && (
-          <button
-            onClick={() => setShowCheckoutModal(true)}
-            className="btn btn-primary"
-            title="Checkout books"
-          >
-            <BookOpen size={20} className="mr-2" />
-            Checkout Books
-          </button>
-        )}
+        <div className="flex items-center space-x-3">
+          {isAdminOrLibrarian && (
+            <button
+              onClick={() => {
+                setShowScannerModal(true);
+                setScannerError('');
+                setScannerSuccessMsg('');
+              }}
+              className="btn bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white flex items-center shadow-lg shadow-emerald-500/20"
+              title="Continuous Return Scanner Mode"
+            >
+              <Scan size={18} className="mr-2" />
+              Continuous Return Scanner
+            </button>
+          )}
+          {(isAdminOrLibrarian || normalizedRole === 'student' || normalizedRole === 'staff') && (
+            <button
+              onClick={() => setShowCheckoutModal(true)}
+              className="btn btn-primary"
+              title="Checkout Books"
+            >
+              <BookOpen size={20} className="mr-2" />
+              Checkout Books
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filters */}
@@ -249,19 +283,31 @@ const Transactions = () => {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                  {isAdminOrLibrarian && (
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                  )}
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Book</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Checkout Date</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
+                  {!isAdminOrLibrarian && (
+                    <>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Return Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fines</th>
+                    </>
+                  )}
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  {isAdminOrLibrarian && (
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {transactions.map(transaction => (
                   <tr key={transaction.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-sm">#{transaction.id}</td>
-                    <td className="px-4 py-3 text-sm">{transaction.user_name || `User #${transaction.user_id}`}</td>
+                    {isAdminOrLibrarian && (
+                      <td className="px-4 py-3 text-sm">{transaction.user_name || `User #${transaction.user_id}`}</td>
+                    )}
                     <td className="px-4 py-3 text-sm">{transaction.title || `Book #${transaction.book_id}`}</td>
                     <td className="px-4 py-3 text-sm">
                       <div className="leading-tight">
@@ -275,30 +321,56 @@ const Transactions = () => {
                         <p className="text-xs text-slate-500">{formatTimeDisplay(transaction.due_date)}</p>
                       </div>
                     </td>
+                    {!isAdminOrLibrarian && (
+                      <>
+                        <td className="px-4 py-3 text-sm">
+                          {transaction.return_date ? (
+                            <div className="leading-tight">
+                              <p className="font-medium text-slate-800">{formatDateDisplay(transaction.return_date)}</p>
+                              <p className="text-xs text-slate-500">{formatTimeDisplay(transaction.return_date)}</p>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">Not returned</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {Number(transaction.pending_fine) > 0 ? (
+                            <span className="text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                              ₹{transaction.pending_fine} Pending
+                            </span>
+                          ) : Number(transaction.paid_fine) > 0 ? (
+                            <span className="text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                              ₹{transaction.paid_fine} Paid
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">None</span>
+                          )}
+                        </td>
+                      </>
+                    )}
                     <td className="px-4 py-3">{getStatusBadge(transaction.status)}</td>
-                    <td className="px-4 py-3 text-sm">
-                      <div className="flex gap-2">
-                        {transaction.status === 'active' && isAdminOrLibrarian && (
-                          <>
-                            <button
-                              onClick={() => handleReturn(transaction)}
-                              className="text-green-600 hover:text-green-700 font-medium"
-                            >
-                              Return
-                            </button>
-                            <button
-                              onClick={() => handleRenew(transaction)}
-                              className="text-blue-600 hover:text-blue-700 font-medium"
-                            >
-                              Renew
-                            </button>
-                          </>
-                        )}
-                        <button onClick={() => raiseDispute(transaction.id)} className="text-orange-600 hover:text-orange-700 font-medium">
-                          Dispute
-                        </button>
-                      </div>
-                    </td>
+                    {isAdminOrLibrarian && (
+                      <td className="px-4 py-3 text-sm">
+                        <div className="flex gap-2">
+                          {transaction.status === 'active' && (
+                            <>
+                              <button
+                                onClick={() => handleReturn(transaction)}
+                                className="text-green-600 hover:text-green-700 font-medium"
+                              >
+                                Return
+                              </button>
+                              <button
+                                onClick={() => handleRenew(transaction)}
+                                className="text-blue-600 hover:text-blue-700 font-medium"
+                              >
+                                Renew
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -312,31 +384,16 @@ const Transactions = () => {
         )}
       </div>
 
-      <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold">Transaction Disputes</h2>
-          <span className="text-sm text-gray-500">{disputes.filter((item) => !['resolved', 'rejected'].includes(item.status)).length} open</span>
-        </div>
-        {disputes.length ? disputes.map((dispute) => (
-          <div key={dispute.id} className="border rounded-lg p-3 mb-2 flex flex-wrap items-center justify-between gap-3">
-            <div><p className="font-medium">Transaction #{dispute.transaction_id} · {dispute.title || `Book #${dispute.book_id}`}</p><p className="text-sm text-gray-600">{dispute.reason}</p></div>
-            {isAdminOrLibrarian ? (
-              <select className="input w-auto" value={dispute.status} onChange={(event) => updateDispute(dispute.id, event.target.value)}>
-                {['open', 'investigating', 'resolved', 'rejected'].map((status) => <option key={status} value={status}>{status}</option>)}
-              </select>
-            ) : <span className="badge badge-info capitalize">{dispute.status}</span>}
-          </div>
-        )) : <p className="text-gray-500">No disputes logged.</p>}
-      </div>
-
       {/* Multi-Book Cart Checkout Modal */}
       <MultiBookCheckoutModal
         isOpen={showCheckoutModal}
         onClose={() => setShowCheckoutModal(false)}
         onSuccess={() => {
+          setShowCheckoutModal(false);
           loadTransactions();
         }}
-        initialUserId={user?.id ? String(user.id) : ''}
+        currentUser={user}
+        isAdminOrLibrarian={isAdminOrLibrarian}
       />
 
       {/* Renew Modal */}
@@ -491,15 +548,12 @@ const Transactions = () => {
                   value={returnForm.condition}
                   onChange={(e) => setReturnForm({ ...returnForm, condition: e.target.value })}
                 >
+                  <option value="excellent">Excellent - Like new</option>
                   <option value="good">Good - Normal wear</option>
-                  <option value="damaged">Damaged - Requires review</option>
-                  <option value="lost">Lost - Book not returned</option>
+                  <option value="fair">Fair - Visible wear</option>
+                  <option value="poor">Poor - Damaged</option>
                 </select>
               </div>
-
-              {(returnForm.condition === 'damaged' || returnForm.condition === 'lost') && (
-                <div className="bg-red-50 border border-red-200 p-3 rounded-lg text-sm text-red-800">Attention required: this return will be escalated for staff review.</div>
-              )}
 
               {/* Notes */}
               <div>
@@ -543,6 +597,161 @@ const Transactions = () => {
                   Confirm Return
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Continuous Return Scanner Modal */}
+      {showScannerModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-gray-900 border border-gray-800 rounded-3xl max-w-3xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Scanner Header */}
+            <div className="p-6 bg-gradient-to-r from-gray-900 via-emerald-950/40 to-gray-900 border-b border-gray-800 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-2xl animate-pulse">
+                  <Scan className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-xl font-bold text-white">Bulk Continuous Return Scanner</h3>
+                    <span className="flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping mr-1" />
+                      Live Mode
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    Scan RFID tag, ISBN, or Transaction ID. The scanner auto-processes on Enter and stays focused.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowScannerModal(false)}
+                className="p-2 text-gray-400 hover:text-white rounded-xl hover:bg-gray-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Scanner Input Form */}
+            <div className="p-6 space-y-4 border-b border-gray-800 bg-gray-950/50">
+              <form onSubmit={handleScanSubmit} className="relative">
+                <div className="relative">
+                  <input
+                    ref={scannerInputRef}
+                    type="text"
+                    value={scannerInput}
+                    onChange={(e) => setScannerInput(e.target.value)}
+                    placeholder="Scan barcode / RFID or type ISBN & hit Enter..."
+                    disabled={scannerLoading}
+                    className="w-full pl-5 pr-28 py-4 bg-gray-900/90 border-2 border-emerald-500/50 focus:border-emerald-400 rounded-2xl text-white placeholder-gray-500 focus:outline-none focus:ring-4 focus:ring-emerald-500/20 text-lg font-mono tracking-wider transition-all"
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    disabled={scannerLoading || !scannerInput.trim()}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl text-sm transition-all disabled:opacity-50 flex items-center space-x-1.5 shadow-md shadow-emerald-600/30"
+                  >
+                    <Zap className="w-4 h-4" />
+                    <span>{scannerLoading ? 'Returning...' : 'Return'}</span>
+                  </button>
+                </div>
+              </form>
+
+              {/* Status Alerts */}
+              {scannerError && (
+                <div className="flex items-center space-x-2 p-3 bg-rose-950/40 border border-rose-500/30 text-rose-300 rounded-xl text-sm animate-in slide-in-from-top-1">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                  <span>{scannerError}</span>
+                </div>
+              )}
+
+              {scannerSuccessMsg && (
+                <div className="flex items-center space-x-2 p-3 bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 rounded-xl text-sm animate-in slide-in-from-top-1">
+                  <CheckCheck className="w-5 h-5 flex-shrink-0" />
+                  <span>{scannerSuccessMsg}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Scanned Returns History */}
+            <div className="p-6 flex-1 overflow-y-auto space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <h4 className="text-sm font-bold text-gray-300 uppercase tracking-wider">
+                    Scanned in this Session
+                  </h4>
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    {scannedReturns.length}
+                  </span>
+                </div>
+                {scannedReturns.length > 0 && (
+                  <button
+                    onClick={() => setScannedReturns([])}
+                    className="flex items-center space-x-1 text-xs text-gray-400 hover:text-rose-400 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Clear History</span>
+                  </button>
+                )}
+              </div>
+
+              {scannedReturns.length === 0 ? (
+                <div className="text-center py-10 border border-dashed border-gray-800 rounded-2xl text-gray-500 text-sm">
+                  Ready to scan. Present a book barcode or RFID tag to begin continuous return.
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {scannedReturns.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between p-3.5 bg-gray-800/40 border border-gray-700/50 rounded-2xl hover:border-gray-600 transition-all"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl">
+                          <CheckCircle className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-white text-sm">{item.title}</p>
+                          <div className="flex items-center space-x-2 text-xs text-gray-400">
+                            <span>Borrower: <strong className="text-gray-300">{item.borrower_name}</strong></span>
+                            {item.isbn && <span>• ISBN: <span className="font-mono">{item.isbn}</span></span>}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        {item.is_fine_exempt ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                            Staff (Exempt)
+                          </span>
+                        ) : item.fine_amount > 0 ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                            Fine: ₹{item.fine_amount}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            No Fine
+                          </span>
+                        )}
+                        <p className="text-[10px] text-gray-500 mt-1">
+                          {format(new Date(item.return_date), 'hh:mm:ss a')}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-gray-900 border-t border-gray-800 flex justify-end">
+              <button
+                onClick={() => setShowScannerModal(false)}
+                className="btn bg-gray-800 hover:bg-gray-700 text-white text-sm px-6 py-2 rounded-xl"
+              >
+                Close Scanner
+              </button>
             </div>
           </div>
         </div>

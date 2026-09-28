@@ -3,7 +3,6 @@ import { Search, Book, FileText, User, MapPin, CheckCircle, XCircle, Clock, Grid
 import { Link } from 'react-router-dom';
 import { bookService, transactionService, reservationService } from '../services';
 import { useAuth } from '../contexts';
-import MultiBookCheckoutModal from '../components/MultiBookCheckoutModal';
 
 const BookSearch = () => {
   const { user: currentUser } = useAuth();
@@ -818,16 +817,78 @@ const BookSearch = () => {
         </div>
       )}
 
-      {/* ── Multi-Book Cart Checkout Modal ── */}
-      <MultiBookCheckoutModal
-        isOpen={Boolean(checkoutModal)}
-        onClose={() => setCheckoutModal(null)}
-        onSuccess={() => {
-          handleSearch();
-        }}
-        initialUserId={currentUser?.id ? String(currentUser.id) : ''}
-        initialBook={checkoutModal}
-      />
+      {/* ── Checkout Modal ── */}
+      {checkoutModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+            <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-t-xl p-5 text-white">
+              <div className="flex items-center gap-3">
+                <ShoppingCart size={24} />
+                <div>
+                  <h2 className="text-xl font-bold">Checkout Book</h2>
+                  <p className="text-green-100 text-sm">Issue this book to a student</p>
+                </div>
+              </div>
+            </div>
+            <form onSubmit={handleCheckout} className="p-6 space-y-4">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                <p className="font-semibold text-gray-900 text-sm">{checkoutModal.title}</p>
+                <p className="text-xs text-gray-500">by {checkoutModal.author}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Student / User ID <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  value={checkoutForm.user_id}
+                  onChange={e => setCheckoutForm(f => ({ ...f, user_id: e.target.value }))}
+                  placeholder="User ID from profile"
+                  className="input w-full"
+                  required
+                  autoFocus
+                />
+                {currentUser?.id && (
+                  <p className="text-xs text-green-700 mt-1">Auto-filled from profile: {currentUser.id}</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Loan Period</label>
+                <select
+                  value={checkoutForm.loan_days}
+                  onChange={e => setCheckoutForm(f => ({ ...f, loan_days: parseInt(e.target.value) }))}
+                  className="input w-full"
+                >
+                  <option value={7}>7 days</option>
+                  <option value={14}>14 days</option>
+                  <option value={21}>21 days</option>
+                  <option value={30}>30 days</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Due back by: <span className="font-medium text-gray-700">
+                    {new Date(Date.now() + checkoutForm.loan_days * 86400000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </span>
+                </p>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCheckoutModal(null)}
+                  className="flex-1 btn btn-outline"
+                  disabled={checkoutLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 btn bg-green-600 hover:bg-green-700 text-white"
+                  disabled={checkoutLoading}
+                >
+                  {checkoutLoading ? 'Processing...' : 'Confirm Checkout'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ── Reserve Modal ── */}
       {reserveModal && (

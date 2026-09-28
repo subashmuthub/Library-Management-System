@@ -44,15 +44,11 @@ class RecommendationService {
       const [candidates] = await connection.execute(
         `SELECT b.id, b.title, b.author, b.category, b.publisher,
                 b.isbn, b.description, b.cover_image_url, b.is_available,
-          COALESCE(pb.borrow_count, 0) AS borrow_count,
-          COALESCE(AVG(br.rating), 0) AS average_rating,
-          COUNT(br.id) AS review_count
+                COALESCE(pb.borrow_count, 0) AS borrow_count
          FROM books b
          LEFT JOIN popular_books_cache pb ON b.id = pb.book_id
-         LEFT JOIN book_reviews br ON br.book_id = b.id AND br.status = 'published'
          WHERE b.id NOT IN (${borrowedPlaceholders})
            AND b.is_available = TRUE
-         GROUP BY b.id
          LIMIT 200`,
         [...borrowedIds]
       );
@@ -95,10 +91,6 @@ class RecommendationService {
             score += 10;
             reasons.push('Trending this week');
           }
-          if (book.average_rating >= 4) {
-            score += 8;
-            reasons.push('Highly rated by readers');
-          }
         } else {
           // Fallback for new users: popularity-only
           score = book.borrow_count + 15;
@@ -115,8 +107,6 @@ class RecommendationService {
           coverImage  : book.cover_image_url,
           isAvailable : Boolean(book.is_available),
           borrowCount : book.borrow_count,
-          averageRating: Number(book.average_rating || 0),
-          reviewCount: Number(book.review_count || 0),
           score,
           reason      : reasons[0] || 'Recommended for you',
           allReasons  : reasons,

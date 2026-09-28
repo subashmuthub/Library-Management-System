@@ -22,6 +22,7 @@ import {
   List,
   CheckCircle,
   XCircle,
+  Bookmark,
 } from "lucide-react";
 import ExcelJS from "exceljs";
 
@@ -119,8 +120,8 @@ const Books = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [filters, setFilters] = useState({
     category: "",
-    department: "",
     available: "",
+    restricted_only: false,
   });
 
   // Department categories
@@ -146,6 +147,7 @@ const Books = () => {
     publisher: "",
     publication_year: "",
     total_copies: 1,
+    is_restricted_research: false,
   });
 
   // Import states
@@ -170,6 +172,7 @@ const Books = () => {
       publisher: "",
       publication_year: "",
       total_copies: 1,
+      is_restricted_research: false,
     });
     setEditingBook(null);
   };
@@ -181,7 +184,7 @@ const Books = () => {
 
   useEffect(() => {
     loadBooks();
-  }, [searchTerm, filters.category, filters.department, filters.available, sortBy, sortOrder]);
+  }, [searchTerm, filters.category, filters.available, filters.restricted_only, sortBy, sortOrder]);
 
   const loadBooks = async () => {
     setLoading(true);
@@ -189,14 +192,21 @@ const Books = () => {
       const params = {
         q: searchTerm || undefined,
         category: filters.category || undefined,
-        department: filters.department || undefined,
         availability: filters.available || undefined,
+        restricted_only: filters.restricted_only ? "true" : undefined,
         limit: 100,
         sortBy: sortBy,
         sortOrder: sortOrder,
       };
       const response = await bookService.getAllBooks(params);
       let booksData = response.data?.books || response.books || [];
+
+      // Client-side filtering fallback for restricted_only
+      if (filters.restricted_only) {
+        booksData = booksData.filter(
+          (book) => book.is_restricted_research === 1 || book.is_restricted_research === true,
+        );
+      }
 
       // Client-side filtering for availability if not filtered by backend
       if (filters.available) {
@@ -253,7 +263,7 @@ const Books = () => {
   // Quick search as user types (debounced)
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
-      if (searchTerm || filters.category || filters.department) {
+      if (searchTerm || filters.category) {
         loadBooks();
       }
     }, 300);
@@ -352,6 +362,7 @@ const Books = () => {
       publisher: book.publisher || "",
       publication_year: book.publication_year || "",
       total_copies: book.total_copies || 1,
+      is_restricted_research: Boolean(book.is_restricted_research),
     });
     setEditingBook(book);
     setShowModal(true);
@@ -370,22 +381,6 @@ const Books = () => {
         "Failed to delete book: " +
           (error.response?.data?.message || error.message),
       );
-    }
-  };
-
-  const handleAddCopies = async (book) => {
-    const copiesToAdd = Number(window.prompt(`How many copies should be added to "${book.title}"?`, "1"));
-    if (!Number.isInteger(copiesToAdd) || copiesToAdd < 1) return;
-
-    try {
-      await bookService.updateBook(book.id, {
-        ...book,
-        total_copies: Number(book.total_copies || 0) + copiesToAdd,
-      });
-      alert(`${copiesToAdd} cop${copiesToAdd === 1 ? 'y' : 'ies'} added successfully!`);
-      loadBooks();
-    } catch (error) {
-      alert(`Failed to add copies: ${error.response?.data?.message || error.message}`);
     }
   };
 
@@ -551,7 +546,7 @@ const Books = () => {
   // Clear all filters
   const handleClearFilters = () => {
     setSearchTerm("");
-    setFilters({ category: "", department: "", available: "" });
+    setFilters({ category: "", available: "", restricted_only: false });
   };
 
   const handleOpenImportModal = () => {
@@ -579,9 +574,9 @@ const Books = () => {
 
       {/* Search Bar */}
       <div className="card">
-        <div className="flex gap-3 items-start">
+        <div className="flex gap-3 items-start flex-wrap lg:flex-nowrap">
           {/* Search Input */}
-          <div className="flex-1">
+          <div className="flex-1 min-w-[240px]">
             <div className="relative">
               <Search
                 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
@@ -607,12 +602,12 @@ const Books = () => {
             </div>
           </div>
 
-          {/* Filter Dropdowns */}
+          {/* Filter Dropdowns & Toggles */}
           <select
-            className="input w-64"
-            value={filters.department}
+            className="input w-56"
+            value={filters.category}
             onChange={(e) =>
-              setFilters({ ...filters, department: e.target.value })
+              setFilters({ ...filters, category: e.target.value })
             }
           >
             <option value="">All Departments</option>
@@ -624,7 +619,7 @@ const Books = () => {
           </select>
 
           <select
-            className="input w-48"
+            className="input w-40"
             value={filters.available}
             onChange={(e) =>
               setFilters({ ...filters, available: e.target.value })
@@ -635,8 +630,25 @@ const Books = () => {
             <option value="in-use">🔴 Issued</option>
           </select>
 
+          {/* Restricted Research & ME Papers Filter Toggle */}
+          <button
+            type="button"
+            onClick={() =>
+              setFilters({ ...filters, restricted_only: !filters.restricted_only })
+            }
+            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap border ${
+              filters.restricted_only
+                ? "bg-purple-100 text-purple-900 border-purple-400 shadow-sm"
+                : "bg-white text-gray-700 border-gray-300 hover:bg-purple-50 hover:text-purple-800"
+            }`}
+            title="Filter to Research & ME Papers"
+          >
+            <Bookmark size={14} className={filters.restricted_only ? "text-purple-700 fill-purple-500" : "text-purple-600"} />
+            Research / ME Papers Only
+          </button>
+
           {/* Clear Button */}
-          {(searchTerm || filters.category || filters.department || filters.available) && (
+          {(searchTerm || filters.category || filters.available || filters.restricted_only) && (
             <button
               type="button"
               onClick={handleClearFilters}
@@ -835,13 +847,25 @@ const Books = () => {
                           onClick={() => addToRecentlyViewed(book)}
                           className="group block"
                         >
-                          <div className="font-semibold text-gray-900 group-hover:text-primary-600">
-                            {book.title}
+                          <div className="font-semibold text-gray-900 group-hover:text-primary-600 flex items-center gap-1.5 flex-wrap">
+                            <span>{book.title}</span>
+                            {book.is_restricted_research && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-300">
+                                Restricted: Research & ME Paper
+                              </span>
+                            )}
                           </div>
                           <div className="text-xs text-gray-500">
                             {book.author}
                             {book.publisher ? ` • ${book.publisher}` : ""}
                           </div>
+                          {Number(book.average_rating) > 0 && (
+                            <div className="flex items-center gap-1 text-[11px] text-amber-600 font-semibold mt-0.5">
+                              <Star size={11} className="fill-amber-400 text-amber-400" />
+                              <span>{Number(book.average_rating).toFixed(1)}</span>
+                              <span className="text-gray-400 text-[10px]">({book.review_count || 0})</span>
+                            </div>
+                          )}
                         </Link>
                       </td>
                       <td>
@@ -893,13 +917,6 @@ const Books = () => {
                                     : "text-gray-400"
                                 }
                               />
-                            </button>
-                            <button
-                              onClick={() => handleAddCopies(book)}
-                              className="p-1.5 rounded hover:bg-green-100 text-green-600 transition-colors"
-                              title="Add Copies"
-                            >
-                              <Plus size={15} />
                             </button>
                             <button
                               onClick={() => handleEditBook(book)}
@@ -1098,6 +1115,30 @@ const Books = () => {
                     min="1"
                     required
                   />
+                </div>
+
+                {/* Restricted Access Setting */}
+                <div className="md:col-span-2 p-3.5 bg-purple-50 rounded-xl border border-purple-200">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="is_restricted_research"
+                      checked={formData.is_restricted_research}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          is_restricted_research: e.target.checked,
+                        })
+                      }
+                      className="rounded border-purple-300 text-purple-600 focus:ring-purple-500 h-4 w-4"
+                    />
+                    <label htmlFor="is_restricted_research" className="text-sm font-semibold text-purple-900 cursor-pointer">
+                      Restricted Access (ME Students & Research Scholars Only)
+                    </label>
+                  </div>
+                  <p className="text-xs text-purple-700 mt-1 pl-6">
+                    Direct access for Staff, ME Students, and Research Scholars. Normal UG students require prior Librarian review and approval before borrowing.
+                  </p>
                 </div>
               </div>
 

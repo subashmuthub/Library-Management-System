@@ -13,6 +13,9 @@ const Reservations = () => {
   const { user } = useAuth();
   const userRole = String(user?.role || user?.role_name || user?.role?.role_name || '').toLowerCase();
   const isAdminOrLibrarian = userRole === 'admin' || userRole === 'librarian';
+  const tableHeaders = isAdminOrLibrarian
+    ? ['ID', 'Reserved By', 'Book', 'Currently With', 'Expected Return', 'Queue', 'Reserved On', 'Status', 'Actions']
+    : ['ID', 'Book', 'Currently With', 'Expected Return', 'Queue', 'Reserved On', 'Status', 'Actions'];
 
   const [reservations, setReservations] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -139,21 +142,9 @@ const Reservations = () => {
 
   const queueBadge = (pos) => {
     if (!pos) return null;
-    const color = pos === 1
-      ? 'bg-red-100 text-red-700'
-      : pos <= 3
-        ? 'bg-yellow-100 text-yellow-700'
-        : 'bg-blue-100 text-blue-700';
-    return <span className={`px-2 py-1 rounded-full text-xs font-bold ${color}`}>#{pos} in queue</span>;
-  };
-
-  const getQueuePosition = (reservation) => {
-    if (reservation.queue_position) return reservation.queue_position;
-    const sameBook = reservations
-      .filter((item) => item.book_id === reservation.book_id && ['active', 'ready'].includes(item.status))
-      .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
-    const position = sameBook.findIndex((item) => item.id === reservation.id);
-    return position >= 0 ? position + 1 : null;
+    if (pos === 1) return <span className="px-2 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700">#{pos} · HIGH</span>;
+    if (pos <= 3) return <span className="px-2 py-1 rounded-full text-xs font-bold bg-yellow-100 text-yellow-700">#{pos} · MED</span>;
+    return <span className="px-2 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-700">#{pos} · NORMAL</span>;
   };
 
   return (
@@ -215,7 +206,7 @@ const Reservations = () => {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {['ID', 'Reserved By', 'Book', 'Currently With', 'Expected Return', 'Queue', 'Reserved On', 'Status', 'Actions'].map(h => (
+                  {tableHeaders.map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
                   ))}
                 </tr>
@@ -225,17 +216,19 @@ const Reservations = () => {
                   <tr key={r.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 font-mono text-gray-500">#{r.id}</td>
 
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 bg-indigo-100 rounded-full flex items-center justify-center shrink-0">
-                          <User size={12} className="text-indigo-600" />
+                    {isAdminOrLibrarian && (
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 bg-indigo-100 rounded-full flex items-center justify-center shrink-0">
+                            <User size={12} className="text-indigo-600" />
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-900">{r.user_name || `User #${r.user_id}`}</p>
+                            {r.student_id && <p className="text-xs text-gray-500">{r.student_id}</p>}
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium text-gray-900">{r.user_name || `User #${r.user_id}`}</p>
-                          {r.student_id && <p className="text-xs text-gray-500">{r.student_id}</p>}
-                        </div>
-                      </div>
-                    </td>
+                      </td>
+                    )}
 
                     <td className="px-4 py-3">
                       <p className="font-semibold text-gray-900 max-w-[180px] truncate">{r.title || `Book #${r.book_id}`}</p>
@@ -267,7 +260,7 @@ const Reservations = () => {
                       )}
                     </td>
 
-                    <td className="px-4 py-3">{queueBadge(getQueuePosition(r))}</td>
+                    <td className="px-4 py-3">{queueBadge(r.queue_position)}</td>
 
                     <td className="px-4 py-3 text-xs text-gray-500">
                       {r.created_at ? new Date(r.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}
@@ -281,7 +274,11 @@ const Reservations = () => {
                           {isAdminOrLibrarian && (
                             <button onClick={() => handleFulfill(r.id)} className="text-xs text-green-600 hover:text-green-800 font-semibold hover:underline">Fulfill</button>
                           )}
-                          <button onClick={() => handleCancel(r.id)} className="text-xs text-red-500 hover:text-red-700 font-semibold hover:underline">Cancel</button>
+                          {(isAdminOrLibrarian || String(r.user_id) === String(user?.id)) ? (
+                            <button onClick={() => handleCancel(r.id)} className="text-xs text-red-500 hover:text-red-700 font-semibold hover:underline">Cancel</button>
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
                         </div>
                       ) : (
                         <span className="text-xs text-gray-400">—</span>
@@ -325,9 +322,20 @@ const Reservations = () => {
                 <form onSubmit={handleCheckAndReserve} className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">User ID <span className="text-red-500">*</span></label>
-                    <input type="number" required className="input w-full" value={reserveForm.user_id}
-                      onChange={e => setReserveForm({ ...reserveForm, user_id: e.target.value })}
-                      placeholder="Auto-filled from profile" autoFocus />
+                    <input
+                      type="number"
+                      required
+                      readOnly={!isAdminOrLibrarian}
+                      className={`input w-full ${!isAdminOrLibrarian ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : ''}`}
+                      value={reserveForm.user_id}
+                      onChange={e => {
+                        if (isAdminOrLibrarian) {
+                          setReserveForm({ ...reserveForm, user_id: e.target.value });
+                        }
+                      }}
+                      placeholder="Auto-filled from profile"
+                      autoFocus={isAdminOrLibrarian}
+                    />
                     {user?.id && <p className="text-xs text-green-700 mt-1">Using profile user ID: {user.id}</p>}
                   </div>
                   <div>

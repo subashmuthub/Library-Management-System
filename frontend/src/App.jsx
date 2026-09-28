@@ -26,6 +26,8 @@ import LibraryHeatmap from './pages/LibraryHeatmap';
 import OverduePrediction from './pages/OverduePrediction';
 import ShelfLocator from './pages/ShelfLocator';
 import ActiveUserCertificate from './pages/ActiveUserCertificate';
+import BookSuggestions from './pages/BookSuggestions';
+import PendingRequestsDashboard from './pages/PendingRequestsDashboard';
 import HomePage from './pages/HomePage';
 
 function App() {
@@ -53,20 +55,22 @@ function App() {
               <Route path="transactions" element={<Transactions />} />
               <Route path="fines" element={<Fines />} />
               <Route path="reservations" element={<Reservations />} />
-              <Route path="users" element={<PrivateRoute roles={["admin"]}><UserManagement /></PrivateRoute>} />
+              <Route path="reservations/pending" element={<PrivateRoute roles={["admin", "librarian"]}><PendingRequestsDashboard /></PrivateRoute>} />
+              <Route path="users" element={<PrivateRoute roles={["admin", "librarian"]}><UserManagement /></PrivateRoute>} />
               <Route path="entry" element={<EntryLog />} />
               <Route path="rfid" element={<RFIDScanner />} />
               <Route path="navigation" element={<Navigation />} />
-              <Route path="student-visualization" element={<StudentVisualization />} />
+              <Route path="student-visualization" element={<PrivateRoute roles={["admin", "librarian"]}><StudentVisualization /></PrivateRoute>} />
               <Route path="book-orders" element={<PrivateRoute roles={["admin"]}><BookOrderDetails /></PrivateRoute>} />
               <Route path="question-papers" element={<QuestionPaperLibrary />} />
               <Route path="recommendations" element={<BookRecommendations />} />
-              <Route path="heatmap" element={<LibraryHeatmap />} />
-              <Route path="overdue-prediction" element={<OverduePrediction />} />
+              <Route path="heatmap" element={<PrivateRoute roles={["admin", "librarian"]}><LibraryHeatmap /></PrivateRoute>} />
+              <Route path="overdue-prediction" element={<PrivateRoute roles={["admin", "librarian"]}><OverduePrediction /></PrivateRoute>} />
               <Route path="shelf-locator" element={<ShelfLocator />} />
-              <Route path="settings" element={<PrivateRoute roles={["admin"]}><Settings /></PrivateRoute>} />
+              <Route path="suggestions" element={<BookSuggestions />} />
+              <Route path="settings" element={<PrivateRoute roles={["admin", "librarian"]}><Settings /></PrivateRoute>} />
               <Route path="profile" element={<Profile />} />
-              <Route path="active-user-certificate" element={<ActiveUserCertificate />} />
+              <Route path="active-user-certificate" element={<PrivateRoute roles={["admin", "librarian"]}><ActiveUserCertificate /></PrivateRoute>} />
             </Route>
 
             {/* Fallback */}

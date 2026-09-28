@@ -44,12 +44,6 @@ router.post(
   bookController.createBook
 );
 
-// Batch checkout books
-router.post(
-  '/checkout-batch',
-  bookController.checkoutBatch
-);
-
 // Update existing book
 router.put(
   '/:id',

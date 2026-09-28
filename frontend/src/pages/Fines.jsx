@@ -33,6 +33,9 @@ const Fines = () => {
     setLoading(true);
     try {
       const params = filter !== 'all' ? { status: filter } : {};
+      if (userRole === 'student' && user?.id) {
+        params.userId = user.id;
+      }
       const response = await fineService.getPendingFines(params);
       setFines(response.fines || response.data || []);
     } catch (error) {
@@ -44,14 +47,25 @@ const Fines = () => {
 
   const loadStats = async () => {
     try {
-      const response = await fineService.getStatistics();
-      const statsData = response.overall_statistics || response.data?.overall_statistics || {};
-      setStats({
-        total_pending: parseFloat(statsData.pending_amount || 0),
-        total_paid: parseFloat(statsData.collected_amount || 0),
-        total_waived: parseFloat(statsData.waived_amount || 0),
-        pending_count: statsData.pending_count || 0
-      });
+      if (userRole === 'student' && user?.id) {
+        const response = await fineService.getUserFineSummary(user.id);
+        const summary = response.summary || {};
+        setStats({
+          total_pending: parseFloat(summary.total_pending_amount || 0),
+          total_paid: parseFloat(summary.total_paid_amount || summary.total_amount_paid || 0),
+          total_waived: parseFloat(summary.waived_fines || 0),
+          pending_count: summary.pending_fines || 0
+        });
+      } else {
+        const response = await fineService.getStatistics();
+        const statsData = response.overall_statistics || response.data?.overall_statistics || {};
+        setStats({
+          total_pending: parseFloat(statsData.pending_amount || 0),
+          total_paid: parseFloat(statsData.collected_amount || 0),
+          total_waived: parseFloat(statsData.waived_amount || 0),
+          pending_count: statsData.pending_count || 0
+        });
+      }
     } catch (error) {
       console.error('Failed to load statistics:', error);
     }
@@ -59,7 +73,11 @@ const Fines = () => {
 
   const loadPaymentHistory = async () => {
     try {
-      const data = await fineService.getPaymentHistory({ limit: 50 });
+      const params = { limit: 50 };
+      if (userRole === 'student' && user?.id) {
+        params.userId = user.id;
+      }
+      const data = await fineService.getPaymentHistory(params);
       setPaymentHistory(data.receipts || data.data || []);
     } catch (error) {
       console.error('Failed to load payment history:', error);
@@ -121,8 +139,10 @@ const Fines = () => {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold">Fines Management</h1>
-        <p className="text-gray-600">Track and manage library fines</p>
+        <h1 className="text-2xl font-bold">{userRole === 'student' ? 'My Library Fines' : 'Fines Management'}</h1>
+        <p className="text-gray-600">
+          {userRole === 'student' ? 'View and settle your outstanding fines and check payment receipts' : 'Track and manage library fines'}
+        </p>
       </div>
 
       {/* Statistics Cards */}
@@ -236,7 +256,9 @@ const Fines = () => {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                      {isAdminOrLibrarian && (
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                      )}
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transaction</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Days Overdue</th>
@@ -248,7 +270,9 @@ const Fines = () => {
                     {fines.map(fine => (
                       <tr key={fine.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-sm">#{fine.id}</td>
-                        <td className="px-4 py-3 text-sm">{fine.user_name || `User #${fine.user_id}`}</td>
+                        {isAdminOrLibrarian && (
+                          <td className="px-4 py-3 text-sm">{fine.user_name || `User #${fine.user_id}`}</td>
+                        )}
                         <td className="px-4 py-3 text-sm">Transaction #{fine.transaction_id}</td>
                         <td className="px-4 py-3 text-sm font-semibold">₹{fine.amount}</td>
                         <td className="px-4 py-3 text-sm">{fine.days_overdue || 'N/A'}</td>
@@ -268,7 +292,7 @@ const Fines = () => {
                                 {isAdminOrLibrarian && (
                                   <button
                                     onClick={() => handleWaiveFine(fine.id)}
-                                    className="text-blue-600 hover:text-blue-700 font-medium"
+                                    className="px-3 py-1 bg-gray-100 text-blue-600 hover:bg-blue-50 border border-blue-200 rounded font-medium transition-colors"
                                   >
                                     Waive
                                   </button>
@@ -303,7 +327,9 @@ const Fines = () => {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Receipt ID</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                    {isAdminOrLibrarian && (
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                    )}
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Book</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Method</th>
@@ -315,7 +341,9 @@ const Fines = () => {
                   {paymentHistory.map(receipt => (
                     <tr key={receipt.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-mono text-blue-600">{receipt.receipt_id}</td>
-                      <td className="px-4 py-3 text-sm">{receipt.user_name}</td>
+                      {isAdminOrLibrarian && (
+                        <td className="px-4 py-3 text-sm">{receipt.user_name}</td>
+                      )}
                       <td className="px-4 py-3 text-sm">{receipt.book_title || 'N/A'}</td>
                       <td className="px-4 py-3 text-sm font-semibold text-green-600">₹{receipt.amount}</td>
                       <td className="px-4 py-3 text-sm">

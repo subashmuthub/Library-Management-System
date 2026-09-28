@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts';
-import { authService, entryService, transactionService, feedbackService } from '../services';
-import { User, Mail, CreditCard, Shield, CheckCircle, AlertCircle, Download } from 'lucide-react';
-import { jsPDF } from 'jspdf';
+import { authService, entryService, transactionService } from '../services';
+import { User, Mail, CreditCard, Shield, CheckCircle, AlertCircle, GraduationCap, Building, Calendar, Award } from 'lucide-react';
+import DigitalLibraryCard from '../components/DigitalLibraryCard';
 
 const Profile = () => {
   const { user, updateUser } = useAuth();
@@ -12,6 +12,9 @@ const Profile = () => {
     last_name: user?.last_name || user?.lastName || '',
     email: user?.email || '',
     student_id: user?.student_id || user?.studentId || '',
+    degree_type: user?.degree_type || user?.degreeType || 'BE',
+    department: user?.department || 'CSE',
+    academic_year: user?.academic_year || user?.academicYear || '3rd Year',
   });
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -19,9 +22,28 @@ const Profile = () => {
   const [avatarFile, setAvatarFile] = useState(null);
   const displayName = user?.name || [user?.first_name || user?.firstName, user?.last_name || user?.lastName].filter(Boolean).join(' ');
   const displayRole = user?.role?.role_name || user?.role;
+  const rawRole = String(user?.role?.role_name || user?.role || '').toLowerCase();
+  const isAdmin = ['admin', 'administrator'].includes(rawRole);
+  const isLibrarian = ['librarian'].includes(rawRole);
+  const isStaff = ['teacher', 'faculty', 'staff', 'librarian'].includes(rawRole);
+  const isStudent = !isAdmin && !isStaff;
+  const displayRoleLabel = isAdmin ? 'System Administrator' : isLibrarian ? 'Library Staff' : isStaff ? 'Faculty & Staff' : (displayRole || 'Student');
   const [borrowedBooks, setBorrowedBooks] = useState([]);
-  const [suggestion, setSuggestion] = useState({ title: '', author: '', isbn: '', department: '', justification: '' });
-  const [suggestionMessage, setSuggestionMessage] = useState('');
+
+  // Sync formData when user loads
+  useEffect(() => {
+    if (user) {
+      setFormData({
+        first_name: user.first_name || user.firstName || '',
+        last_name: user.last_name || user.lastName || '',
+        email: user.email || '',
+        student_id: user.student_id || user.studentId || '',
+        degree_type: isStudent ? (user.degree_type || user.degreeType || 'BE') : '',
+        department: user.department || (isAdmin ? 'Administration' : isLibrarian ? 'Library' : 'CSE'),
+        academic_year: isStudent ? (user.academic_year || user.academicYear || '3rd Year') : '',
+      });
+    }
+  }, [user, isStudent, isAdmin, isLibrarian]);
 
   // Load user stats on mount
   useEffect(() => {
@@ -65,7 +87,9 @@ const Profile = () => {
       // Include userId for backend (development mode)
       const updateData = {
         ...formData,
-        userId: user?.id
+        userId: user?.id,
+        degree_type: isStudent ? formData.degree_type : null,
+        academic_year: isStudent ? formData.academic_year : null,
       };
       const response = await authService.updateProfile(updateData);
       updateUser(response.user);
@@ -100,48 +124,15 @@ const Profile = () => {
     }
   };
 
-  const handleDownloadReport = async () => {
-    if (!user?.id) return;
-    try {
-      const response = await transactionService.getAllTransactions({ user_id: user.id, limit: 200 });
-      const history = response.transactions || response.data || [];
-      const doc = new jsPDF();
-      doc.setFontSize(18);
-      doc.text('Smart Library Activity Report', 20, 20);
-      doc.setFontSize(11);
-      doc.text(`Student: ${displayName || 'User'}`, 20, 30);
-      doc.text(`Student ID: ${user.student_id || user.studentId || 'N/A'}`, 20, 37);
-      doc.text(`Generated: ${new Date().toLocaleDateString('en-IN')}`, 20, 44);
-      let y = 58;
-      history.forEach((item, index) => {
-        if (y > 275) { doc.addPage(); y = 20; }
-        doc.text(`${index + 1}. ${item.title || `Book #${item.book_id}`}`, 20, y);
-        doc.text(`Checked out: ${item.checkout_date || 'N/A'} | Returned: ${item.return_date || 'Not returned'}`, 28, y + 7);
-        y += 16;
-      });
-      doc.save(`library-activity-${user.student_id || user.id}.pdf`);
-    } catch (error) {
-      setResult({ success: false, message: error.response?.data?.error || 'Unable to create activity report' });
-    }
-  };
-
-  const handleSuggestionSubmit = async (event) => {
-    event.preventDefault();
-    try {
-      await feedbackService.createPurchaseSuggestion(suggestion);
-      setSuggestion({ title: '', author: '', isbn: '', department: '', justification: '' });
-      setSuggestionMessage('Suggestion submitted for librarian review.');
-    } catch (error) {
-      setSuggestionMessage(error.response?.data?.error || 'Unable to submit suggestion.');
-    }
-  };
-
   const handleCancel = () => {
     setFormData({
       first_name: user?.first_name || user?.firstName || '',
       last_name: user?.last_name || user?.lastName || '',
       email: user?.email || '',
       student_id: user?.student_id || user?.studentId || '',
+      degree_type: isStudent ? (user?.degree_type || user?.degreeType || 'BE') : '',
+      department: user?.department || (isAdmin ? 'Administration' : isLibrarian ? 'Library' : 'CSE'),
+      academic_year: isStudent ? (user?.academic_year || user?.academicYear || '3rd Year') : '',
     });
     setIsEditing(false);
     setResult(null);
@@ -161,7 +152,16 @@ const Profile = () => {
           )}
         </div>
         <h1 className="text-2xl font-bold mb-1">{displayName || 'User'}</h1>
-        <p className="text-gray-600 capitalize">{displayRole}</p>
+        <p className="text-gray-600 capitalize font-medium">{displayRoleLabel}</p>
+      </div>
+
+      {/* Digital Library Card with QR Code */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between px-1">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400">Digital Library Pass</h2>
+          <span className="text-[11px] text-indigo-400 font-medium">Valid for self-checkout & gate access</span>
+        </div>
+        <DigitalLibraryCard user={user} />
       </div>
 
       {/* Profile Information */}
@@ -247,22 +247,130 @@ const Profile = () => {
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <CreditCard size={16} className="inline mr-1" />
-                Student ID
-              </label>
-              <input
-                type="text"
-                name="student_id"
-                className="input"
-                value={formData.student_id}
-                onChange={handleChange}
-                placeholder="Optional"
-              />
-            </div>
+            {isStudent ? (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <CreditCard size={16} className="inline mr-1" />
+                      Student / Roll ID
+                    </label>
+                    <input
+                      type="text"
+                      name="student_id"
+                      className="input"
+                      value={formData.student_id}
+                      onChange={handleChange}
+                      placeholder="e.g. 21CS101"
+                    />
+                  </div>
 
-            <div className="flex gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <GraduationCap size={16} className="inline mr-1" />
+                      Degree Program
+                    </label>
+                    <select
+                      name="degree_type"
+                      className="input"
+                      value={formData.degree_type}
+                      onChange={handleChange}
+                    >
+                      <option value="BE">BE (Bachelor of Engineering)</option>
+                      <option value="B.Tech">B.Tech (Bachelor of Technology)</option>
+                      <option value="ME">ME (Master of Engineering)</option>
+                      <option value="M.Tech">M.Tech (Master of Technology)</option>
+                      <option value="PhD">PhD (Doctor of Philosophy)</option>
+                      <option value="Research Scholar">Research Scholar</option>
+                      <option value="MS">MS (Master of Science by Research)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <Building size={16} className="inline mr-1" />
+                      Department
+                    </label>
+                    <select
+                      name="department"
+                      className="input"
+                      value={formData.department}
+                      onChange={handleChange}
+                    >
+                      <option value="CSE">Computer Science & Engineering (CSE)</option>
+                      <option value="ECE">Electronics & Communication (ECE)</option>
+                      <option value="MECH">Mechanical Engineering (MECH)</option>
+                      <option value="AIDS">Artificial Intelligence & Data Science (AIDS)</option>
+                      <option value="CIVIL">Civil Engineering (CIVIL)</option>
+                      <option value="IT">Information Technology (IT)</option>
+                      <option value="EEE">Electrical & Electronics (EEE)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <Calendar size={16} className="inline mr-1" />
+                      Academic Year
+                    </label>
+                    <select
+                      name="academic_year"
+                      className="input"
+                      value={formData.academic_year}
+                      onChange={handleChange}
+                    >
+                      <option value="1st Year">1st Year</option>
+                      <option value="2nd Year">2nd Year</option>
+                      <option value="3rd Year">3rd Year</option>
+                      <option value="Final Year">Final Year</option>
+                    </select>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <CreditCard size={16} className="inline mr-1" />
+                    {isAdmin ? 'Admin / Staff ID' : 'Staff / Employee ID'}
+                  </label>
+                  <input
+                    type="text"
+                    name="student_id"
+                    className="input"
+                    value={formData.student_id}
+                    onChange={handleChange}
+                    placeholder="e.g. STF-01"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Building size={16} className="inline mr-1" />
+                    Department / Division
+                  </label>
+                  <select
+                    name="department"
+                    className="input"
+                    value={formData.department}
+                    onChange={handleChange}
+                  >
+                    <option value="Administration">Administration</option>
+                    <option value="Library">Library</option>
+                    <option value="CSE">Computer Science & Engineering (CSE)</option>
+                    <option value="ECE">Electronics & Communication (ECE)</option>
+                    <option value="MECH">Mechanical Engineering (MECH)</option>
+                    <option value="AIDS">Artificial Intelligence & Data Science (AIDS)</option>
+                    <option value="CIVIL">Civil Engineering (CIVIL)</option>
+                    <option value="IT">Information Technology (IT)</option>
+                    <option value="EEE">Electrical & Electronics (EEE)</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
               <button type="submit" className="btn btn-primary flex-1" disabled={loading}>
                 {loading ? 'Saving...' : 'Save Changes'}
               </button>
@@ -289,27 +397,111 @@ const Profile = () => {
               </div>
             </div>
 
-            <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-              <CreditCard className="text-gray-600 flex-shrink-0 mt-1" size={20} />
-              <div>
-                <p className="text-sm text-gray-600">Student ID</p>
-                <p className="font-medium">{user?.student_id || user?.studentId || 'N/A'}</p>
-              </div>
-            </div>
+            {isStudent ? (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                    <CreditCard className="text-gray-600 flex-shrink-0 mt-1" size={20} />
+                    <div>
+                      <p className="text-sm text-gray-600">Roll / Student ID</p>
+                      <p className="font-medium font-mono">{user?.student_id || user?.studentId || 'N/A'}</p>
+                    </div>
+                  </div>
 
-            <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-              <CreditCard className="text-gray-600 flex-shrink-0 mt-1" size={20} />
-              <div>
-                <p className="text-sm text-gray-600">Registration Number</p>
-                <p className="font-medium">{user?.student_id || 'N/A'}</p>
-              </div>
-            </div>
+                  <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                    <GraduationCap className="text-gray-600 flex-shrink-0 mt-1" size={20} />
+                    <div>
+                      <p className="text-sm text-gray-600">Degree Program</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="font-semibold text-gray-900">{user?.degree_type || user?.degreeType || 'BE'}</span>
+                        {['me', 'm.tech', 'phd', 'research scholar'].includes(String(user?.degree_type || user?.degreeType || '').toLowerCase()) ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                            Direct Research Access Eligible
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                            UG Student
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                    <Building className="text-gray-600 flex-shrink-0 mt-1" size={20} />
+                    <div>
+                      <p className="text-sm text-gray-600">Department</p>
+                      <p className="font-medium">{user?.department || 'CSE'}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                    <Calendar className="text-gray-600 flex-shrink-0 mt-1" size={20} />
+                    <div>
+                      <p className="text-sm text-gray-600">Academic Year</p>
+                      <p className="font-medium">{user?.academic_year || user?.academicYear || '3rd Year'}</p>
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                    <CreditCard className="text-gray-600 flex-shrink-0 mt-1" size={20} />
+                    <div>
+                      <p className="text-sm text-gray-600">{isAdmin ? 'Admin / Staff ID' : 'Staff / Employee ID'}</p>
+                      <p className="font-medium font-mono">{user?.student_id || user?.studentId || (isAdmin ? `ADMIN-${String(user?.id || '0000').padStart(4, '0')}` : `STAFF-${String(user?.id || '0000').padStart(4, '0')}`)}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                    <Award className="text-gray-600 flex-shrink-0 mt-1" size={20} />
+                    <div>
+                      <p className="text-sm text-gray-600">Designation / Access Level</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="font-semibold text-gray-900">
+                          {isAdmin ? 'System Administrator' : isLibrarian ? 'Library Staff' : 'Faculty / Staff'}
+                        </span>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                          isAdmin ? 'bg-purple-100 text-purple-800 border-purple-200' : 'bg-amber-100 text-amber-800 border-amber-200'
+                        }`}>
+                          {isAdmin ? 'Full Root Access' : 'Librarian Desk Privileges'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                    <Building className="text-gray-600 flex-shrink-0 mt-1" size={20} />
+                    <div>
+                      <p className="text-sm text-gray-600">Department / Division</p>
+                      <p className="font-medium">{user?.department || (isAdmin ? 'Administration' : 'Library')}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                    <Shield className="text-gray-600 flex-shrink-0 mt-1" size={20} />
+                    <div>
+                      <p className="text-sm text-gray-600">Borrowing Privileges</p>
+                      <p className="font-medium">{isAdmin ? 'Unlimited Books (Administrator Pass)' : '10 Books (Staff Loan Period: 60 Days)'}</p>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
 
             <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
               <Shield className="text-gray-600 flex-shrink-0 mt-1" size={20} />
               <div>
                 <p className="text-sm text-gray-600">Role</p>
-                <span className="badge badge-info capitalize">{displayRole || 'user'}</span>
+                <span className={`badge ${isAdmin ? 'badge-primary' : isStaff ? 'badge-warning' : 'badge-info'} capitalize`}>
+                  {isAdmin ? 'Admin' : isLibrarian ? 'Staff' : isStaff ? 'Staff' : 'Student'}
+                </span>
               </div>
             </div>
           </div>
@@ -318,12 +510,7 @@ const Profile = () => {
 
       {/* Account Stats */}
       <div className="card">
-        <div className="flex items-center justify-between gap-3 mb-4">
-          <h2 className="text-xl font-bold">Account Statistics</h2>
-          <button type="button" onClick={handleDownloadReport} className="btn btn-secondary">
-            <Download size={16} className="mr-2" /> Export PDF
-          </button>
-        </div>
+        <h2 className="text-xl font-bold mb-4">Account Statistics</h2>
         <div className="grid grid-cols-2 gap-4">
           <div className="text-center p-4 bg-primary-50 rounded-lg">
             <p className="text-3xl font-bold text-primary-600">{stats.borrowed}</p>
@@ -334,21 +521,6 @@ const Profile = () => {
             <p className="text-sm text-gray-600 mt-1">Library Visits</p>
           </div>
         </div>
-      </div>
-
-      <div className="card">
-        <h2 className="text-xl font-bold mb-2">Suggest a Book Purchase</h2>
-        <p className="text-sm text-gray-600 mb-4">Recommend a title for the library collection.</p>
-        <form onSubmit={handleSuggestionSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {['title', 'author', 'isbn', 'department'].map((field) => (
-            <input key={field} required={field === 'title'} className="input" placeholder={field.replace('_', ' ').replace(/^[a-z]/, (letter) => letter.toUpperCase())} value={suggestion[field]} onChange={(event) => setSuggestion({ ...suggestion, [field]: event.target.value })} />
-          ))}
-          <textarea className="input md:col-span-2" rows="3" placeholder="Why should the library buy this?" value={suggestion.justification} onChange={(event) => setSuggestion({ ...suggestion, justification: event.target.value })} />
-          <div className="md:col-span-2 flex items-center gap-3">
-            <button type="submit" className="btn btn-primary">Submit Suggestion</button>
-            {suggestionMessage && <span className="text-sm text-gray-600">{suggestionMessage}</span>}
-          </div>
-        </form>
       </div>
 
       <div className="card">

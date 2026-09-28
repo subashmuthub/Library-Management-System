@@ -10,16 +10,33 @@
  * Verify session and attach user to request
  */
 const authenticate = (req, res, next) => {
-  if (!req.session || !req.session.user) {
-    return res.status(401).json({
-      error: 'Unauthorized',
-      message: 'No active session. Please log in.'
-    });
+  if (req.user) {
+    return next();
   }
 
-  // Attach the session user to the request so downstream code can use req.user
-  req.user = req.session.user;
-  next();
+  if (req.session && req.session.user) {
+    req.user = req.session.user;
+    return next();
+  }
+
+  // Fallback to Bearer token if provided
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.split(' ')[1];
+      const jwt = require('jsonwebtoken');
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+      req.user = decoded;
+      return next();
+    } catch {
+      // Continue to unauthorized response
+    }
+  }
+
+  return res.status(401).json({
+    error: 'Unauthorized',
+    message: 'No active session. Please log in.'
+  });
 };
 
 /**
@@ -35,10 +52,13 @@ const authorize = (allowedRoles) => {
       });
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    const roleName = String(req.user.role || req.user.role_name || req.user.role?.role_name || '').toLowerCase();
+    const normalizedRoles = allowedRoles.map((r) => String(r).toLowerCase());
+
+    if (!normalizedRoles.includes(roleName)) {
       return res.status(403).json({
         error: 'Forbidden',
-        message: 'Insufficient permissions'
+        message: 'Access restricted to Librarian and Admin roles only.'
       });
     }
 

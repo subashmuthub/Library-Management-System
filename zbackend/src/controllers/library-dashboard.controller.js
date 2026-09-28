@@ -27,6 +27,7 @@ class LibraryDashboardController {
                     ELSE 'Bronze'
                 END AS points_tier
             FROM users u
+            LEFT JOIN user_roles ur ON u.role_id = ur.id
             LEFT JOIN (
                 SELECT
                     user_id,
@@ -45,7 +46,7 @@ class LibraryDashboardController {
                 ${usePeriodFilter ? "WHERE checkout_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)" : ""}
                 GROUP BY user_id
             ) b ON u.id = b.user_id
-            WHERE u.status = 'active' AND COALESCE(u.role_id, 3) = 3
+            WHERE u.status = 'active' AND (ur.role_name = 'student' OR u.role_id = 3)
             HAVING visit_count > 0 OR borrow_count > 0
             ORDER BY score_points DESC, borrow_count DESC, visit_count DESC
             LIMIT ?
@@ -724,6 +725,186 @@ class LibraryDashboardController {
             });
         } catch (error) {
             console.error('Error sending top student award email:', error);
+            return res.status(500).json({ error: 'Internal server error' });
+        }
+    }
+
+    // Get personalized student dashboard statistics
+    static async getStudentDashboardStats(req, res) {
+        try {
+            const userId = parseInt(req.params.userId || req.query.userId || req.user?.id || req.session?.user?.id, 10);
+            if (!userId || isNaN(userId)) {
+                return res.status(400).json({ error: 'Valid student user ID is required' });
+            }
+
+            const sessionUser = req.user || req.session?.user;
+            const role = String(
+                sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || ""
+            ).toLowerCase();
+            if (role === 'student' && sessionUser?.id && sessionUser.id !== userId) {
+                return res.status(403).json({ error: 'You are only authorized to view your own dashboard' });
+            }
+
+            const connection = await pool.getConnection();
+
+            try {
+                // 1. Student Active Checkouts with due countdown and fine info
+                const [checkouts] = await connection.execute(`
+                    SELECT 
+                        bt.id,
+                        bt.book_id,
+                        bt.checkout_date,
+                        bt.due_date,
+                        bt.return_date,
+                        bt.renewal_count,
+                        b.title,
+                        b.author,
+                        b.isbn,
+                        b.cover_image_url,
+                        DATEDIFF(bt.due_date, CURDATE()) as days_until_due,
+                        CASE 
+                            WHEN bt.due_date < CURDATE() THEN 'overdue'
+                            WHEN bt.due_date = CURDATE() THEN 'due_today'
+                            ELSE 'active'
+                        END as checkout_status,
+                        COALESCE(SUM(f.amount - f.amount_paid), 0) as fine_amount
+                    FROM book_transactions bt
+                    JOIN books b ON bt.book_id = b.id
+                    LEFT JOIN fines f ON bt.id = f.transaction_id AND f.status = 'pending'
+                    WHERE bt.user_id = ? AND bt.return_date IS NULL
+                    GROUP BY bt.id, bt.book_id, bt.checkout_date, bt.due_date, bt.return_date, bt.renewal_count, b.title, b.author, b.isbn, b.cover_image_url
+                    ORDER BY bt.due_date ASC
+                `, [userId]);
+
+                // 2. Student Active & Ready Reservations
+                const [reservations] = await connection.execute(`
+                    SELECT 
+                        r.id,
+                        r.book_id,
+                        r.status,
+                        r.created_at,
+                        r.expiry_date,
+                        r.queue_position,
+                        b.title,
+                        b.author,
+                        b.isbn
+                    FROM reservations r
+                    JOIN books b ON r.book_id = b.id
+                    WHERE r.user_id = ? AND r.status IN ('active', 'ready')
+                    ORDER BY r.created_at DESC
+                `, [userId]);
+
+                // 3. Student Personal Fines Summary
+                const [[fineSummary]] = await connection.execute(`
+                    SELECT 
+                        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_fines_count,
+                        COALESCE(SUM(CASE WHEN status = 'pending' THEN (amount - amount_paid) END), 0) as total_pending_fines,
+                        COALESCE(SUM(CASE WHEN status = 'paid' THEN amount_paid END), 0) as total_fines_paid
+                    FROM fines
+                    WHERE user_id = ?
+                `, [userId]);
+
+                // 4. Student's Personal Recent Activity (Checkouts, returns, entries)
+                const [recentActivity] = await connection.execute(`
+                    SELECT 
+                        'checkout' as activity_type,
+                        bt.checkout_date as activity_time,
+                        b.title as book_title,
+                        'Borrowed book' as description
+                    FROM book_transactions bt
+                    JOIN books b ON bt.book_id = b.id
+                    WHERE bt.user_id = ?
+                    UNION ALL
+                    SELECT 
+                        'return' as activity_type,
+                        bt.return_date as activity_time,
+                        b.title as book_title,
+                        'Returned book' as description
+                    FROM book_transactions bt
+                    JOIN books b ON bt.book_id = b.id
+                    WHERE bt.user_id = ? AND bt.return_date IS NOT NULL
+                    UNION ALL
+                    SELECT 
+                        'entry' as activity_type,
+                        el.timestamp as activity_time,
+                        NULL as book_title,
+                        CONCAT('Library visit (', el.entry_type, ')') as description
+                    FROM entry_logs el
+                    WHERE el.user_id = ?
+                    ORDER BY activity_time DESC
+                    LIMIT 8
+                `, [userId, userId, userId]);
+
+                // 5. Live Library Occupancy
+                const [[occupancyData]] = await connection.execute(`
+                    SELECT COUNT(*) as current_occupancy
+                    FROM (
+                        SELECT 
+                            user_id,
+                            entry_type,
+                            ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY timestamp DESC) as rn
+                        FROM entry_logs
+                        WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+                    ) latest_entries
+                    WHERE rn = 1 AND entry_type = 'entry'
+                `);
+
+                // 6. Popular Books
+                const [popularBooks] = await connection.execute(`
+                    SELECT 
+                        b.id,
+                        b.title,
+                        b.author,
+                        b.isbn,
+                        COUNT(bt.id) as checkout_count,
+                        COUNT(r.id) as reservation_count,
+                        (COUNT(bt.id) + COUNT(r.id)) as total_demand
+                    FROM books b
+                    LEFT JOIN book_transactions bt ON b.id = bt.book_id 
+                        AND bt.checkout_date >= DATE_SUB(CURDATE(), INTERVAL 60 DAY)
+                    LEFT JOIN reservations r ON b.id = r.book_id 
+                        AND r.created_at >= DATE_SUB(CURDATE(), INTERVAL 60 DAY)
+                    WHERE b.status = 'active'
+                    GROUP BY b.id
+                    ORDER BY total_demand DESC, b.id ASC
+                    LIMIT 6
+                `);
+
+                const borrowedCount = checkouts.length;
+                const overdueCount = checkouts.filter(c => c.checkout_status === 'overdue').length;
+                const dueSoonCount = checkouts.filter(c => c.days_until_due >= 0 && c.days_until_due <= 3).length;
+                const activeReservationsCount = reservations.filter(r => r.status === 'active').length;
+                const readyReservationsCount = reservations.filter(r => r.status === 'ready').length;
+
+                connection.release();
+
+                return res.json({
+                    user_id: userId,
+                    summary_counts: {
+                        borrowed_count: borrowedCount,
+                        overdue_count: overdueCount,
+                        due_soon_count: dueSoonCount,
+                        active_reservations_count: activeReservationsCount,
+                        ready_reservations_count: readyReservationsCount,
+                        pending_fines_count: Number(fineSummary?.pending_fines_count || 0),
+                        total_pending_fines: Number(fineSummary?.total_pending_fines || 0),
+                        total_fines_paid: Number(fineSummary?.total_fines_paid || 0),
+                        current_occupancy: Number(occupancyData?.current_occupancy || 0),
+                    },
+                    checkouts,
+                    reservations,
+                    recent_activity: recentActivity,
+                    popular_books: popularBooks,
+                    occupancy: {
+                        current_occupancy: Number(occupancyData?.current_occupancy || 0),
+                    },
+                });
+            } catch (queryErr) {
+                connection.release();
+                throw queryErr;
+            }
+        } catch (error) {
+            console.error('Error fetching student dashboard stats:', error);
             return res.status(500).json({ error: 'Internal server error' });
         }
     }

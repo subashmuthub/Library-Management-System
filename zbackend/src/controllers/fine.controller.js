@@ -13,6 +13,20 @@ class FineController {
         try {
             const { page = 1, limit = 50, userId, status } = req.query;
             
+            const sessionUser = req.user || req.session?.user;
+            const role = String(
+                sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || ""
+            ).toLowerCase();
+            const isAdminOrLibrarian = ['admin', 'librarian'].includes(role);
+
+            let effectiveUserId = userId;
+            if (!isAdminOrLibrarian) {
+                if (!sessionUser?.id) {
+                    return res.status(401).json({ error: 'Authentication required' });
+                }
+                effectiveUserId = sessionUser.id;
+            }
+            
             // Parse and validate pagination parameters
             const parsedPage = Math.max(1, parseInt(page) || 1);
             const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 50));
@@ -59,9 +73,9 @@ class FineController {
                 params.push(status);
             }
             
-            if (userId) {
+            if (effectiveUserId) {
                 query += ` AND f.user_id = ?`;
-                params.push(userId);
+                params.push(effectiveUserId);
             }
 
             query += ` ORDER BY f.created_at DESC`;
@@ -87,9 +101,9 @@ class FineController {
                 countParams.push(status);
             }
 
-            if (userId) {
+            if (effectiveUserId) {
                 countQuery += ` AND f.user_id = ?`;
-                countParams.push(userId);
+                countParams.push(effectiveUserId);
             }
 
             const [countResult] = await pool.query(countQuery, countParams);
@@ -143,6 +157,16 @@ class FineController {
                 return res.status(404).json({ error: 'Fine not found' });
             }
 
+            const sessionUser = req.user || req.session?.user;
+            const role = String(
+                sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || ""
+            ).toLowerCase();
+            const isAdminOrLibrarian = ['admin', 'librarian'].includes(role);
+            if (!isAdminOrLibrarian && sessionUser?.id && fines[0].user_id !== sessionUser.id) {
+                connection.release();
+                return res.status(403).json({ error: 'Access denied to fine details' });
+            }
+
             connection.release();
             res.json(fines[0]);
 
@@ -193,6 +217,18 @@ class FineController {
                 }
 
                 const currentFine = fines[0];
+                const sessionUser = req.user || req.session?.user;
+                const role = String(
+                    sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || ""
+                ).toLowerCase();
+                const requestingUserId = sessionUser?.id;
+
+                if (role === 'student' && requestingUserId && currentFine.user_id !== requestingUserId) {
+                    await connection.rollback();
+                    connection.release();
+                    return res.status(403).json({ error: 'You are only authorized to pay your own fines' });
+                }
+
                 const amountToPay = parseFloat(amount_paid) || parseFloat(currentFine.amount);
                 const totalAmount = parseFloat(currentFine.amount);
                 const alreadyPaid = parseFloat(currentFine.amount_paid);
@@ -479,6 +515,15 @@ class FineController {
     static async getUserFineSummary(req, res) {
         try {
             const { userId } = req.params;
+            const sessionUser = req.user || req.session?.user;
+            const role = String(
+                sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || ""
+            ).toLowerCase();
+            const isAdminOrLibrarian = ['admin', 'librarian'].includes(role);
+            if (!isAdminOrLibrarian && sessionUser?.id && String(sessionUser.id) !== String(userId)) {
+                return res.status(403).json({ error: 'Access denied to fine summary' });
+            }
+
             const connection = await pool.getConnection();
 
             // Get fine summary
@@ -742,6 +787,20 @@ class FineController {
         try {
             const { userId, fineId, limit = 50 } = req.query;
 
+            const sessionUser = req.user || req.session?.user;
+            const role = String(
+                sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || ""
+            ).toLowerCase();
+            const isAdminOrLibrarian = ['admin', 'librarian'].includes(role);
+
+            let effectiveUserId = userId;
+            if (!isAdminOrLibrarian) {
+                if (!sessionUser?.id) {
+                    return res.status(401).json({ error: 'Authentication required' });
+                }
+                effectiveUserId = sessionUser.id;
+            }
+
             let query = `
                 SELECT 
                     pr.*,
@@ -759,9 +818,9 @@ class FineController {
 
             const params = [];
 
-            if (userId) {
+            if (effectiveUserId) {
                 query += ' AND pr.user_id = ?';
-                params.push(userId);
+                params.push(effectiveUserId);
             }
 
             if (fineId) {

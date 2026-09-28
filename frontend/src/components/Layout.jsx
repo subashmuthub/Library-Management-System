@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts';
 import {
-  Award, BarChart3, Bell, BookOpen, Bookmark, CalendarDays, ChevronDown,
+  Award, BarChart3, Bell, BookOpen, BookPlus, Bookmark, CalendarDays, ChevronDown,
   Clock3, DollarSign, FileText, LayoutDashboard, LogIn, LogOut, MapPin,
   Menu, PackagePlus, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Scan,
-  Settings, Sparkles, User, Users, X,
+  Settings, Sparkles, User, Users, X, ShieldCheck
 } from 'lucide-react';
 
 const navigation = [
@@ -16,7 +16,8 @@ const navigation = [
       { label: 'Advanced Search', path: '/book-search', icon: Search },
       { label: 'AI Recommendations', path: '/recommendations', icon: Sparkles, tag: 'New' },
       { label: 'QR Shelf Locator', path: '/shelf-locator', icon: MapPin, tag: 'New' },
-      { label: 'Book Orders', path: '/book-orders', icon: PackagePlus, adminOnly: true },
+      { label: 'Suggest a Book', path: '/suggestions', icon: BookPlus },
+      { label: 'Book Orders', path: '/book-orders', icon: PackagePlus, roles: ['admin'] },
       { label: 'Question Papers', path: '/question-papers', icon: FileText },
     ],
   },
@@ -24,22 +25,23 @@ const navigation = [
     label: 'Issue Management', icon: RefreshCw, items: [
       { label: 'Transactions', path: '/transactions', icon: RefreshCw },
       { label: 'Reservations', path: '/reservations', icon: Bookmark },
+      { label: 'Research Approvals', path: '/reservations/pending', icon: ShieldCheck, roles: ['admin', 'librarian'] },
       { label: 'Fine Management', path: '/fines', icon: DollarSign },
       { label: 'RFID Scanner', path: '/rfid', icon: Scan },
     ],
   },
-  { label: 'Users', path: '/users', icon: Users, adminOnly: true },
+  { label: 'Users', path: '/users', icon: Users, roles: ['admin', 'librarian'] },
   {
     label: 'Analytics & Reports', icon: BarChart3, items: [
-      { label: 'Student Visualization', path: '/student-visualization', icon: BarChart3 },
-      { label: 'Library Heatmap', path: '/heatmap', icon: MapPin, tag: 'New' },
-      { label: 'Overdue Predictions', path: '/overdue-prediction', icon: Clock3, tag: 'New' },
-      { label: 'Active User Certificate', path: '/active-user-certificate', icon: Award, tag: 'New' },
+      { label: 'Student Visualization', path: '/student-visualization', icon: BarChart3, roles: ['admin', 'librarian'] },
+      { label: 'Library Heatmap', path: '/heatmap', icon: MapPin, tag: 'New', roles: ['admin', 'librarian'] },
+      { label: 'Overdue Predictions', path: '/overdue-prediction', icon: Clock3, tag: 'New', roles: ['admin', 'librarian'] },
+      { label: 'Active User Certificate', path: '/active-user-certificate', icon: Award, tag: 'New', roles: ['admin', 'librarian'] },
       { label: 'Entry Log', path: '/entry', icon: LogIn },
       { label: 'Navigation', path: '/navigation', icon: MapPin },
     ],
   },
-  { label: 'Settings', path: '/settings', icon: Settings, adminOnly: true },
+  { label: 'Settings', path: '/settings', icon: Settings, roles: ['admin', 'librarian'] },
 ];
 
 const flattenNavigation = (items) => items.flatMap((item) => item.items || item);
@@ -50,28 +52,42 @@ const Layout = () => {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [expanded, setExpanded] = useState({ Books: true, 'Issue Management': true, 'Analytics & Reports': true });
+  const [expanded, setExpanded] = useState({
+    Books: true,
+    'Issue Management': true,
+    'Analytics & Reports': true,
+    'Log & Navigation': true,
+  });
   const [profileOpen, setProfileOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [notifications, setNotifications] = useState([
-    { id: 1, title: 'Overdue books need attention', detail: 'Review the overdue circulation queue.', path: '/transactions', tone: 'danger', unread: true },
-    { id: 2, title: 'Reservations ready for pickup', detail: 'Check the latest ready reservations.', path: '/reservations', tone: 'warning', unread: true },
-    { id: 3, title: 'Fine review available', detail: 'There are pending fines to review.', path: '/fines', tone: 'info', unread: true },
-  ]);
-  const notificationsRef = useRef(null);
   const [search, setSearch] = useState('');
 
   const roleName = typeof user?.role === 'string' ? user.role : user?.role?.role_name;
-  const isAdmin = (roleName || '').toLowerCase() === 'admin';
-  const visibleNavigation = navigation
-    .filter((item) => !item.adminOnly || isAdmin)
-    .map((item) => {
-      if (!item.items) return item;
-      return {
-        ...item,
-        items: item.items.filter((child) => !child.adminOnly || isAdmin),
-      };
-    });
+  const userRole = (roleName || '').toLowerCase();
+  const isAdmin = userRole === 'admin';
+  const isLibrarian = userRole === 'librarian';
+  const isStaff = ['teacher', 'faculty', 'staff', 'librarian'].includes(userRole);
+  const isStudent = !isAdmin && !isStaff;
+
+  const isItemAllowed = (item) => {
+    if (item.adminOnly && !isAdmin) return false;
+    if (item.roles && !item.roles.map((r) => r.toLowerCase()).includes(userRole)) return false;
+    return true;
+  };
+
+  const visibleNavigation = useMemo(() => {
+    return navigation
+      .filter(isItemAllowed)
+      .map((item) => {
+        let label = item.label;
+        if (item.label === 'Analytics & Reports' || item.label === 'Log & Activity') {
+          label = userRole === 'student' ? 'Log & Navigation' : 'Analytics & Reports';
+        }
+        if (!item.items) return { ...item, label };
+        const filteredChildren = item.items.filter(isItemAllowed);
+        return { ...item, label, items: filteredChildren };
+      })
+      .filter((item) => !item.items || item.items.length > 0);
+  }, [isAdmin, userRole]);
   const currentPage = useMemo(() => {
     const page = flattenNavigation(visibleNavigation).find((item) => location.pathname === item.path);
     return page?.label || 'Dashboard';
@@ -80,23 +96,6 @@ const Layout = () => {
   const searchResults = search.trim()
     ? flattenNavigation(visibleNavigation).filter((item) => item.label.toLowerCase().includes(search.toLowerCase()))
     : [];
-  const unreadNotifications = notifications.filter((notification) => notification.unread).length;
-
-  useEffect(() => {
-    const handleOutsideClick = (event) => {
-      if (notificationsRef.current && !notificationsRef.current.contains(event.target)) {
-        setNotificationsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, []);
-
-  const openNotification = (notification) => {
-    setNotifications((items) => items.map((item) => item.id === notification.id ? { ...item, unread: false } : item));
-    setNotificationsOpen(false);
-    navigate(notification.path);
-  };
 
   const handleLogout = async () => {
     await logout();
@@ -171,42 +170,59 @@ const Layout = () => {
               {searchResults.length > 0 && <div className="app-search-results">{searchResults.slice(0, 6).map((result) => <Link key={result.path} to={result.path} onClick={() => setSearch('')}>{result.label}</Link>)}</div>}
             </div>
             <div className="app-date"><CalendarDays size={16} /><span>{todayLabel}</span></div>
-            <div className="app-notifications-wrap" ref={notificationsRef}>
-              <button
-                className="app-icon-button"
-                onClick={() => setNotificationsOpen((value) => !value)}
-                aria-label={`${unreadNotifications} unread notifications`}
-                aria-expanded={notificationsOpen}
-                aria-haspopup="true"
-              >
-                <Bell size={18} />
-                {unreadNotifications > 0 && <span className="app-notification-badge">{unreadNotifications}</span>}
-              </button>
-              {notificationsOpen && (
-                <div className="app-notifications-panel" role="dialog" aria-label="Notifications">
-                  <div className="app-notifications-heading">
-                    <div><strong>Notifications</strong><span>{unreadNotifications} unread</span></div>
-                    <button onClick={() => setNotifications((items) => items.map((item) => ({ ...item, unread: false })))}>Mark all read</button>
-                  </div>
-                  <div className="app-notifications-list">
-                    {notifications.map((notification) => (
-                      <button key={notification.id} className={`app-notification-item ${notification.unread ? 'is-unread' : ''}`} onClick={() => openNotification(notification)}>
-                        <span className={`app-notification-dot app-notification-${notification.tone}`} />
-                        <span><strong>{notification.title}</strong><small>{notification.detail}</small></span>
-                        {notification.unread && <i aria-label="Unread" />}
-                      </button>
-                    ))}
-                  </div>
-                  <Link className="app-notifications-footer" to="/dashboard" onClick={() => setNotificationsOpen(false)}>View dashboard alerts</Link>
-                </div>
-              )}
-            </div>
+            <button className="app-icon-button" aria-label="Notifications"><Bell size={18} /><span className="app-notification-badge">3</span></button>
             <div className="app-profile-wrap">
               <button className="app-profile-button" onClick={() => setProfileOpen((value) => !value)} aria-expanded={profileOpen}>
                 <span className="app-avatar">{user?.profile_image_url ? <img src={user.profile_image_url} alt="" /> : <User size={17} />}</span>
-                <span className="app-profile-copy"><strong>{user?.name || 'Library user'}</strong><small>{roleName || 'Staff'}</small></span><ChevronDown size={15} />
+                <span className="app-profile-copy">
+                  <span className="inline-flex items-center gap-1.5">
+                    <strong>{user?.name || [user?.first_name, user?.last_name].filter(Boolean).join(' ') || 'Library user'}</strong>
+                    {isAdmin ? (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold border bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800 uppercase">
+                        Admin
+                      </span>
+                    ) : (isLibrarian || isStaff) ? (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold border bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800 uppercase">
+                        Staff
+                      </span>
+                    ) : user?.degree_type ? (
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                        ['me', 'm.tech', 'phd', 'research scholar'].includes(String(user.degree_type).toLowerCase())
+                          ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800'
+                          : 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800'
+                      }`}>
+                        {user.degree_type}{user.department ? ` - ${user.department}` : ''}
+                      </span>
+                    ) : null}
+                  </span>
+                  <small>{isAdmin ? 'Admin' : (isLibrarian ? 'Librarian (Staff)' : (isStaff ? 'Staff' : 'Student'))}</small>
+                </span>
+                <ChevronDown size={15} />
               </button>
-              {profileOpen && <div className="app-profile-menu"><button onClick={() => { setProfileOpen(false); navigate('/profile'); }}><User size={16} /> My profile</button><button onClick={handleLogout} className="app-logout"><LogOut size={16} /> Sign out</button></div>}
+              {profileOpen && (
+                <div className="app-profile-menu">
+                  {isStudent && user?.degree_type ? (
+                    <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 text-xs">
+                      <div className="font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                        <span>{user?.degree_type} - {user?.department || 'CSE'}</span>
+                        {['me', 'm.tech', 'phd', 'research scholar'].includes(String(user.degree_type).toLowerCase()) && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-300 font-semibold uppercase">PG Research</span>
+                        )}
+                      </div>
+                      {user?.academic_year && <div className="text-[11px] text-gray-500 mt-0.5">{user.academic_year}</div>}
+                    </div>
+                  ) : (
+                    <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 text-xs">
+                      <div className="font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                        <span className="capitalize">{isAdmin ? 'System Administrator' : (isLibrarian ? 'Librarian (Staff)' : 'Staff Member')}</span>
+                      </div>
+                      <div className="text-[11px] text-gray-500 mt-0.5">{user?.department || (isAdmin ? 'Administration' : 'Library')}</div>
+                    </div>
+                  )}
+                  <button onClick={() => { setProfileOpen(false); navigate('/profile'); }}><User size={16} /> My profile</button>
+                  <button onClick={handleLogout} className="app-logout"><LogOut size={16} /> Sign out</button>
+                </div>
+              )}
             </div>
           </div>
         </header>

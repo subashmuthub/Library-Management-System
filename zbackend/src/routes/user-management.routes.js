@@ -7,10 +7,11 @@
 const express = require('express');
 const router = express.Router();
 const UserManagementController = require('../controllers/user-management.controller');
-// const { authenticate } = require('../middleware/auth.middleware');
+const { authenticate, authorize } = require('../middleware/auth.middleware');
 
-// Authentication disabled for now
-// router.use(authenticate);
+// Enforce authentication and restrict user management to admin & librarian
+router.use(authenticate);
+router.use(authorize(['admin', 'librarian']));
 
 /**
  * GET /api/user-management

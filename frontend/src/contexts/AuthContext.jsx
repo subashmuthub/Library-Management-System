@@ -49,7 +49,11 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const response = await authService.login(email, password);
-      const { user: userData } = response;
+      const { user: userData, token } = response;
+
+      if (token || userData?.token) {
+        localStorage.setItem("token", token || userData.token);
+      }
 
       setUser(userData);
       localStorage.setItem("user", JSON.stringify(userData));
@@ -68,7 +72,11 @@ export const AuthProvider = ({ children }) => {
   const googleLogin = async (token) => {
     try {
       const response = await authService.googleLogin(token);
-      const { user: userData } = response;
+      const { user: userData, token: jwtToken } = response;
+
+      if (jwtToken || userData?.token) {
+        localStorage.setItem("token", jwtToken || userData.token);
+      }
 
       setUser(userData);
       localStorage.setItem("user", JSON.stringify(userData));
@@ -109,7 +117,11 @@ export const AuthProvider = ({ children }) => {
   const verifyEmailOtp = async (email, otp) => {
     try {
       const response = await authService.verifyOtp(email, otp);
-      const { user: verifiedUser } = response;
+      const { user: verifiedUser, token: jwtToken } = response;
+
+      if (jwtToken || verifiedUser?.token) {
+        localStorage.setItem("token", jwtToken || verifiedUser.token);
+      }
 
       if (verifiedUser) {
         setUser(verifiedUser);
@@ -148,6 +160,7 @@ export const AuthProvider = ({ children }) => {
     }
     setUser(null);
     localStorage.removeItem("user");
+    localStorage.removeItem("token");
   };
 
   const updateUser = (updatedUser) => {

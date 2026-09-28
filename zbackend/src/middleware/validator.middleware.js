@@ -42,11 +42,20 @@ const validationRules = {
       .isLength({ min: 6 })
       .withMessage("Password must be at least 6 characters"),
     body("name").notEmpty().withMessage("Name required"),
-    body("student_id").notEmpty().withMessage("Student ID required"),
+    body("student_id")
+      .optional()
+      .custom((value, { req }) => {
+        const role = String(req.body.role || 'student').toLowerCase();
+        if (role === 'student' && !value) {
+          throw new Error("Student ID is required for student registration");
+        }
+        return true;
+      }),
+    body("employee_id").optional(),
     body("role")
       .optional()
-      .isIn(["student"])
-      .withMessage("Self registration allows student role only"),
+      .isIn(["student", "staff"])
+      .withMessage("Self registration allows student or staff role only"),
   ],
 
   // User login

@@ -36,10 +36,12 @@ class OverdueService {
           DATEDIFF(CURDATE(), bt.due_date) * ? AS calculated_fine,
           b.title        AS book_title,
           CONCAT(u.first_name, ' ', u.last_name) AS user_name,
-          u.email
+          u.email,
+          ur.role_name
         FROM book_transactions bt
         JOIN books b ON bt.book_id = b.id
         JOIN users u ON bt.user_id = u.id
+        LEFT JOIN user_roles ur ON u.role_id = ur.id
         WHERE bt.return_date IS NULL
           AND bt.due_date < CURDATE()
           AND bt.status IN ('active', 'overdue')
@@ -54,20 +56,25 @@ class OverdueService {
 
       for (const row of overdueRows) {
         try {
+          const isStaff = ['teacher', 'faculty', 'staff'].includes(String(row.role_name).toLowerCase());
+          const fineAmount = isStaff ? 0 : row.calculated_fine;
+
           // 2. Update transaction status to overdue
           await connection.execute(
             `UPDATE book_transactions SET status = 'overdue' WHERE id = ? AND status = 'active'`,
             [row.transaction_id]
           );
 
-          // 3. Upsert fine record — only update amount/days if record already exists
-          await connection.execute(`
-            INSERT INTO fines (user_id, transaction_id, fine_type, amount, days_overdue, fine_rate, status)
-            VALUES (?, ?, 'overdue', ?, ?, ?, 'pending')
-            ON DUPLICATE KEY UPDATE
-              amount       = VALUES(amount),
-              days_overdue = VALUES(days_overdue)
-          `, [row.user_id, row.transaction_id, row.calculated_fine, row.days_overdue, FINE_RATE_PER_DAY]);
+          // 3. Upsert fine record — only for non-staff borrowers
+          if (!isStaff && fineAmount > 0) {
+            await connection.execute(`
+              INSERT INTO fines (user_id, transaction_id, fine_type, amount, days_overdue, fine_rate, status)
+              VALUES (?, ?, 'overdue', ?, ?, ?, 'pending')
+              ON DUPLICATE KEY UPDATE
+                amount       = VALUES(amount),
+                days_overdue = VALUES(days_overdue)
+            `, [row.user_id, row.transaction_id, fineAmount, row.days_overdue, FINE_RATE_PER_DAY]);
+          }
 
           // 4. Insert notification (deduplicated by checking today's record)
           const [existing] = await connection.execute(
@@ -77,6 +84,10 @@ class OverdueService {
           );
 
           if (!existing.length) {
+            const notifMessage = isStaff
+              ? `Your borrowed book "${row.book_title}" is ${row.days_overdue} day(s) overdue. Please return it to the library.`
+              : `Your borrowed book "${row.book_title}" is ${row.days_overdue} day(s) overdue. Fine: ₹${fineAmount.toFixed(2)}.`;
+
             await connection.execute(`
               INSERT INTO notification_logs 
                 (user_id, transaction_id, notification_type, title, message, fine_amount, days_overdue)
@@ -85,8 +96,8 @@ class OverdueService {
               row.user_id,
               row.transaction_id,
               `Overdue: ${row.book_title}`,
-              `Your borrowed book "${row.book_title}" is ${row.days_overdue} day(s) overdue. Fine: ₹${row.calculated_fine.toFixed(2)}.`,
-              row.calculated_fine,
+              notifMessage,
+              fineAmount,
               row.days_overdue,
             ]);
 
@@ -94,7 +105,7 @@ class OverdueService {
             await connection.execute(`
               INSERT INTO overdue_alert_history (transaction_id, user_id, book_id, days_overdue, fine_snapshot)
               VALUES (?, ?, ?, ?, ?)
-            `, [row.transaction_id, row.user_id, row.book_id, row.days_overdue, row.calculated_fine]);
+            `, [row.transaction_id, row.user_id, row.book_id, row.days_overdue, fineAmount]);
           }
 
           processed++;

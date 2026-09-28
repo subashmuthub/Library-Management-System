@@ -13,10 +13,11 @@ class BookController {
             const { 
                 search, 
                 q, // Also support 'q' parameter for search
-                category,
-                department,
+                category, 
                 author, 
                 availability,
+                restricted_only,
+                research_only,
                 page = 1, 
                 limit = 20,
                 sortBy = 'title',
@@ -37,16 +38,10 @@ class BookController {
                 queryParams.push(searchParam, searchParam, searchParam);
             }
 
-            // Filter by category
+            // Filter by category/department
             if (category && category.trim()) {
                 whereConditions.push('b.category = ?');
                 queryParams.push(category.trim());
-            }
-
-            // Filter by academic department
-            if (department && department.trim()) {
-                whereConditions.push('b.department = ?');
-                queryParams.push(department.trim());
             }
 
             // Filter by author
@@ -62,24 +57,34 @@ class BookController {
                 whereConditions.push('b.is_available = FALSE');
             }
 
+            // Filter by Restricted Research & ME Papers
+            if (restricted_only === 'true' || restricted_only === true || research_only === 'true' || research_only === true || restricted_only === '1') {
+                whereConditions.push('b.is_restricted_research = TRUE');
+            }
+
             const whereClause = whereConditions.join(' AND ');
 
-            // Main query for books
+            // Main query for books with safe average rating and review count calculation
             let query = `
                 SELECT b.*, 
                        'available' as availability_status, 
-                       0 as reservation_count 
+                       0 as reservation_count,
+                       COALESCE(ROUND(AVG(r.rating), 1), 0.0) as average_rating,
+                       COUNT(r.id) as review_count
                 FROM books b 
+                LEFT JOIN reviews r ON b.id = r.book_id
                 WHERE ${whereClause}
+                GROUP BY b.id
             `;
 
             // Add sorting
-            const validSortColumns = ['title', 'author', 'category', 'publication_year', 'created_at'];
+            const validSortColumns = ['title', 'author', 'category', 'publication_year', 'created_at', 'average_rating'];
             const validSortOrders = ['ASC', 'DESC'];
             const safeSortBy = validSortColumns.includes(sortBy) ? sortBy : 'title';
             const safeSortOrder = validSortOrders.includes(sortOrder.toUpperCase()) ? sortOrder.toUpperCase() : 'ASC';
             
-            query += ` ORDER BY b.${safeSortBy} ${safeSortOrder}`;
+            const sortPrefix = safeSortBy === 'average_rating' ? '' : 'b.';
+            query += ` ORDER BY ${sortPrefix}${safeSortBy} ${safeSortOrder}`;
 
             // Add pagination with safe values
             const pageNum = Math.max(1, parseInt(page) || 1);
@@ -91,16 +96,24 @@ class BookController {
             const [books] = await connection.execute(query, queryParams);
 
             // Get total count with same WHERE clause
-            const countQuery = `SELECT COUNT(*) as total FROM books b WHERE ${whereClause}`;
+            const countQuery = `SELECT COUNT(DISTINCT b.id) as total FROM books b WHERE ${whereClause}`;
             const [countResult] = await connection.execute(countQuery, queryParams);
             const total = countResult[0].total;
 
             connection.release();
 
+            const formattedBooks = books.map(book => ({
+                ...book,
+                average_rating: Number(book.average_rating) || 0,
+                review_count: Number(book.review_count) || 0,
+                is_available: book.is_available === 1 || book.is_available === true,
+                is_restricted_research: book.is_restricted_research === 1 || book.is_restricted_research === true,
+            }));
+
             res.json({
                 success: true,
                 data: {
-                    books,
+                    books: formattedBooks,
                     pagination: {
                         currentPage: pageNum,
                         totalPages: Math.ceil(total / limitNum),
@@ -235,9 +248,10 @@ class BookController {
 
     // Get book by ID with detailed information
     static async getBookById(req, res) {
+        let connection;
         try {
             const { id } = req.params;
-            const connection = await pool.getConnection();
+            connection = await pool.getConnection();
 
             const [books] = await connection.execute(`
                 SELECT 
@@ -261,53 +275,92 @@ class BookController {
                 LEFT JOIN book_transactions bt ON b.id = bt.book_id AND bt.return_date IS NULL
                 LEFT JOIN users u ON bt.user_id = u.id
                 LEFT JOIN reservations r ON b.id = r.book_id AND r.status = 'active'
-                WHERE b.id = ?
-            `, [id]);
+                WHERE b.id = ? OR b.isbn = ?
+                LIMIT 1
+            `, [id, id]);
 
-            if (books.length === 0) {
+            if (!books || books.length === 0) {
                 return res.status(404).json({ error: 'Book not found' });
             }
 
+            const book = books[0];
+
             // Get location history (last 10 movements)
-            const [history] = await connection.execute(`
-                SELECT 
-                    s.shelf_code,
-                    blh.timestamp,
-                    u.first_name,
-                    u.last_name
-                FROM book_location_history blh
-                INNER JOIN shelves s ON blh.shelf_id = s.id
-                LEFT JOIN users u ON blh.scanned_by = u.id
-                WHERE blh.book_id = ?
-                ORDER BY blh.timestamp DESC
-                LIMIT 10
-            `, [id]);
+            let history = [];
+            try {
+                const [historyRows] = await connection.execute(`
+                    SELECT 
+                        s.shelf_code,
+                        blh.timestamp,
+                        u.first_name,
+                        u.last_name
+                    FROM book_location_history blh
+                    INNER JOIN shelves s ON blh.shelf_id = s.id
+                    LEFT JOIN users u ON blh.scanned_by = u.id
+                    WHERE blh.book_id = ?
+                    ORDER BY blh.timestamp DESC
+                    LIMIT 10
+                `, [id]);
+                history = historyRows || [];
+            } catch (histErr) {
+                console.warn('Location history query warning:', histErr.message);
+                history = [];
+            }
 
             // Fetch all physical copies for the same ISBN and their current locations.
-            const [isbnCopies] = await connection.execute(`
-                SELECT
-                    b.id,
-                    b.isbn,
-                    b.title,
-                    b.is_available,
-                    cbl.shelf_code,
-                    cbl.zone,
-                    cbl.section,
-                    CASE
-                        WHEN bt.id IS NOT NULL THEN 'in_use'
-                        ELSE 'available'
-                    END as copy_status
-                FROM books b
-                LEFT JOIN current_book_locations cbl ON b.id = cbl.book_id
-                LEFT JOIN book_transactions bt ON b.id = bt.book_id AND bt.return_date IS NULL
-                WHERE b.isbn = ?
-                ORDER BY b.id ASC
-            `, [books[0].isbn]);
+            let isbnCopies = [];
+            if (book.isbn) {
+                try {
+                    const [copies] = await connection.execute(`
+                        SELECT
+                            b.id,
+                            b.isbn,
+                            b.title,
+                            b.is_available,
+                            cbl.shelf_code,
+                            cbl.zone,
+                            cbl.section,
+                            CASE
+                                WHEN bt.id IS NOT NULL THEN 'in_use'
+                                ELSE 'available'
+                            END as copy_status
+                        FROM books b
+                        LEFT JOIN current_book_locations cbl ON b.id = cbl.book_id
+                        LEFT JOIN book_transactions bt ON b.id = bt.book_id AND bt.return_date IS NULL
+                        WHERE b.isbn = ?
+                        ORDER BY b.id ASC
+                    `, [book.isbn]);
+                    isbnCopies = copies || [];
+                } catch (copyErr) {
+                    console.warn('ISBN copies query warning:', copyErr.message);
+                    isbnCopies = [];
+                }
+            }
 
-            connection.release();
+            // Fetch reviews for this book
+            let reviews = [];
+            let averageRating = 0;
+            try {
+                const [reviewRows] = await connection.execute(`
+                    SELECT r.id, r.rating, r.review_text, r.created_at,
+                           u.id as user_id, CONCAT(u.first_name, ' ', u.last_name) as user_name
+                    FROM reviews r
+                    JOIN users u ON r.user_id = u.id
+                    WHERE r.book_id = ?
+                    ORDER BY r.created_at DESC
+                `, [id]);
+                reviews = reviewRows || [];
+                if (reviews.length > 0) {
+                    const totalSum = reviews.reduce((acc, curr) => acc + Number(curr.rating || 0), 0);
+                    averageRating = Number((totalSum / reviews.length).toFixed(1));
+                }
+            } catch (revErr) {
+                console.warn('Reviews table query warning (safe fallback):', revErr.message);
+                reviews = [];
+                averageRating = 0;
+            }
 
-            const book = books[0];
-            res.json({
+            return res.json({
                 book: {
                     id: book.id,
                     isbn: book.isbn,
@@ -327,6 +380,10 @@ class BookController {
                     isbn_copy_count: isbnCopies.length,
                     available_isbn_copies: isbnCopies.filter(copy => copy.copy_status === 'available').length,
                     is_available: book.is_available === 1,
+                    is_restricted_research: Boolean(book.is_restricted_research),
+                    average_rating: averageRating,
+                    review_count: reviews.length,
+                    reviews: reviews || [],
                     rfid_tag: book.tag_id,
                     status: book.status,
                     borrower_name: book.borrower_name,
@@ -340,7 +397,8 @@ class BookController {
                         lastScanned: book.last_scanned
                     } : null
                 },
-                isbnCopies: isbnCopies.map(copy => ({
+                reviews: reviews || [],
+                isbnCopies: (isbnCopies || []).map(copy => ({
                     id: copy.id,
                     isbn: copy.isbn,
                     copy_status: copy.copy_status,
@@ -350,7 +408,7 @@ class BookController {
                     zone: copy.zone,
                     section: copy.section
                 })),
-                locationHistory: history.map(h => ({
+                locationHistory: (history || []).map(h => ({
                     shelfCode: h.shelf_code,
                     timestamp: h.timestamp,
                     scannedBy: h.first_name && h.last_name 
@@ -361,7 +419,11 @@ class BookController {
 
         } catch (error) {
             console.error('Error fetching book:', error);
-            res.status(500).json({ error: 'Internal server error' });
+            return res.status(500).json({ error: 'Internal server error' });
+        } finally {
+            if (connection) {
+                connection.release();
+            }
         }
     }
 
@@ -488,7 +550,8 @@ class BookController {
                 pages,
                 description,
                 cover_image_url,
-                total_copies = 1
+                total_copies = 1,
+                is_restricted_research = false
             } = req.body;
 
             // Validate required fields
@@ -525,12 +588,13 @@ class BookController {
                 INSERT INTO books (
                     isbn, title, author, type, publisher, publication_year,
                     category, edition, language, pages, description, 
-                    cover_image_url, total_copies
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cover_image_url, total_copies, is_restricted_research
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
                 isbn, title, author, type, publisher, publication_year,
                 category, edition, language, pages, description, 
-                cover_image_url, total_copies
+                cover_image_url, total_copies,
+                Boolean(is_restricted_research) ? 1 : 0
             ]);
 
             const bookId = result.insertId;
@@ -568,7 +632,8 @@ class BookController {
             const allowedFields = [
                 'title', 'author', 'publisher', 'publication_year',
                 'category', 'edition', 'language', 'pages', 
-                'description', 'cover_image_url', 'total_copies', 'is_available'
+                'description', 'cover_image_url', 'total_copies', 'is_available',
+                'is_restricted_research'
             ];
 
             const updates = {};
@@ -809,247 +874,91 @@ class BookController {
         }
     }
 
-    // Batch checkout multiple books
-    static async checkoutBatch(req, res) {
-        let connection = null;
+    // Add review for a book
+    static async addReview(req, res) {
         try {
-            const userId = req.body.userId || req.body.user_id;
-            const rawBookIds = req.body.bookIds || req.body.book_ids;
-            const rawLoanDays = req.body.loanDays || req.body.loan_days || 14;
-            const librarianId = req.user?.id || req.body.librarianId || null;
+            const { id } = req.params;
+            const { rating, review_text } = req.body;
+            const userId = req.user.id;
 
-            if (!userId) {
+            if (!rating || rating < 1 || rating > 5) {
                 return res.status(400).json({
                     success: false,
-                    error: 'User ID is required',
-                    message: 'User ID is required'
+                    message: 'Rating must be an integer between 1 and 5'
                 });
             }
 
-            if (!Array.isArray(rawBookIds) || rawBookIds.length === 0) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'bookIds must be a non-empty array of book IDs',
-                    message: 'At least one book must be selected for checkout'
-                });
-            }
+            const connection = await pool.getConnection();
 
-            // Deduplicate and parse IDs
-            const parsedBookIds = [...new Set(rawBookIds.map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0))];
-
-            if (parsedBookIds.length === 0) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'No valid numeric book IDs provided',
-                    message: 'Please provide valid book IDs'
-                });
-            }
-
-            const loanDays = Math.max(1, parseInt(rawLoanDays, 10) || 14);
-
-            connection = await pool.getConnection();
-
-            // 1. Verify user exists and status
-            const [targetUsers] = await connection.execute(
-                `SELECT u.id, u.status, u.first_name, u.last_name,
-                        LOWER(COALESCE(ur.role_name, CASE u.role_id WHEN 4 THEN 'staff' WHEN 5 THEN 'staff' WHEN 6 THEN 'staff' ELSE 'student' END)) AS role_name
-                 FROM users u
-                 LEFT JOIN user_roles ur ON u.role_id = ur.id
-                 WHERE u.id = ?`,
-                [userId]
-            );
-
-            if (targetUsers.length === 0) {
+            const [books] = await connection.execute('SELECT id FROM books WHERE id = ?', [id]);
+            if (books.length === 0) {
                 connection.release();
-                return res.status(404).json({
-                    success: false,
-                    error: 'User not found',
-                    message: `User with ID ${userId} does not exist.`
-                });
+                return res.status(404).json({ success: false, message: 'Book not found' });
             }
 
-            const borrower = targetUsers[0];
+            const [result] = await connection.execute(`
+                INSERT INTO reviews (book_id, user_id, rating, review_text)
+                VALUES (?, ?, ?, ?)
+            `, [id, userId, Math.round(rating), review_text || null]);
 
-            if (borrower.status !== 'active') {
-                connection.release();
-                return res.status(400).json({
-                    success: false,
-                    error: 'User account is not active',
-                    message: `User account is ${borrower.status}. Checkout cannot proceed.`
-                });
-            }
-
-            const roleName = borrower.role_name;
-            const normalizedRole = ['teacher', 'faculty', 'staff'].includes(roleName) ? 'staff' : roleName;
-
-            // 2. Check overdue books
-            const [overdueCheck] = await connection.execute(
-                `SELECT COUNT(*) as count 
-                 FROM book_transactions 
-                 WHERE user_id = ? AND status = 'active' AND due_date < CURDATE()`,
-                [userId]
-            );
-
-            if (overdueCheck[0].count > 0) {
-                connection.release();
-                return res.status(400).json({
-                    success: false,
-                    error: 'User has overdue books',
-                    message: `Cannot checkout: user has ${overdueCheck[0].count} overdue book(s) that must be returned first.`
-                });
-            }
-
-            // 3. Check active borrowing limit
-            const [activeLoans] = await connection.execute(
-                `SELECT COUNT(*) as count 
-                 FROM book_transactions 
-                 WHERE user_id = ? AND status = 'active'`,
-                [userId]
-            );
-
-            const currentActiveLoans = activeLoans[0].count;
-            const maxLimit = normalizedRole === 'staff' ? 6 : 4;
-            const totalRequested = parsedBookIds.length;
-
-            if (currentActiveLoans + totalRequested > maxLimit) {
-                connection.release();
-                return res.status(400).json({
-                    success: false,
-                    error: 'Borrowing limit exceeded',
-                    message: `Borrowing limit exceeded: ${normalizedRole} maximum is ${maxLimit} books. User already has ${currentActiveLoans} active book(s) and requested ${totalRequested} more.`,
-                    currentActiveLoans,
-                    requestedCount: totalRequested,
-                    maxLimit
-                });
-            }
-
-            // 4. Validate each book and check availability
-            const placeholders = parsedBookIds.map(() => '?').join(',');
-            const [existingBooks] = await connection.execute(
-                `SELECT b.id, b.title, b.author, b.is_available,
-                        (SELECT COUNT(*) FROM book_transactions bt WHERE bt.book_id = b.id AND bt.status = 'active') as active_transactions
-                 FROM books b 
-                 WHERE b.id IN (${placeholders})`,
-                parsedBookIds
-            );
-
-            const bookMap = new Map();
-            existingBooks.forEach(b => bookMap.set(b.id, b));
-
-            const bookEvaluation = [];
-            let hasUnavailableBooks = false;
-
-            for (const bookId of parsedBookIds) {
-                const book = bookMap.get(bookId);
-                if (!book) {
-                    hasUnavailableBooks = true;
-                    bookEvaluation.push({
-                        bookId,
-                        available: false,
-                        reason: 'Book does not exist in catalog'
-                    });
-                } else if (!book.is_available || book.active_transactions > 0) {
-                    hasUnavailableBooks = true;
-                    bookEvaluation.push({
-                        bookId,
-                        title: book.title,
-                        author: book.author,
-                        available: false,
-                        reason: 'Book is currently checked out or unavailable'
-                    });
-                } else {
-                    bookEvaluation.push({
-                        bookId,
-                        title: book.title,
-                        author: book.author,
-                        available: true
-                    });
-                }
-            }
-
-            if (hasUnavailableBooks) {
-                connection.release();
-                return res.status(400).json({
-                    success: false,
-                    error: 'One or more books are not available for checkout',
-                    message: 'One or more books in the cart are currently unavailable or invalid.',
-                    books: bookEvaluation
-                });
-            }
-
-            // 5. Execute transaction inserting multiple checkout records
-            await connection.beginTransaction();
-
-            const checkoutDate = new Date();
-            const dueDate = new Date();
-            dueDate.setDate(dueDate.getDate() + loanDays);
-
-            const checkoutResults = [];
-
-            for (const item of bookEvaluation) {
-                const [insertResult] = await connection.execute(
-                    `INSERT INTO book_transactions (
-                        user_id,
-                        book_id,
-                        checked_out_by,
-                        checkout_date,
-                        due_date,
-                        status
-                     ) VALUES (?, ?, ?, ?, ?, 'active')`,
-                    [userId, item.bookId, librarianId, checkoutDate, dueDate]
-                );
-
-                await connection.execute(
-                    `UPDATE books SET is_available = FALSE WHERE id = ?`,
-                    [item.bookId]
-                );
-
-                checkoutResults.push({
-                    transactionId: insertResult.insertId,
-                    bookId: item.bookId,
-                    title: item.title,
-                    author: item.author,
-                    checkoutDate,
-                    dueDate,
-                    status: 'active'
-                });
-            }
-
-            await connection.execute(
-                `UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-                [userId]
-            );
-
-            await connection.commit();
             connection.release();
 
-            return res.status(201).json({
+            res.status(201).json({
                 success: true,
-                message: `Successfully checked out ${checkoutResults.length} book(s)`,
-                checkoutCount: checkoutResults.length,
-                due_date: dueDate.toISOString(),
-                user: {
-                    id: borrower.id,
-                    name: `${borrower.first_name} ${borrower.last_name}`,
-                    role: roleName
-                },
-                transactions: checkoutResults
-            });
-
-        } catch (error) {
-            if (connection) {
-                try {
-                    await connection.rollback();
-                } catch (rbErr) {
-                    console.error('Rollback error:', rbErr);
+                message: 'Review submitted successfully',
+                data: {
+                    id: result.insertId,
+                    book_id: parseInt(id),
+                    user_id: userId,
+                    rating: Math.round(rating),
+                    review_text
                 }
-                connection.release();
-            }
-            console.error('Error in checkoutBatch:', error);
-            return res.status(500).json({
+            });
+        } catch (error) {
+            console.error('Error adding review:', error);
+            res.status(500).json({
                 success: false,
-                error: 'Internal server error during batch checkout',
-                message: error.message
+                message: 'Failed to submit review',
+                error: error.message
+            });
+        }
+    }
+
+    // Get reviews for a book
+    static async getBookReviews(req, res) {
+        try {
+            const { id } = req.params;
+            const connection = await pool.getConnection();
+
+            const [reviews] = await connection.execute(`
+                SELECT r.id, r.book_id, r.rating, r.review_text, r.created_at,
+                       u.id as user_id, CONCAT(u.first_name, ' ', u.last_name) as user_name
+                FROM reviews r
+                JOIN users u ON r.user_id = u.id
+                WHERE r.book_id = ?
+                ORDER BY r.created_at DESC
+            `, [id]);
+
+            connection.release();
+
+            const averageRating = reviews.length > 0
+                ? Number((reviews.reduce((acc, curr) => acc + Number(curr.rating || 0), 0) / reviews.length).toFixed(1))
+                : 0;
+
+            res.json({
+                success: true,
+                data: {
+                    reviews,
+                    average_rating: averageRating,
+                    total_reviews: reviews.length
+                }
+            });
+        } catch (error) {
+            console.error('Error fetching book reviews:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to fetch reviews',
+                error: error.message
             });
         }
     }
@@ -1066,7 +975,8 @@ module.exports = {
     getIsbnCopies: BookController.getIsbnCopies,
     getBookLocationHistory: BookController.getBookLocationHistory,
     bulkImportBooks: BookController.bulkImportBooks,
-    checkoutBatch: BookController.checkoutBatch,
+    addReview: BookController.addReview,
+    getBookReviews: BookController.getBookReviews,
     
     // Legacy methods for backward compatibility
     searchBooks: BookController.searchBooks

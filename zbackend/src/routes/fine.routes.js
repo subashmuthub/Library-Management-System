@@ -7,10 +7,10 @@
 const express = require('express');
 const router = express.Router();
 const FineController = require('../controllers/fine.controller');
-// const { authenticate } = require('../middleware/auth.middleware');
+const { authenticate, authorize } = require('../middleware/auth.middleware');
 
-// Authentication disabled for now
-// router.use(authenticate);
+// Enforce authentication across all fine routes
+router.use(authenticate);
 
 /**
  * GET /api/fines
@@ -24,7 +24,7 @@ router.get('/', FineController.getPendingFines);
  * Get fine statistics for dashboard (admin/librarian only)
  * Query params: period (days)
  */
-router.get('/statistics', FineController.getFineStatistics);
+router.get('/statistics', authorize(['admin', 'librarian']), FineController.getFineStatistics);
 
 /**
  * GET /api/fines/:id
@@ -44,14 +44,14 @@ router.post('/:id/pay', FineController.payFine);
  * Waive a fine (librarian/admin only)
  * Body: { reason }
  */
-router.post('/:id/waive', FineController.waiveFine);
+router.post('/:id/waive', authorize(['admin', 'librarian']), FineController.waiveFine);
 
 /**
  * POST /api/fines/manual
  * Create a manual fine (for damaged books, etc.)
  * Body: { user_id, transaction_id?, fine_type, amount, description, reason }
  */
-router.post('/manual', FineController.createManualFine);
+router.post('/manual', authorize(['admin', 'librarian']), FineController.createManualFine);
 
 /**
  * GET /api/fines/calculate/:transactionId

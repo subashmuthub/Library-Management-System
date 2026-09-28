@@ -106,7 +106,9 @@ const PaymentModal = ({ fine, onClose, onPaymentSuccess }) => {
 
     try {
       // Check if Razorpay is configured
-      const statusResponse = await fetch('http://localhost:3001/api/v1/payments/status');
+      const statusResponse = await fetch('http://localhost:3001/api/v1/payments/status', {
+        credentials: 'include'
+      });
       const statusData = await statusResponse.json();
 
       if (!statusData.configured) {
@@ -118,6 +120,7 @@ const PaymentModal = ({ fine, onClose, onPaymentSuccess }) => {
       // Create Razorpay order
       const orderResponse = await fetch(`http://localhost:3001/api/v1/payments/order/${fine.id}`, {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -192,6 +195,7 @@ const PaymentModal = ({ fine, onClose, onPaymentSuccess }) => {
     try {
       const response = await fetch('http://localhost:3001/api/v1/payments/verify', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -254,6 +258,7 @@ const PaymentModal = ({ fine, onClose, onPaymentSuccess }) => {
 
         const response = await fetch(`http://localhost:3001/api/v1/fines/${fine.id}/pay`, {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -298,6 +303,7 @@ const PaymentModal = ({ fine, onClose, onPaymentSuccess }) => {
       try {
         const response = await fetch(`http://localhost:3001/api/v1/fines/${fine.id}/pay`, {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -631,7 +637,7 @@ Thank you for your payment!
                 <div className="border-t border-b py-4 mb-6">
                   <div className="flex justify-between items-center">
                     <span className="text-lg font-semibold">Amount Paid</span>
-                    <span className="text-3xl font-bold text-green-600 print:text-black">₹{receiptData.amount}</span>
+                    <span className="text-3xl font-bold text-green-600 print:text-black">${receiptData.amount}</span>
                   </div>
                   <div className="flex justify-between items-center mt-2">
                     <span className="text-sm text-gray-600 print:text-black">Status</span>

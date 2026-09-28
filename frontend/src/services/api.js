@@ -11,6 +11,27 @@ const api = axios.create({
   withCredentials: true, // Send cookies with requests
 });
 
+// Request interceptor to inject Authorization Bearer token
+api.interceptors.request.use(
+  (config) => {
+    let token = localStorage.getItem("token");
+    if (!token) {
+      try {
+        const storedUser = JSON.parse(localStorage.getItem("user") || "{}");
+        token = storedUser?.token || storedUser?.accessToken;
+      } catch {
+        token = null;
+      }
+    }
+
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error),
+);
+
 // Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,

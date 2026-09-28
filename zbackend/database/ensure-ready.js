@@ -14,60 +14,13 @@ require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
 const BASE_REQUIRED_TABLES = ["users", "books", "user_roles", "entry_logs"];
 
-const RUNTIME_TABLES = ["book_transactions", "fines"];
-
-async function ensureFeedbackTables(connection) {
-  await connection.query(`
-    CREATE TABLE IF NOT EXISTS book_reviews (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      book_id INT NOT NULL,
-      user_id INT NOT NULL,
-      rating TINYINT UNSIGNED NOT NULL,
-      review_text VARCHAR(1000) NULL,
-      status ENUM('published', 'hidden') NOT NULL DEFAULT 'published',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      UNIQUE KEY uq_book_review_user (book_id, user_id),
-      FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB`);
-  await connection.query(`
-    CREATE TABLE IF NOT EXISTS purchase_suggestions (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      requested_by INT NOT NULL,
-      title VARCHAR(255) NOT NULL,
-      author VARCHAR(255) NULL,
-      isbn VARCHAR(30) NULL,
-      department VARCHAR(100) NULL,
-      justification VARCHAR(1000) NULL,
-      status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
-      reviewed_by INT NULL,
-      reviewed_at TIMESTAMP NULL,
-      review_notes VARCHAR(1000) NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
-      INDEX idx_purchase_suggestions_status (status)
-    ) ENGINE=InnoDB`);
-  await connection.query(`
-    CREATE TABLE IF NOT EXISTS transaction_disputes (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      transaction_id INT NOT NULL,
-      raised_by INT NOT NULL,
-      reason VARCHAR(1000) NOT NULL,
-      status ENUM('open', 'investigating', 'resolved', 'rejected') NOT NULL DEFAULT 'open',
-      resolution_notes VARCHAR(1000) NULL,
-      resolved_by INT NULL,
-      resolved_at TIMESTAMP NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      FOREIGN KEY (transaction_id) REFERENCES book_transactions(id) ON DELETE CASCADE,
-      FOREIGN KEY (raised_by) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (resolved_by) REFERENCES users(id) ON DELETE SET NULL,
-      INDEX idx_transaction_disputes_status (status)
-    ) ENGINE=InnoDB`);
-}
+const RUNTIME_TABLES = [
+  "book_transactions",
+  "fines",
+  "reviews",
+  "book_suggestions",
+  "book_reservations",
+];
 
 async function runSetupScript() {
   console.warn("⚠ Running database/setup.js to build base schema...");
@@ -126,6 +79,7 @@ async function ensureRuntimeTables(connection) {
       returned_by INT NULL,
       return_condition VARCHAR(50) NULL,
       notes TEXT NULL,
+      is_book_bank_loan BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
@@ -170,9 +124,139 @@ async function ensureRuntimeTables(connection) {
       INDEX idx_status (status)
     ) ENGINE=InnoDB
   `);
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS reviews (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      book_id INT NOT NULL,
+      user_id INT NOT NULL,
+      rating INT NOT NULL CHECK (rating >= 1 AND rating <= 5),
+      review_text TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+      FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+
+      INDEX idx_reviews_book (book_id),
+      INDEX idx_reviews_user (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS book_suggestions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      author VARCHAR(255) NOT NULL,
+      isbn VARCHAR(50) NULL,
+      reason TEXT NULL,
+      status ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+
+      INDEX idx_suggestions_user (user_id),
+      INDEX idx_suggestions_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS book_reservations (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      book_id INT NOT NULL,
+      user_id INT NOT NULL,
+      status ENUM('PENDING', 'APPROVED', 'REJECTED', 'FULFILLED', 'CANCELLED') NOT NULL DEFAULT 'PENDING',
+      reason TEXT NOT NULL,
+      reviewed_by INT NULL,
+      rejection_reason TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+      FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+
+      INDEX idx_reservation_book (book_id),
+      INDEX idx_reservation_user (user_id),
+      INDEX idx_reservation_status (status),
+      INDEX idx_reservation_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+}
+
+async function ensureUserColumns(connection, dbName) {
+  // Completely purge legacy columns if present
+  const legacyUserColumns = ["community_category", "is_book_bank_eligible"];
+  for (const col of legacyUserColumns) {
+    const exists = await hasColumn(connection, dbName, "users", col);
+    if (exists) {
+      await connection.query(`ALTER TABLE users DROP COLUMN ${col}`).catch(() => {});
+    }
+  }
+
+  // Ensure academic credential columns exist
+  const academicColumns = [
+    {
+      name: "degree_type",
+      sql: "ALTER TABLE users ADD COLUMN degree_type VARCHAR(30) NULL AFTER student_id",
+    },
+    {
+      name: "department",
+      sql: "ALTER TABLE users ADD COLUMN department VARCHAR(50) NULL AFTER degree_type",
+    },
+    {
+      name: "academic_year",
+      sql: "ALTER TABLE users ADD COLUMN academic_year VARCHAR(20) NULL AFTER department",
+    },
+  ];
+
+  for (const col of academicColumns) {
+    const exists = await hasColumn(connection, dbName, "users", col.name);
+    if (!exists) {
+      await connection.query(col.sql).catch(() => {});
+    }
+  }
+
+  // Backfill student accounts only
+  await connection.query(`
+    UPDATE users 
+    SET 
+      degree_type = COALESCE(degree_type, 'BE'),
+      department = COALESCE(department, 'CSE'),
+      academic_year = COALESCE(academic_year, '3rd Year')
+    WHERE (role_id IN (3, 5, 6) OR role_id IS NULL)
+      AND (degree_type IS NULL OR department IS NULL OR academic_year IS NULL)
+  `).catch(() => {});
+
+  // Ensure Admin and Librarian/Staff accounts do not hold student degree attributes
+  await connection.query(`
+    UPDATE users 
+    SET degree_type = NULL, academic_year = NULL 
+    WHERE role_id IN (1, 2, 4)
+  `).catch(() => {});
+
+  await connection.query(`
+    UPDATE users 
+    SET department = 'Administration' 
+    WHERE role_id = 1 AND (department IS NULL OR department = 'CSE')
+  `).catch(() => {});
+
+  await connection.query(`
+    UPDATE users 
+    SET department = 'Library' 
+    WHERE role_id = 2 AND (department IS NULL OR department = 'CSE')
+  `).catch(() => {});
 }
 
 async function ensureBookTransactionColumns(connection, dbName) {
+  // Purge legacy loan columns if present
+  const hasLegacyLoan = await hasColumn(connection, dbName, "book_transactions", "is_book_bank_loan");
+  if (hasLegacyLoan) {
+    await connection.query("ALTER TABLE book_transactions DROP COLUMN is_book_bank_loan").catch(() => {});
+  }
+
   const addColumnStatements = [
     {
       name: "checked_out_by",
@@ -235,6 +319,10 @@ async function ensureBookProcurementColumns(connection, dbName) {
       name: "purchase_invoice_no",
       sql: "ALTER TABLE books ADD COLUMN purchase_invoice_no VARCHAR(100) NULL AFTER purchase_date",
     },
+    {
+      name: "is_restricted_research",
+      sql: "ALTER TABLE books ADD COLUMN is_restricted_research BOOLEAN NOT NULL DEFAULT FALSE AFTER pages",
+    },
   ];
 
   for (const column of procurementColumns) {
@@ -242,6 +330,17 @@ async function ensureBookProcurementColumns(connection, dbName) {
     if (!exists) {
       await connection.query(column.sql);
     }
+  }
+
+  // Migrate legacy is_book_bank if it exists, then purge legacy columns
+  const hasLegacyBookBank = await hasColumn(connection, dbName, "books", "is_book_bank");
+  if (hasLegacyBookBank) {
+    await connection.query("UPDATE books SET is_restricted_research = TRUE WHERE is_book_bank = TRUE").catch(() => {});
+    await connection.query("ALTER TABLE books DROP COLUMN is_book_bank").catch(() => {});
+  }
+  const hasLegacySchemeName = await hasColumn(connection, dbName, "books", "book_bank_scheme_name");
+  if (hasLegacySchemeName) {
+    await connection.query("ALTER TABLE books DROP COLUMN book_bank_scheme_name").catch(() => {});
   }
 
   await connection.query(`
@@ -264,7 +363,9 @@ async function ensureDefaultRoles(connection) {
       (1, 'admin', 'System administrator with full access', '{"users":["create","read","update","delete"],"books":["create","read","update","delete"],"transactions":["create","read","update","delete"],"fines":["create","read","update","delete"]}'),
       (2, 'librarian', 'Library staff with administrative access', '{"users":["read","update"],"books":["create","read","update"],"transactions":["create","read","update"],"fines":["read","update"]}'),
       (3, 'student', 'Student user with basic access', '{"books":["read"],"transactions":["read"],"reservations":["create","read","update"]}'),
-      (4, 'staff', 'Faculty and support staff with borrower access', '{"books":["read"],"transactions":["read"],"reservations":["create","read","update"]}')
+      (4, 'staff', 'Faculty and support staff with borrower access', '{"books":["read"],"transactions":["read"],"reservations":["create","read","update"]}'),
+      (5, 'me_student', 'Master of Engineering (PG) student with direct research thesis access', '{"books":["read"],"transactions":["read"],"reservations":["create","read","update"]}'),
+      (6, 'research_scholar', 'Doctoral researcher with direct research paper and thesis access', '{"books":["read"],"transactions":["read"],"reservations":["create","read","update"]}')
   `);
 }
 
@@ -272,7 +373,7 @@ async function ensureDatabaseReady() {
   const dbName = process.env.DB_NAME || "smart_library";
 
   const connection = await mysql.createConnection({
-    host: process.env.DB_HOST || "localhost",
+    host: process.env.DB_HOST || "127.0.0.1",
     port: Number.parseInt(process.env.DB_PORT, 10) || 3306,
     user: process.env.DB_USER || "root",
     password: process.env.DB_PASSWORD || "",
@@ -311,7 +412,7 @@ async function ensureDatabaseReady() {
     await connection.changeUser({ database: dbName });
 
     await ensureRuntimeTables(connection);
-    await ensureFeedbackTables(connection);
+    await ensureUserColumns(connection, dbName);
     await ensureBookTransactionColumns(connection, dbName);
     await ensureBookProcurementColumns(connection, dbName);
     await ensureDefaultRoles(connection);

@@ -6,6 +6,7 @@
 
 const bcrypt = require("bcryptjs");
 const crypto = require("node:crypto");
+const passport = require("passport");
 const { OAuth2Client } = require("google-auth-library");
 const { query } = require("../config/database");
 const EmailService = require("../services/email.service");
@@ -63,6 +64,30 @@ const ensureAuthVerificationSchema = async () => {
     await query(`ALTER TABLE users ADD COLUMN email_verified_at TIMESTAMP NULL`);
   }
 
+  const googleIdColumn = await query(
+    `SELECT COUNT(*) as total FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'google_id'`,
+  );
+  if (!googleIdColumn[0]?.total) {
+    await query(`ALTER TABLE users ADD COLUMN google_id VARCHAR(255) NULL UNIQUE`);
+  }
+
+  const authProviderColumn = await query(
+    `SELECT COUNT(*) as total FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'auth_provider'`,
+  );
+  if (!authProviderColumn[0]?.total) {
+    await query(`ALTER TABLE users ADD COLUMN auth_provider VARCHAR(50) DEFAULT 'local'`);
+  }
+
+  const profileImageColumn = await query(
+    `SELECT COUNT(*) as total FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'profile_image_url'`,
+  );
+  if (!profileImageColumn[0]?.total) {
+    await query(`ALTER TABLE users ADD COLUMN profile_image_url VARCHAR(500) NULL`);
+  }
+
   authSchemaReady = true;
 };
 
@@ -92,10 +117,35 @@ const getRoleName = (roleId) => {
     2: "librarian",
     3: "student",
     4: "staff",
-    5: "staff",
-    6: "staff",
+    5: "me_student",
+    6: "research_scholar",
   };
   return roleMap[roleId] || "student";
+};
+
+const jwt = require("jsonwebtoken");
+const { hasDirectResearchAccess } = require("../utils/access-control.helper");
+
+const generateAuthToken = (user) => {
+  const isStudentRole = ['student', 'me_student', 'research_scholar'].includes(
+    String(user.role_name || user.role || '').toLowerCase()
+  );
+  return jwt.sign(
+    {
+      id: user.id,
+      email: user.email,
+      role: user.role_name || user.role,
+      role_id: user.role_id,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      student_id: user.student_id,
+      degree_type: isStudentRole ? (user.degree_type || 'BE') : null,
+      department: user.department || (isStudentRole ? 'CSE' : (user.role_name === 'admin' ? 'Administration' : 'Library')),
+      academic_year: isStudentRole ? (user.academic_year || '3rd Year') : null,
+    },
+    process.env.JWT_SECRET || "secret",
+    { expiresIn: "7d" }
+  );
 };
 
 /**
@@ -107,7 +157,27 @@ const register = async (req, res, next) => {
     console.log("🔷 Registration attempt:", req.body);
     await ensureAuthVerificationSchema();
 
-    const { email, password, name, student_id, phone } = req.body;
+    const { email, password, name, student_id, employee_id, staff_id, phone, role } = req.body;
+    const requestedRole = String(role || 'student').toLowerCase();
+    const staffEmailDomains = (process.env.STAFF_EMAIL_DOMAINS || 'nec.edu.in,college.edu,university.edu').split(',').map(d => d.trim().toLowerCase());
+
+    // Determine role based on requested role and college staff domain
+    let targetRoleId = 3;
+    let assignedRole = 'student';
+
+    if (requestedRole === 'staff') {
+      const emailDomain = (email || '').split('@')[1]?.toLowerCase() || '';
+      const isApprovedDomain = staffEmailDomains.some(d => emailDomain === d || emailDomain.endsWith('.' + d) || emailDomain.includes('staff') || emailDomain.includes('faculty'));
+
+      if (!isApprovedDomain) {
+        return res.status(400).json({
+          error: "Registration Error",
+          message: `Staff registration requires an authorized college staff email domain (e.g. ${staffEmailDomains.join(', ')}).`,
+        });
+      }
+      targetRoleId = 4;
+      assignedRole = 'staff';
+    }
 
     // Check if user already exists
     const existingUser = await query(
@@ -118,14 +188,6 @@ const register = async (req, res, next) => {
     );
 
     if (existingUser.length > 0) {
-      if (Number(existingUser[0].role_id) !== 3) {
-        return res.status(403).json({
-          error: "Registration Error",
-          message:
-            "This email belongs to a staff account. Please continue using login or Google sign-in.",
-        });
-      }
-
       if (!Number(existingUser[0].email_verified)) {
         return res.status(409).json({
           error: "Verification Error",
@@ -139,7 +201,7 @@ const register = async (req, res, next) => {
       return res.status(409).json({
         error: "Registration Error",
         message:
-          "Email already exists. Please login with password or Continue with Google. Your account role will be kept unchanged.",
+          "Email already exists. Please login with password or Continue with Google.",
       });
     }
 
@@ -151,13 +213,15 @@ const register = async (req, res, next) => {
     const firstName = nameParts[0];
     const lastName = nameParts.slice(1).join(" ") || nameParts[0];
 
+    const effectiveId = student_id || employee_id || staff_id || (assignedRole === 'staff' ? `STAFF-${Date.now().toString().slice(-4)}` : null);
+
     const result = await query(
       `INSERT INTO users (email, password, first_name, last_name, role_id, student_id, phone, status, email_verified)
-       VALUES (?, ?, ?, ?, 3, ?, ?, 'active', 0)`,
-      [email, passwordHash, firstName, lastName, student_id, phone || null],
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 0)`,
+      [email, passwordHash, firstName, lastName, targetRoleId, effectiveId, phone || null],
     );
     createdUserId = result.insertId;
-    console.log("🔷 User created with ID:", createdUserId);
+    console.log("🔷 User created with ID:", createdUserId, "Role:", assignedRole);
 
     await sendEmailVerificationOtp({ userId: createdUserId, email, firstName });
 
@@ -165,7 +229,7 @@ const register = async (req, res, next) => {
       message: "Registration successful. OTP sent to email.",
       requires_verification: true,
       email,
-      role: "student",
+      role: assignedRole,
     });
   } catch (error) {
     console.error("🔴 Registration error:", error);
@@ -219,6 +283,10 @@ const login = async (req, res, next) => {
           u.first_name,
           u.last_name,
           u.role_id,
+          u.profile_image_url,
+          u.degree_type,
+          u.department,
+          u.academic_year,
           COALESCE(
             r.role_name,
             CASE u.role_id
@@ -229,8 +297,8 @@ const login = async (req, res, next) => {
             END
           ) AS role_name,
           u.student_id,
-           u.status,
-           COALESCE(u.email_verified, 0) AS email_verified
+          u.status,
+          COALESCE(u.email_verified, 0) AS email_verified
        FROM users u
        LEFT JOIN user_roles r ON u.role_id = r.id
        WHERE u.email = ?`,
@@ -253,7 +321,7 @@ const login = async (req, res, next) => {
 
     const user = users[0];
     console.log("🔷 User found:", {
-      email: user.email,
+      email,
       status: user.status,
       role: user.role_name,
       hasPassword: !!user.password,
@@ -291,11 +359,28 @@ const login = async (req, res, next) => {
     req.session.regenerate((sessionErr) => {
       if (sessionErr) return next(sessionErr);
 
+      const isDirectResearchEligible = hasDirectResearchAccess(user);
+
+      const isStudentRole = ['student', 'me_student', 'research_scholar'].includes(
+        String(user.role_name || user.role || '').toLowerCase()
+      );
+      const degreeType = isStudentRole ? (user.degree_type || 'BE') : null;
+      const academicYear = isStudentRole ? (user.academic_year || '3rd Year') : null;
+      const department = user.department || (isStudentRole ? 'CSE' : (user.role_name === 'admin' ? 'Administration' : 'Library'));
+
       req.session.user = {
         id: user.id,
         email: user.email,
         role: user.role_name,
         role_id: user.role_id,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        student_id: user.student_id,
+        degree_type: degreeType,
+        department: department,
+        academic_year: academicYear,
+        is_direct_research_eligible: isDirectResearchEligible,
+        profile_image_url: user.profile_image_url || null,
         email_verified: Number(user.email_verified) === 1,
       };
 
@@ -303,8 +388,10 @@ const login = async (req, res, next) => {
         if (saveErr) return next(saveErr);
 
         console.log("🔷 Session created for:", email);
+        const token = generateAuthToken(user);
         res.json({
           message: "Login successful",
+          token,
           user: {
             id: user.id,
             name: `${user.first_name} ${user.last_name}`,
@@ -313,7 +400,13 @@ const login = async (req, res, next) => {
             email: user.email,
             role: user.role_name,
             student_id: user.student_id,
+            degree_type: degreeType,
+            department: department,
+            academic_year: academicYear,
+            is_direct_research_eligible: isDirectResearchEligible,
+            profile_image_url: user.profile_image_url || null,
             email_verified: Number(user.email_verified) === 1,
+            token,
           },
         });
       });
@@ -364,6 +457,9 @@ const googleLogin = async (req, res, next) => {
           u.first_name,
           u.last_name,
           u.role_id,
+          u.degree_type,
+          u.department,
+          u.academic_year,
           COALESCE(
             r.role_name,
             CASE u.role_id
@@ -389,9 +485,9 @@ const googleLogin = async (req, res, next) => {
       const passwordHash = await bcrypt.hash(randomPassword, 10);
 
       const insertResult = await query(
-        `INSERT INTO users (email, password, first_name, last_name, role_id, status, email_verified, email_verified_at)
-         VALUES (?, ?, ?, ?, ?, 'active', 1, CURRENT_TIMESTAMP)`,
-        [email, passwordHash, givenName, familyName, 3],
+        `INSERT INTO users (email, password, first_name, last_name, role_id, degree_type, department, academic_year, status, email_verified, email_verified_at)
+         VALUES (?, ?, ?, ?, 3, 'BE', 'CSE', '3rd Year', 'active', 1, CURRENT_TIMESTAMP)`,
+        [email, passwordHash, givenName, familyName],
       );
 
       const createdUsers = await query(
@@ -401,6 +497,9 @@ const googleLogin = async (req, res, next) => {
             u.first_name,
             u.last_name,
             u.role_id,
+            u.degree_type,
+            u.department,
+            u.academic_year,
             COALESCE(
               r.role_name,
               CASE u.role_id
@@ -438,19 +537,37 @@ const googleLogin = async (req, res, next) => {
     req.session.regenerate((sessionErr) => {
       if (sessionErr) return next(sessionErr);
 
+      const isDirectResearchEligible = hasDirectResearchAccess(user);
+
+      const isStudentRole = ['student', 'me_student', 'research_scholar'].includes(
+        String(user.role_name || user.role || '').toLowerCase()
+      );
+      const degreeType = isStudentRole ? (user.degree_type || 'BE') : null;
+      const academicYear = isStudentRole ? (user.academic_year || '3rd Year') : null;
+      const department = user.department || (isStudentRole ? 'CSE' : (user.role_name === 'admin' ? 'Administration' : 'Library'));
+
       req.session.user = {
         id: user.id,
         email: user.email,
         role: user.role_name,
         role_id: user.role_id,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        student_id: user.student_id,
+        degree_type: degreeType,
+        department: department,
+        academic_year: academicYear,
+        is_direct_research_eligible: isDirectResearchEligible,
         email_verified: true,
       };
 
       req.session.save((saveErr) => {
         if (saveErr) return next(saveErr);
 
+        const token = generateAuthToken(user);
         res.json({
           message: "Google login successful",
+          token,
           user: {
             id: user.id,
             name: `${user.first_name} ${user.last_name}`,
@@ -459,7 +576,12 @@ const googleLogin = async (req, res, next) => {
             email: user.email,
             role: user.role_name,
             student_id: user.student_id,
+            degree_type: degreeType,
+            department: department,
+            academic_year: academicYear,
+            is_direct_research_eligible: isDirectResearchEligible,
             email_verified: true,
+            token,
           },
         });
       });
@@ -504,7 +626,17 @@ const me = (req, res) => {
         reason: "email_not_verified",
       });
     }
-    return res.json({ authenticated: true, user: req.session.user });
+    const isStudentRole = ['student', 'me_student', 'research_scholar'].includes(
+      String(req.session.user.role || req.session.user.role_name || '').toLowerCase()
+    );
+    const sessionUser = {
+      ...req.session.user,
+      degree_type: isStudentRole ? (req.session.user.degree_type || 'BE') : null,
+      department: req.session.user.department || (isStudentRole ? 'CSE' : (req.session.user.role === 'admin' ? 'Administration' : 'Library')),
+      academic_year: isStudentRole ? (req.session.user.academic_year || '3rd Year') : null,
+      is_direct_research_eligible: hasDirectResearchAccess(req.session.user),
+    };
+    return res.json({ authenticated: true, user: sessionUser });
   }
   return res.json({ authenticated: false, user: null, reason: "no_active_session" });
 };
@@ -517,160 +649,106 @@ const me = (req, res) => {
  * Query param: return_url  — where to send the user after login (optional).
  *   e.g. http://localhost:5173/dashboard  (saved in OAuth state)
  */
-const googleOAuthStart = (req, res) => {
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-    return res
-      .status(500)
-      .send(
-        "Google OAuth is not configured (missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET).",
-      );
+const googleOAuthStart = (req, res, next) => {
+  ensureAuthVerificationSchema().catch((e) => console.error("Schema setup error:", e));
+
+  const clientID = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+  if (!clientID || !clientSecret || clientID === "your_google_client_id") {
+    let loginPageUrl = "http://localhost:5173/login";
+    try {
+      if (req.query.return_url) {
+        loginPageUrl = new URL(req.query.return_url).origin + "/login";
+      }
+    } catch {
+      /* fallback */
+    }
+    return res.redirect(
+      `${loginPageUrl}?google_error=${encodeURIComponent("Google OAuth is not configured on server (missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in .env)")}`,
+    );
   }
 
-  const redirectUri = getGoogleRedirectUri(req);
-  const client = new OAuth2Client(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    redirectUri,
-  );
+  const returnUrl = req.query.return_url || `${req.protocol}://${req.get("host")}/dashboard`;
+  const state = Buffer.from(JSON.stringify({ returnUrl })).toString("base64url");
 
-  // Store return_url in the state param so the callback can redirect back to the right origin.
-  const state = Buffer.from(
-    JSON.stringify({
-      returnUrl:
-        req.query.return_url ||
-        `${req.protocol}://localhost:${process.env.PORT || 3000}/`,
-    }),
-  ).toString("base64url");
-
-  const authUrl = client.generateAuthUrl({
-    access_type: "offline",
-    scope: ["openid", "email", "profile"],
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
     state,
     prompt: "select_account",
-  });
-
-  res.redirect(authUrl);
+  })(req, res, next);
 };
 
 /**
- * Step 2 of OAuth redirect flow: Google sends the browser here with ?code=...&state=...
- * Exchange the code for tokens, find/create the user, set session, redirect to app.
+ * Step 2 of OAuth redirect flow: Google sends browser here with ?code=...&state=...
+ * Passport authenticates code, finds/creates user, sets session, and redirects to frontend app.
  */
 const googleOAuthCallback = async (req, res, next) => {
-  const { code, state, error: oauthError } = req.query;
+  const { state, error: oauthError } = req.query;
 
-  // Default fallback URL
-  const defaultReturn = `${req.protocol}://localhost:${process.env.PORT || 3000}/`;
-  let returnUrl = defaultReturn;
-  let loginPageUrl = defaultReturn;
+  let returnUrl = `http://localhost:5173/dashboard`;
+  let loginPageUrl = `http://localhost:5173/login`;
 
   try {
     if (state) {
       const stateData = JSON.parse(Buffer.from(state, "base64url").toString());
-      returnUrl = stateData.returnUrl || defaultReturn;
-      // Login page = same origin as returnUrl but at root path
-      loginPageUrl = new URL(returnUrl).origin + "/";
+      if (stateData.returnUrl) {
+        returnUrl = stateData.returnUrl;
+        loginPageUrl = new URL(returnUrl).origin + "/login";
+      }
     }
   } catch {
     /* keep default */
   }
 
-  if (oauthError || !code) {
-    console.error("🔴 Google OAuth error:", oauthError);
+  if (oauthError) {
+    console.error("🔴 Google OAuth error parameter:", oauthError);
     return res.redirect(
-      `${loginPageUrl}?google_error=${encodeURIComponent(oauthError || "cancelled")}`,
+      `${loginPageUrl}?google_error=${encodeURIComponent(oauthError === "access_denied" ? "Google sign-in was cancelled." : oauthError)}`,
     );
   }
 
-  try {
-    await ensureAuthVerificationSchema();
-    const redirectUri = getGoogleRedirectUri(req);
-    const client = new OAuth2Client(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      redirectUri,
-    );
-
-    const { tokens } = await client.getToken(code);
-    client.setCredentials(tokens);
-
-    // Verify the ID token to get user info
-    const ticket = await client.verifyIdToken({
-      idToken: tokens.id_token,
-      audience: process.env.GOOGLE_CLIENT_ID,
-    });
-
-    const payload = ticket.getPayload();
-    const email = payload?.email;
-    const emailVerified = payload?.email_verified;
-    const givenName = payload?.given_name || "Google";
-    const familyName = payload?.family_name || "User";
-
-    if (!email || !emailVerified) {
-      return res.redirect(`${loginPageUrl}?google_error=unverified_email`);
+  passport.authenticate("google", { session: false }, async (err, user, info) => {
+    if (err || !user) {
+      const errorMessage = info?.message || err?.message || "Google authentication failed";
+      console.error("🔴 Passport Google authentication failed:", errorMessage);
+      return res.redirect(`${loginPageUrl}?google_error=${encodeURIComponent(errorMessage)}`);
     }
 
-    // Find or create user (same logic as googleLogin)
-    const users = await query(
-      `SELECT u.id, u.email, u.first_name, u.last_name, u.role_id,
-              COALESCE(r.role_name, CASE u.role_id WHEN 1 THEN 'admin' WHEN 2 THEN 'librarian' WHEN 4 THEN 'staff' WHEN 5 THEN 'staff' WHEN 6 THEN 'staff' ELSE 'student' END) AS role_name,
-              u.student_id, u.status, COALESCE(u.email_verified, 0) AS email_verified
-       FROM users u LEFT JOIN user_roles r ON u.role_id = r.id
-       WHERE u.email = ?`,
-      [email],
-    );
+    try {
+      await ensureAuthVerificationSchema();
+      req.session.regenerate((sessionErr) => {
+        if (sessionErr) return next(sessionErr);
 
-    let user = users[0];
+        const isDirectResearchEligible = hasDirectResearchAccess(user);
 
-    if (!user) {
-      const randomPassword = crypto.randomBytes(32).toString("hex");
-      const passwordHash = await bcrypt.hash(randomPassword, 10);
-      const insertResult = await query(
-        `INSERT INTO users (email, password, first_name, last_name, role_id, status, email_verified, email_verified_at) VALUES (?, ?, ?, ?, ?, 'active', 1, CURRENT_TIMESTAMP)`,
-        [email, passwordHash, givenName, familyName, 3],
-      );
-      const created = await query(
-        `SELECT u.id, u.email, u.first_name, u.last_name, u.role_id,
-                COALESCE(r.role_name, CASE u.role_id WHEN 4 THEN 'staff' WHEN 5 THEN 'staff' WHEN 6 THEN 'staff' ELSE 'student' END) AS role_name, u.student_id, u.status,
-                COALESCE(u.email_verified, 0) AS email_verified
-         FROM users u LEFT JOIN user_roles r ON u.role_id = r.id WHERE u.id = ?`,
-        [insertResult.insertId],
-      );
-      user = created[0];
-    } else {
-      await query(
-        `UPDATE users SET email_verified = 1, email_verified_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        [user.id],
-      );
-    }
-
-    if (user.status !== "active") {
-      return res.redirect(`${loginPageUrl}?google_error=account_suspended`);
-    }
-
-    // Set session
-    await new Promise((resolve, reject) => {
-      req.session.regenerate((err) => {
-        if (err) return reject(err);
         req.session.user = {
           id: user.id,
           email: user.email,
           role: user.role_name,
           role_id: user.role_id,
+          first_name: user.first_name,
+          last_name: user.last_name,
+          student_id: user.student_id,
+          degree_type: user.degree_type || 'BE',
+          department: user.department || 'CSE',
+          academic_year: user.academic_year || '3rd Year',
+          is_direct_research_eligible: isDirectResearchEligible,
+          profile_image_url: user.profile_image_url,
           email_verified: true,
         };
-        req.session.save((saveErr) => (saveErr ? reject(saveErr) : resolve()));
-      });
-    });
 
-    console.log(
-      `✅ Google OAuth login: ${email} → redirecting to ${returnUrl}`,
-    );
-    res.redirect(returnUrl);
-  } catch (error) {
-    console.error("🔴 Google OAuth callback error:", error);
-    return res.redirect(`${loginPageUrl}?google_error=server_error`);
-  }
+        req.session.save((saveErr) => {
+          if (saveErr) return next(saveErr);
+          console.log(`✅ Google OAuth login successful for ${user.email} -> Redirecting to ${returnUrl}`);
+          res.redirect(returnUrl);
+        });
+      });
+    } catch (sessionError) {
+      console.error("🔴 Session creation error:", sessionError);
+      return res.redirect(`${loginPageUrl}?google_error=session_error`);
+    }
+  })(req, res, next);
 };
 
 const verifyOtp = async (req, res, next) => {
@@ -680,6 +758,7 @@ const verifyOtp = async (req, res, next) => {
 
     const users = await query(
       `SELECT u.id, u.email, u.first_name, u.last_name, u.role_id, u.student_id,
+              u.degree_type, u.department, u.academic_year,
               COALESCE(r.role_name, CASE u.role_id WHEN 1 THEN 'admin' WHEN 2 THEN 'librarian' WHEN 4 THEN 'staff' WHEN 5 THEN 'staff' WHEN 6 THEN 'staff' ELSE 'student' END) AS role_name,
               COALESCE(u.email_verified, 0) AS email_verified
        FROM users u
@@ -696,6 +775,7 @@ const verifyOtp = async (req, res, next) => {
     }
 
     const user = users[0];
+    const isDirectResearchEligible = hasDirectResearchAccess(user);
 
     if (Number(user.email_verified) === 1) {
       return res.json({
@@ -708,6 +788,10 @@ const verifyOtp = async (req, res, next) => {
           email: user.email,
           role: user.role_name,
           student_id: user.student_id,
+          degree_type: user.degree_type || 'BE',
+          department: user.department || 'CSE',
+          academic_year: user.academic_year || '3rd Year',
+          is_direct_research_eligible: isDirectResearchEligible,
           email_verified: true,
         },
       });
@@ -764,14 +848,23 @@ const verifyOtp = async (req, res, next) => {
         email: user.email,
         role: user.role_name,
         role_id: user.role_id,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        student_id: user.student_id,
+        degree_type: user.degree_type || 'BE',
+        department: user.department || 'CSE',
+        academic_year: user.academic_year || '3rd Year',
+        is_direct_research_eligible: isDirectResearchEligible,
         email_verified: true,
       };
 
       req.session.save((saveErr) => {
         if (saveErr) return next(saveErr);
 
+        const token = generateAuthToken(user);
         res.json({
           message: "Email verified successfully",
+          token,
           user: {
             id: user.id,
             name: `${user.first_name} ${user.last_name}`,
@@ -780,7 +873,12 @@ const verifyOtp = async (req, res, next) => {
             email: user.email,
             role: user.role_name,
             student_id: user.student_id,
+            degree_type: user.degree_type || 'BE',
+            department: user.department || 'CSE',
+            academic_year: user.academic_year || '3rd Year',
+            is_direct_research_eligible: isDirectResearchEligible,
             email_verified: true,
+            token,
           },
         });
       });

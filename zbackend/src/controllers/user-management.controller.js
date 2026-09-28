@@ -9,7 +9,11 @@ const bcrypt = require('bcrypt');
 
 const normalizeRoleName = (roleName, roleId) => {
     const normalized = String(roleName || '').toLowerCase();
-    if (['faculty', 'teacher', 'staff'].includes(normalized) || [4, 5, 6].includes(Number(roleId))) {
+    if (normalized === 'admin' || roleId === 1) return 'admin';
+    if (normalized === 'librarian' || roleId === 2) return 'librarian';
+    if (normalized === 'me_student' || roleId === 5) return 'me_student';
+    if (normalized === 'research_scholar' || roleId === 6) return 'research_scholar';
+    if (['faculty', 'teacher', 'staff'].includes(normalized) || Number(roleId) === 4) {
         return 'staff';
     }
     return normalized || 'student';

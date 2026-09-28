@@ -26,7 +26,6 @@ import {
   fineService,
   reservationService,
   transactionService,
-  feedbackService,
 } from "../services";
 
 const AnalyticsSections = lazy(
@@ -65,6 +64,7 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const roleName =
     typeof user?.role === "string" ? user.role : user?.role?.role_name;
+  const isStudent = (roleName || "").toLowerCase() === "student";
   const canManageCirculation = ["admin", "librarian"].includes(
     (roleName || "").toLowerCase(),
   );
@@ -82,6 +82,7 @@ const Dashboard = () => {
     from: null,
     to: null,
   });
+  const [studentData, setStudentData] = useState(null);
   const [dashboardStats, setDashboardStats] = useState(null);
   const [libraryStatus, setLibraryStatus] = useState(null);
   const [bookAnalytics, setBookAnalytics] = useState(null);
@@ -91,8 +92,6 @@ const Dashboard = () => {
   const [reservationStats, setReservationStats] = useState(null);
   const [topPendingFines, setTopPendingFines] = useState([]);
   const [readyReservations, setReadyReservations] = useState([]);
-  const [dueSoonTransactions, setDueSoonTransactions] = useState([]);
-  const [purchaseSuggestions, setPurchaseSuggestions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -108,11 +107,17 @@ const Dashboard = () => {
 
   useEffect(() => {
     loadDashboardData();
-  }, [effectivePeriod, user?.id]);
+  }, [effectivePeriod, user?.id, isStudent]);
 
   const loadDashboardData = async () => {
     setLoading(true);
     try {
+      if (isStudent && user?.id) {
+        const sData = await dashboardService.getStudentStats(user.id);
+        setStudentData(sData);
+        return;
+      }
+
       const [statsData, statusData, analyticsData, insightsData, txData, fineData, reservationData, pendingFinesData, readyReservationsData] = await Promise.all([
         dashboardService.getStats({ period: effectivePeriod }).catch(() => null),
         dashboardService.getStatus().catch(() => null),
@@ -136,26 +141,6 @@ const Dashboard = () => {
       setReadyReservations(
         readyReservationsData?.reservations || readyReservationsData?.data || [],
       );
-
-      if (!canManageCirculation && user?.id) {
-        const personalTransactions = await transactionService
-          .getUserCheckouts(user.id)
-          .catch(() => ({ transactions: [] }));
-        const activeTransactions = personalTransactions?.transactions || personalTransactions?.data || [];
-        setDueSoonTransactions(
-          activeTransactions.filter((transaction) => {
-            if (!transaction.due_date) return false;
-            const daysUntilDue = differenceInCalendarDays(new Date(transaction.due_date), new Date());
-            return daysUntilDue >= 0 && daysUntilDue <= 7;
-          }),
-        );
-      } else {
-        setDueSoonTransactions([]);
-      }
-      if (canManageCirculation) {
-        const suggestions = await feedbackService.getPurchaseSuggestions().catch(() => ({ suggestions: [] }));
-        setPurchaseSuggestions(suggestions.suggestions || []);
-      }
     } catch (error) {
       console.error("Failed to load dashboard data:", error);
     } finally {
@@ -167,11 +152,6 @@ const Dashboard = () => {
   const handleRefresh = async () => {
     setRefreshing(true);
     await loadDashboardData();
-  };
-
-  const updatePurchaseSuggestion = async (id, status) => {
-    await feedbackService.updatePurchaseSuggestion(id, { status });
-    setPurchaseSuggestions((items) => items.map((item) => item.id === id ? { ...item, status } : item));
   };
 
   const applyFilters = () => {
@@ -261,6 +241,58 @@ const Dashboard = () => {
       },
     ];
   }, [dashboardStats, libraryStatus, transactionStats]);
+
+  const studentStatCards = useMemo(() => {
+    if (!studentData) return [];
+    const counts = studentData.summary_counts || {};
+    return [
+      {
+        icon: BookOpen,
+        label: "My Borrowed Books",
+        value: counts.borrowed_count || 0,
+        color: "bg-indigo-50 text-indigo-700",
+      },
+      {
+        icon: counts.overdue_count > 0 ? AlertTriangle : Clock,
+        label: "Due Soon / Overdue",
+        value:
+          counts.overdue_count > 0
+            ? `${counts.overdue_count} Overdue`
+            : `${counts.due_soon_count || 0} Due Soon`,
+        color:
+          counts.overdue_count > 0
+            ? "bg-rose-50 text-rose-700"
+            : "bg-orange-50 text-orange-700",
+      },
+      {
+        icon: Bookmark,
+        label: "Active Reservations",
+        value: counts.active_reservations_count || 0,
+        color: "bg-amber-50 text-amber-700",
+      },
+      {
+        icon: Scan,
+        label: "Ready for Pickup",
+        value: counts.ready_reservations_count || 0,
+        color: "bg-emerald-50 text-emerald-700",
+      },
+      {
+        icon: IndianRupee,
+        label: "My Pending Fines",
+        value: `₹${Number(counts.total_pending_fines || 0).toFixed(2)}`,
+        color:
+          counts.total_pending_fines > 0
+            ? "bg-rose-50 text-rose-700"
+            : "bg-emerald-50 text-emerald-700",
+      },
+      {
+        icon: Users,
+        label: "Library Occupancy",
+        value: Number(counts.current_occupancy || 0),
+        color: "bg-blue-50 text-blue-700",
+      },
+    ];
+  }, [studentData]);
 
   const todayCards = useMemo(() => {
     const today = dashboardStats?.today_metrics || {};
@@ -404,6 +436,326 @@ const Dashboard = () => {
     );
   }
 
+  if (isStudent) {
+    return (
+      <div className="space-y-6">
+        <div className="card bg-gradient-to-r from-primary-500 via-primary-600 to-primary-700 text-white border-0 shadow-lg">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold mb-2 tracking-tight">
+                Welcome back, {user?.first_name || user?.name || "Student"}!
+              </h1>
+              <p className="text-primary-100 text-sm md:text-base">
+                Personal library overview for your borrowed books, upcoming due dates, reservations, and reading activity.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleRefresh}
+                className="btn bg-white text-primary-700 hover:bg-primary-50"
+                disabled={refreshing}
+              >
+                <RefreshCw
+                  size={16}
+                  className={`mr-2 ${refreshing ? "animate-spin" : ""}`}
+                />
+                Refresh
+              </button>
+            </div>
+          </div>
+          <div className="mt-4 pt-3 border-t border-white/20 flex flex-wrap items-center gap-2.5 text-xs">
+            <span className="bg-white/20 backdrop-blur-xs px-2.5 py-1 rounded-full font-medium">
+              ID: <strong className="font-mono">{user?.student_id || user?.studentId || "N/A"}</strong>
+            </span>
+            <span className="bg-white/20 backdrop-blur-xs px-2.5 py-1 rounded-full font-medium">
+              Program: <strong>{user?.degree_type || "BE"} - {user?.department || "CSE"}</strong>
+            </span>
+            <span className="bg-white/20 backdrop-blur-xs px-2.5 py-1 rounded-full font-medium">
+              Year: <strong>{user?.academic_year || "3rd Year"}</strong>
+            </span>
+            {['me', 'm.tech', 'phd', 'research scholar'].includes(String(user?.degree_type || '').toLowerCase()) ? (
+              <span className="bg-emerald-400 text-emerald-950 font-bold px-2.5 py-1 rounded-full shadow-xs">
+                Eligible for Direct Research Access (ME Student)
+              </span>
+            ) : (
+              <span className="bg-white/15 text-white font-medium px-2.5 py-1 rounded-full">
+                UG Student • Approval Workflow Active
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold tracking-tight text-slate-900">My Library Overview</h2>
+          <span className="text-xs text-slate-500">Live student status</span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {studentStatCards.map((card) => (
+            <StatCard
+              key={card.label}
+              icon={card.icon}
+              label={card.label}
+              value={card.value}
+              color={card.color}
+            />
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="card xl:col-span-2">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <BookOpen className="text-primary-600" size={20} />
+                <h2 className="text-xl font-bold tracking-tight">My Borrowed Books & Due Dates</h2>
+              </div>
+              <button
+                type="button"
+                className="text-primary-700 text-sm font-medium hover:underline"
+                onClick={() => navigate("/transactions")}
+              >
+                View all
+              </button>
+            </div>
+
+            {studentData?.checkouts?.length ? (
+              <div className="space-y-3">
+                {studentData.checkouts.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between"
+                  >
+                    <div className="min-w-0 pr-3">
+                      <p className="font-semibold text-slate-900 truncate">{item.title}</p>
+                      <p className="text-xs text-slate-500 truncate">
+                        {item.author} {item.isbn ? `| ISBN: ${item.isbn}` : ""}
+                      </p>
+                      <p className="text-xs text-slate-600 mt-1">
+                        Borrowed: {item.checkout_date ? format(new Date(item.checkout_date), "MMM dd, yyyy") : "N/A"} • Due: {item.due_date ? format(new Date(item.due_date), "MMM dd, yyyy") : "N/A"}
+                      </p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      {item.checkout_status === "overdue" ? (
+                        <span className="text-xs font-bold rounded-full bg-rose-100 text-rose-700 px-2.5 py-1">
+                          Overdue by {Math.abs(item.days_until_due)}d
+                        </span>
+                      ) : item.checkout_status === "due_today" ? (
+                        <span className="text-xs font-bold rounded-full bg-amber-100 text-amber-700 px-2.5 py-1">
+                          Due Today
+                        </span>
+                      ) : (
+                        <span className="text-xs font-medium rounded-full bg-emerald-100 text-emerald-700 px-2.5 py-1">
+                          {item.days_until_due} days left
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-slate-500 text-center py-8">
+                No books currently checked out. Search the collection to borrow a book!
+              </p>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Bookmark className="text-primary-600" size={20} />
+                <h2 className="text-xl font-bold tracking-tight">My Reservations</h2>
+              </div>
+              <button
+                type="button"
+                className="text-primary-700 text-sm font-medium hover:underline"
+                onClick={() => navigate("/reservations")}
+              >
+                View all
+              </button>
+            </div>
+
+            {studentData?.reservations?.length ? (
+              <div className="space-y-3">
+                {studentData.reservations.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-xl border border-slate-200 bg-slate-50 p-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-900 truncate pr-2">
+                        {item.title}
+                      </p>
+                      <span
+                        className={`text-xs rounded-full px-2 py-1 font-semibold ${
+                          item.status === "ready"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-amber-100 text-amber-700"
+                        }`}
+                      >
+                        {item.status === "ready" ? "READY FOR PICKUP" : `QUEUE #${item.queue_position || 1}`}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1 truncate">{item.author}</p>
+                    {item.expiry_date && item.status === "ready" && (
+                      <p className="text-xs text-rose-600 mt-1">
+                        Pickup before: {format(new Date(item.expiry_date), "MMM dd, yyyy")}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-slate-500 text-center py-8">No active reservations</p>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="card">
+            <div className="flex items-center gap-2 mb-4">
+              <Activity className="text-primary-600" size={20} />
+              <h2 className="text-xl font-bold tracking-tight">My Recent Activity</h2>
+            </div>
+
+            {studentData?.recent_activity?.length ? (
+              <div className="space-y-3">
+                {studentData.recent_activity.slice(0, 6).map((activity, index) => (
+                  <div
+                    key={`${activity.activity_type}-${index}`}
+                    className="p-3 bg-slate-50 border border-slate-100 rounded-xl"
+                  >
+                    <p className="font-medium capitalize text-slate-800">
+                      {activity.activity_type} - {activity.description}
+                    </p>
+                    {activity.book_title && (
+                      <p className="text-sm text-slate-600 truncate">{activity.book_title}</p>
+                    )}
+                    <p className="text-xs text-slate-500 mt-1">
+                      {formatDateTime(activity.activity_time)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-slate-500 text-center py-8">No recent activity recorded</p>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold tracking-tight">Popular Books in Library</h2>
+              <button
+                type="button"
+                className="text-primary-700 text-sm font-medium hover:underline"
+                onClick={() => navigate("/books")}
+              >
+                View all
+              </button>
+            </div>
+
+            {studentData?.popular_books?.length ? (
+              <div className="space-y-2">
+                {studentData.popular_books.slice(0, 6).map((book) => (
+                  <div
+                    key={book.id}
+                    className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-slate-900 truncate">{book.title}</p>
+                      <p className="text-xs text-slate-500 truncate">{book.author}</p>
+                    </div>
+                    <span className="text-xs bg-primary-100 text-primary-700 rounded-full px-2 py-1">
+                      {book.total_demand || 0} demand
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-slate-500 text-center py-8">No books currently listed</p>
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <h2 className="text-xl font-bold tracking-tight mb-4">Quick Actions</h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <button
+              className="btn btn-primary py-4"
+              onClick={() => navigate("/book-search")}
+            >
+              <BookOpen size={20} className="inline mb-1" />
+              <br />
+              Search Books
+            </button>
+            <button
+              className="btn btn-secondary py-4"
+              onClick={() => navigate("/transactions")}
+            >
+              <RefreshCw size={20} className="inline mb-1" />
+              <br />
+              My Checkouts
+            </button>
+            <button
+              className="btn btn-secondary py-4"
+              onClick={() => navigate("/fines")}
+            >
+              <IndianRupee size={20} className="inline mb-1" />
+              <br />
+              My Fines
+            </button>
+            <button
+              className="btn btn-secondary py-4"
+              onClick={() => navigate("/reservations")}
+            >
+              <Bookmark size={20} className="inline mb-1" />
+              <br />
+              Reservations
+            </button>
+            <button
+              className="btn btn-secondary py-4"
+              onClick={() => navigate("/rfid")}
+            >
+              <Scan size={20} className="inline mb-1" />
+              <br />
+              Scan RFID
+            </button>
+            <button
+              className="btn btn-secondary py-4"
+              onClick={() => navigate("/navigation")}
+            >
+              <ArrowRight size={20} className="inline mb-1" />
+              <br />
+              Navigate
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="card">
+            <h3 className="text-base font-semibold mb-1">Borrowing Status</h3>
+            <p className="text-sm text-slate-600">
+              Active: {studentData?.summary_counts?.borrowed_count || 0} books | Overdue: {studentData?.summary_counts?.overdue_count || 0}
+            </p>
+          </div>
+          <div className="card">
+            <h3 className="text-base font-semibold mb-1">Fines Status</h3>
+            <p className="text-sm text-slate-600">
+              Pending: ₹{Number(studentData?.summary_counts?.total_pending_fines || 0).toFixed(2)} | Paid: ₹{Number(studentData?.summary_counts?.total_fines_paid || 0).toFixed(2)}
+            </p>
+          </div>
+          <div className="card">
+            <h3 className="text-base font-semibold mb-1">Reservations Status</h3>
+            <p className="text-sm text-slate-600">
+              Active: {studentData?.summary_counts?.active_reservations_count || 0} | Ready: {studentData?.summary_counts?.ready_reservations_count || 0}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="card bg-gradient-to-r from-primary-500 via-primary-600 to-primary-700 text-white border-0 shadow-lg">
@@ -485,30 +837,6 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {!canManageCirculation && dueSoonTransactions.length > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
-          <div className="flex items-start gap-3">
-            <Clock className="mt-0.5 shrink-0 text-amber-600" size={20} />
-            <div>
-              <h2 className="font-semibold">Books due soon</h2>
-              <p className="mt-1 text-sm text-amber-800">
-                Please return the following book{dueSoonTransactions.length === 1 ? '' : 's'} within the next 7 days.
-              </p>
-              <ul className="mt-2 space-y-1 text-sm">
-                {dueSoonTransactions.map((transaction) => (
-                  <li key={transaction.id} className="flex flex-wrap items-center gap-x-2">
-                    <span className="font-medium">{transaction.title || `Book #${transaction.book_id}`}</span>
-                    <span className="text-amber-700">
-                      due {format(new Date(transaction.due_date), "dd MMM yyyy")}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold tracking-tight text-slate-900">Key Metrics</h2>
         <button
@@ -540,43 +868,6 @@ const Dashboard = () => {
           />
         ))}
       </div>
-
-      {canManageCirculation && (
-        <div className="card border border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-xl font-bold">Morning Briefing</h2>
-              <p className="text-sm text-slate-600">Today&apos;s circulation priorities in one view.</p>
-            </div>
-            <Clock className="text-primary-600" size={22} />
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-            <div className="rounded-lg bg-red-50 p-3"><p className="text-red-700">Overdue</p><p className="text-2xl font-bold text-red-800">{transactionStats?.overall_statistics?.overdue_books || 0}</p></div>
-            <div className="rounded-lg bg-amber-50 p-3"><p className="text-amber-700">Due today</p><p className="text-2xl font-bold text-amber-800">{transactionStats?.overall_statistics?.due_today || 0}</p></div>
-            <div className="rounded-lg bg-rose-50 p-3"><p className="text-rose-700">Pending fines</p><p className="text-2xl font-bold text-rose-800">{fineStats?.overall_statistics?.pending_count || 0}</p></div>
-            <div className="rounded-lg bg-emerald-50 p-3"><p className="text-emerald-700">Ready reservations</p><p className="text-2xl font-bold text-emerald-800">{reservationStats?.overall_statistics?.ready_reservations || 0}</p></div>
-          </div>
-        </div>
-      )}
-
-      {canManageCirculation && (
-        <div className="card border border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold">Purchase Suggestions</h2>
-            <span className="text-sm text-slate-500">{purchaseSuggestions.filter((item) => item.status === "pending").length} pending</span>
-          </div>
-          {purchaseSuggestions.length ? (
-            <div className="space-y-2">
-              {purchaseSuggestions.map((item) => (
-                <div key={item.id} className="border rounded-lg p-3 flex flex-wrap items-center justify-between gap-3">
-                  <div><p className="font-medium">{item.title}</p><p className="text-sm text-slate-600">{item.author || "Unknown author"} · {item.department || "General"}</p><p className="text-xs text-slate-500">{item.justification || "No justification provided"}</p></div>
-                  {item.status === "pending" ? <div className="flex gap-2"><button type="button" className="btn btn-primary py-1 px-2 text-xs" onClick={() => updatePurchaseSuggestion(item.id, "approved")}>Approve</button><button type="button" className="btn btn-secondary py-1 px-2 text-xs" onClick={() => updatePurchaseSuggestion(item.id, "rejected")}>Reject</button></div> : <span className="badge badge-info capitalize">{item.status}</span>}
-                </div>
-              ))}
-            </div>
-          ) : <p className="text-slate-500">No purchase suggestions.</p>}
-        </div>
-      )}
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
@@ -970,16 +1261,6 @@ const Dashboard = () => {
         </div>
       )}
 
-      {!canManageCirculation && (
-        <div className="card">
-          <h2 className="text-xl font-bold tracking-tight mb-2">Student Focus View</h2>
-          <p className="text-sm text-slate-600">
-            Advanced operational queues are available for librarian and admin roles.
-            You can still access books, transactions, fines, and reservations from quick actions.
-          </p>
-        </div>
-      )}
-
       <Suspense
         fallback={
           <div className="card">
@@ -1061,7 +1342,7 @@ const Dashboard = () => {
         <div className="card">
           <h3 className="text-base font-semibold mb-1">Fine Metrics</h3>
           <p className="text-sm text-slate-600">
-            Pending {fineStats?.overall_statistics?.pending_count || 0} | Collected ₹{Number(fineStats?.overall_statistics?.collected_amount || 0).toFixed(2)}
+            Pending {fineStats?.overall_statistics?.pending_count || 0} | Collected ${Number(fineStats?.overall_statistics?.collected_amount || 0).toFixed(2)}
           </p>
         </div>
         <div className="card">

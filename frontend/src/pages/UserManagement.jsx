@@ -4,15 +4,18 @@ import { Users, UserPlus, UserCheck, UserX, Lock, Activity, Edit } from 'lucide-
 
 const UserManagement = () => {
   const normalizeRoleId = (roleId) => {
-    return [4, 5, 6].includes(Number(roleId)) ? 4 : roleId;
+    return Number(roleId) || 3;
   };
 
   const roleOptions = [
     { value: 1, label: 'Admin' },
     { value: 2, label: 'Librarian' },
-    { value: 3, label: 'Student' },
-    { value: 4, label: 'Staff' },
+    { value: 3, label: 'UG Student' },
+    { value: 4, label: 'Staff / Faculty' },
+    { value: 5, label: 'ME Student' },
+    { value: 6, label: 'Research Scholar' },
   ];
+
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('all'); // all, active, inactive
@@ -23,12 +26,12 @@ const UserManagement = () => {
     name: '',
     email: '',
     password: '',
-    role_id: 3 // Student by default
+    role_id: 3, // UG Student by default
   });
   const [editForm, setEditForm] = useState({
     name: '',
     email: '',
-    role_id: 3
+    role_id: 3,
   });
 
   useEffect(() => {
@@ -55,7 +58,12 @@ const UserManagement = () => {
       await userManagementService.createUser(createForm);
       alert('User created successfully!');
       setShowCreateModal(false);
-      setCreateForm({ name: '', email: '', password: '', role_id: 3 });
+      setCreateForm({
+        name: '',
+        email: '',
+        password: '',
+        role_id: 3,
+      });
       loadUsers();
     } catch (error) {
       alert(`User creation failed: ${error.response?.data?.error || error.message}`);
@@ -93,9 +101,9 @@ const UserManagement = () => {
   const handleEditUser = (user) => {
     setEditingUser(user);
     setEditForm({
-      name: `${user.first_name} ${user.last_name}`,
+      name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name || '',
       email: user.email,
-      role_id: normalizeRoleId(user.role_id)
+      role_id: normalizeRoleId(user.role_id),
     });
     setShowEditModal(true);
   };
@@ -107,7 +115,11 @@ const UserManagement = () => {
       alert('User updated successfully!');
       setShowEditModal(false);
       setEditingUser(null);
-      setEditForm({ name: '', email: '', role_id: 3 });
+      setEditForm({
+        name: '',
+        email: '',
+        role_id: 3,
+      });
       loadUsers();
     } catch (error) {
       alert(`User update failed: ${error.response?.data?.error || error.message}`);
@@ -126,17 +138,24 @@ const UserManagement = () => {
       librarian: 'bg-blue-100 text-blue-700',
       student: 'bg-gray-100 text-gray-700',
       staff: 'bg-amber-100 text-amber-800',
+      me_student: 'bg-indigo-100 text-indigo-700',
+      research_scholar: 'bg-emerald-100 text-emerald-800',
     };
-    const normalizedRole = (() => {
-      const value = (roleName || '').toLowerCase();
-      if (['faculty', 'teacher', 'staff'].includes(value)) {
-        return 'staff';
-      }
-      return value;
-    })();
-    return <span className={`px-2 py-1 rounded text-xs font-semibold ${styles[normalizedRole] || 'bg-gray-100 text-gray-700'}`}>
-      {normalizedRole.toUpperCase()}
-    </span>;
+    const value = (roleName || '').toLowerCase();
+    const label = {
+      admin: 'ADMIN',
+      librarian: 'LIBRARIAN',
+      student: 'UG STUDENT',
+      staff: 'STAFF',
+      me_student: 'ME STUDENT',
+      research_scholar: 'RESEARCH SCHOLAR'
+    }[value] || value.toUpperCase();
+
+    return (
+      <span className={`px-2 py-1 rounded text-xs font-semibold ${styles[value] || 'bg-gray-100 text-gray-700'}`}>
+        {label}
+      </span>
+    );
   };
 
   return (
@@ -197,15 +216,16 @@ const UserManagement = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {users.map(user => (
-                  <tr key={user.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm">#{user.id}</td>
-                    <td className="px-4 py-3 text-sm font-medium">{user.name}</td>
-                    <td className="px-4 py-3 text-sm">{user.email}</td>
-                    <td className="px-4 py-3">{getRoleBadge(user.role_name)}</td>
-                    <td className="px-4 py-3">{getStatusBadge(user.status)}</td>
-                    <td className="px-4 py-3 text-sm">{user.created_at ? new Date(user.created_at).toLocaleDateString() : 'N/A'}</td>
-                    <td className="px-4 py-3 text-sm">
+                {users.map(user => {
+                  return (
+                    <tr key={user.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm">#{user.id}</td>
+                      <td className="px-4 py-3 text-sm font-medium">{user.name}</td>
+                      <td className="px-4 py-3 text-sm">{user.email}</td>
+                      <td className="px-4 py-3">{getRoleBadge(user.role_name)}</td>
+                      <td className="px-4 py-3">{getStatusBadge(user.status)}</td>
+                      <td className="px-4 py-3 text-sm">{user.created_at ? new Date(user.created_at).toLocaleDateString() : 'N/A'}</td>
+                      <td className="px-4 py-3 text-sm">
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleEditUser(user)}
@@ -235,7 +255,8 @@ const UserManagement = () => {
                       </div>
                     </td>
                   </tr>
-                ))}
+                );
+              })}
               </tbody>
             </table>
           </div>

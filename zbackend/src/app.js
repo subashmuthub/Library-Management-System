@@ -14,6 +14,8 @@ const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const session = require("express-session");
+const passport = require("passport");
+const { configurePassport } = require("./config/passport");
 require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
 const app = express();
@@ -102,6 +104,11 @@ app.use(
   }),
 );
 
+// Passport middleware for Google OAuth 2.0
+configurePassport();
+app.use(passport.initialize());
+app.use(passport.session());
+
 // Body parsing middleware
 const requestBodyLimit = process.env.REQUEST_BODY_LIMIT || "50mb";
 app.use(express.json({ limit: requestBodyLimit }));
@@ -165,16 +172,25 @@ app.use("/api/v1", (req, res, next) => {
     return next();
   }
 
-  const sessionUser = req.session?.user;
+  const sessionUser = req.user || req.session?.user;
   const role = String(
     sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || "",
   ).toLowerCase();
 
-  // Student exceptions: allow self-checkout and reservations.
+  // Student exceptions: allow self-checkout, reservations, fine payments, suggestions, and reviews.
   if (
-    role === "student" &&
+    (role === "student" || role === "staff") &&
     req.method === "POST" &&
-    (req.path === "/transactions/checkout" || req.path === "/books/checkout-batch" || req.path.startsWith("/reservations") || req.path.match(/^\/feedback\/books\/\d+\/reviews$/) || req.path === "/feedback/purchase-suggestions" || req.path === "/feedback/disputes")
+    (
+      req.path === "/transactions/checkout" ||
+      req.path === "/books/checkout" ||
+      /^\/books\/\d+\/checkout/.test(req.path) ||
+      req.path.startsWith("/reservations") ||
+      req.path.startsWith("/payments") ||
+      req.path.startsWith("/suggestions") ||
+      /^\/books\/\d+\/reviews/.test(req.path) ||
+      /^\/fines\/\d+\/pay/.test(req.path)
+    )
   ) {
     return next();
   }
@@ -195,16 +211,22 @@ app.use("/api/v1", (req, res, next) => {
 });
 
 app.use("/api/v1/auth", authRoutes);
+app.use("/api/auth", authRoutes);
 app.use("/auth", authRoutes);
 app.use("/api/v1/users", require("./routes/user.routes"));
+app.use("/api/users", require("./routes/user.routes"));
 app.use("/api/v1/user-management", require("./routes/user-management.routes"));
+app.use("/api/user-management", require("./routes/user-management.routes"));
 app.use("/api/v1/dashboard", require("./routes/library-dashboard.routes"));
 app.use("/api/v1/entry", require("./routes/entry.routes"));
 app.use("/api/v1/books", requireActiveEntryForStudents, require("./routes/books.routes"));
 app.use("/api/books", requireActiveEntryForStudents, require("./routes/books.routes"));
 app.use("/api/v1/transactions", require("./routes/transaction.routes"));
+app.use("/api/transactions", require("./routes/transaction.routes"));
 app.use('/api/v1/navigation', require('./routes/navigation.routes'));
 app.use('/api/v1/settings', require('./routes/settings.routes'));
+app.use('/api/v1/suggestions', require('./routes/suggestion.routes'));
+app.use('/api/suggestions', require('./routes/suggestion.routes'));
 
 // ── New modules (enhancement sprint) ────────────────────────────────────────
 app.use('/api/v1/recommendations', require('./routes/recommendation.routes'));
@@ -214,12 +236,12 @@ app.use('/api/v1/heatmap',         require('./routes/heatmap.routes'));
 app.use("/api/v1/fines", require("./routes/fine.routes"));
 app.use("/api/v1/payments", require("./routes/payment.routes"));
 app.use("/api/v1/reservations", requireActiveEntryForStudents, require("./routes/reservation.routes"));
+app.use("/api/reservations", requireActiveEntryForStudents, require("./routes/reservation.routes"));
 app.use("/api/v1/rfid", require("./routes/rfid.routes"));
 app.use("/api/v1/readers", require("./routes/reader.routes"));
 app.use("/api/v1/shelves", require("./routes/shelf.routes"));
 app.use("/api/v1/beacons", require("./routes/beacon.routes"));
 app.use("/api/v1/certificates", require("./routes/certificate.routes"));
-app.use("/api/v1/feedback", require("./routes/feedback.routes"));
 
 // 404 handler
 app.use((req, res) => {
@@ -281,7 +303,7 @@ const googleRedirectUri =
 const OverdueService = require('./services/overdue.service');
 const RecommendationService = require('./services/recommendation.service');
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log("=".repeat(60));
   console.log("  Smart Library Automation System");
   console.log("=".repeat(60));

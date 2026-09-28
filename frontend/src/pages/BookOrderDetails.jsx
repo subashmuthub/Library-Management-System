@@ -118,7 +118,7 @@ const BookOrderDetails = () => {
                       <p className="text-sm font-medium text-slate-800">{row.purchase_source}</p>
                       <p className="text-xs text-slate-600">Vendor: {row.purchase_vendor}</p>
                       <p className="text-xs text-slate-600">Invoice: {row.purchase_invoice_no}</p>
-                      <p className="text-xs text-slate-600">Price: ₹{Number(row.purchase_price || 0).toFixed(2)}</p>
+                      <p className="text-xs text-slate-600">Price: Rs {Number(row.purchase_price || 0).toFixed(2)}</p>
                     </td>
                     <td>
                       <p className="text-sm">Active Loans: <strong>{row.active_loans}</strong></p>

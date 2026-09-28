@@ -144,8 +144,13 @@ export const bookService = {
     return response.data;
   },
 
-  checkoutBatch: async (batchData) => {
-    const response = await api.post("/books/checkout-batch", batchData);
+  addReview: async (bookId, data) => {
+    const response = await api.post(`/books/${bookId}/reviews`, data);
+    return response.data;
+  },
+
+  getReviews: async (bookId) => {
+    const response = await api.get(`/books/${bookId}/reviews`);
     return response.data;
   },
 };
@@ -214,8 +219,8 @@ export const transactionService = {
     return response.data;
   },
 
-  checkoutBatch: async (batchData) => {
-    const response = await api.post("/books/checkout-batch", batchData);
+  checkoutBatch: async (checkoutData) => {
+    const response = await api.post("/books/checkout-batch", checkoutData);
     return response.data;
   },
 
@@ -259,6 +264,11 @@ export const transactionService = {
     const response = await api.get("/transactions/statistics", { params });
     return response.data;
   },
+
+  quickReturn: async (data) => {
+    const response = await api.post("/transactions/quick-return", data);
+    return response.data;
+  },
 };
 
 // Fine management endpoints
@@ -295,6 +305,11 @@ export const fineService = {
 
   getPaymentHistory: async (params) => {
     const response = await api.get("/fines/payments/history", { params });
+    return response.data;
+  },
+
+  getUserFineSummary: async (userId) => {
+    const response = await api.get(`/fines/user/${userId}/summary`);
     return response.data;
   },
 };
@@ -340,6 +355,26 @@ export const reservationService = {
     const response = await api.get("/reservations/statistics", { params });
     return response.data;
   },
+
+  requestAccess: async (data) => {
+    const response = await api.post("/reservations/request", data);
+    return response.data;
+  },
+
+  getPendingRequests: async () => {
+    const response = await api.get("/reservations/pending");
+    return response.data;
+  },
+
+  reviewRequest: async (id, data) => {
+    const response = await api.patch(`/reservations/${id}/review`, data);
+    return response.data;
+  },
+
+  getMyRequestStatus: async (bookId) => {
+    const response = await api.get(`/reservations/my-status/${bookId}`);
+    return response.data;
+  },
 };
 
 // Library dashboard endpoints
@@ -376,6 +411,11 @@ export const dashboardService = {
 
   getBookOrderDetails: async (params) => {
     const response = await api.get("/dashboard/book-order-details", { params });
+    return response.data;
+  },
+
+  getStudentStats: async (userId) => {
+    const response = await api.get(`/dashboard/student/${userId}`);
     return response.data;
   },
 };
@@ -455,41 +495,6 @@ export const recommendationService = {
   },
 };
 
-export const feedbackService = {
-  getBookReviews: async (bookId) => {
-    const response = await api.get(`/feedback/books/${bookId}/reviews`);
-    return response.data;
-  },
-  saveBookReview: async (bookId, payload) => {
-    const response = await api.post(`/feedback/books/${bookId}/reviews`, payload);
-    return response.data;
-  },
-  createPurchaseSuggestion: async (payload) => {
-    const response = await api.post('/feedback/purchase-suggestions', payload);
-    return response.data;
-  },
-  getPurchaseSuggestions: async () => {
-    const response = await api.get('/feedback/purchase-suggestions');
-    return response.data;
-  },
-  updatePurchaseSuggestion: async (id, payload) => {
-    const response = await api.patch(`/feedback/purchase-suggestions/${id}`, payload);
-    return response.data;
-  },
-  getDisputes: async () => {
-    const response = await api.get('/feedback/disputes');
-    return response.data;
-  },
-  createDispute: async (payload) => {
-    const response = await api.post('/feedback/disputes', payload);
-    return response.data;
-  },
-  updateDispute: async (id, payload) => {
-    const response = await api.patch(`/feedback/disputes/${id}`, payload);
-    return response.data;
-  },
-};
-
 // Overdue Alert System
 export const overdueAlertService = {
   getSummary: async () => {
@@ -550,6 +555,22 @@ export const heatmapService = {
   },
   getDailyTrend: async (params) => {
     const response = await api.get('/heatmap/daily-trend', { params });
+    return response.data;
+  },
+};
+
+// Book Suggestions Pipeline
+export const suggestionService = {
+  createSuggestion: async (data) => {
+    const response = await api.post('/suggestions', data);
+    return response.data;
+  },
+  getSuggestions: async (params) => {
+    const response = await api.get('/suggestions', { params });
+    return response.data;
+  },
+  updateStatus: async (id, status) => {
+    const response = await api.patch(`/suggestions/${id}/status`, { status });
     return response.data;
   },
 };

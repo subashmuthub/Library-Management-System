@@ -7,10 +7,10 @@
 const express = require('express');
 const router = express.Router();
 const ReservationController = require('../controllers/reservation.controller');
-// const { authenticate } = require('../middleware/auth.middleware');
+const { authenticate, authorize } = require('../middleware/auth.middleware');
 
-// Authentication disabled for now
-// router.use(authenticate);
+// Enforce authentication across all reservation routes
+router.use(authenticate);
 
 /**
  * POST /api/reservations
@@ -53,10 +53,36 @@ router.get('/book/:bookId/queue', ReservationController.getBookReservationQueue)
 router.post('/:id/cancel', ReservationController.cancelReservation);
 
 /**
+ * POST /api/reservations/request
+ * Submit an approval request for a restricted research title (Students)
+ * Body: { book_id, reason }
+ */
+router.post('/request', ReservationController.requestAccess);
+
+/**
+ * GET /api/reservations/pending
+ * Get all pending research title approval requests (Admin/Librarian only)
+ */
+router.get('/pending', authorize(['admin', 'librarian']), ReservationController.getPendingRequests);
+
+/**
+ * PATCH /api/reservations/:id/review
+ * Approve or reject an access request (Admin/Librarian only)
+ * Body: { status: 'APPROVED' | 'REJECTED', rejection_reason }
+ */
+router.patch('/:id/review', authorize(['admin', 'librarian']), ReservationController.reviewRequest);
+
+/**
+ * GET /api/reservations/my-status/:bookId
+ * Check current student's request status for a specific book
+ */
+router.get('/my-status/:bookId', ReservationController.getMyRequestStatus);
+
+/**
  * POST /api/reservations/:id/fulfill
  * Fulfill reservation (mark as picked up and create checkout)
  * Librarian/Admin only
  */
-router.post('/:id/fulfill', ReservationController.fulfillReservation);
+router.post('/:id/fulfill', authorize(['admin', 'librarian']), ReservationController.fulfillReservation);
 
 module.exports = router;

@@ -7,11 +7,12 @@
 const express = require('express');
 const router = express.Router();
 const TransactionController = require('../controllers/transaction.controller');
-const { requireActiveEntryForStudents } = require('../middleware/entry-policy.middleware');
-// const { authenticate } = require('../middleware/auth.middleware');
+const { authenticate, authorize } = require('../middleware/auth.middleware');
 
-// Authentication disabled for development
-// router.use(authenticate);
+// Enforce authentication across all transaction routes
+router.use(authenticate);
+
+const { requireActiveEntryForStudents } = require('../middleware/entry-policy.middleware');
 
 /**
  * POST /api/transactions/checkout
@@ -20,13 +21,26 @@ const { requireActiveEntryForStudents } = require('../middleware/entry-policy.mi
  */
 router.post('/checkout', requireActiveEntryForStudents, TransactionController.checkoutBook);
 
+/**
+ * POST /api/transactions/checkout-batch
+ * Batch checkout multiple books
+ * Body: { userId, bookIds, loanDays }
+ */
+router.post('/checkout-batch', requireActiveEntryForStudents, TransactionController.checkoutBatch);
+
+/**
+ * POST /api/transactions/quick-return
+ * Bulk / continuous return by barcode, RFID tag, ISBN, or transaction ID
+ * Body: { identifier, condition?, notes? }
+ */
+router.post('/quick-return', authorize(['admin', 'librarian']), TransactionController.quickReturn);
 
 /**
  * POST /api/transactions/:id/return
  * Return a book
  * Body: { condition?, notes? }
  */
-router.post('/:id/return', TransactionController.returnBook);
+router.post('/:id/return', authorize(['admin', 'librarian']), TransactionController.returnBook);
 
 /**
  * POST /api/transactions/:id/renew
@@ -47,7 +61,7 @@ router.get('/', TransactionController.getAllTransactions);
  * Get transaction statistics for dashboard
  * Query params: period (days)
  */
-router.get('/statistics', TransactionController.getTransactionStatistics);
+router.get('/statistics', authorize(['admin', 'librarian']), TransactionController.getTransactionStatistics);
 
 /**
  * GET /api/transactions/overdue

@@ -7,6 +7,7 @@
 const { query } = require('../config/database');
 const fs = require('fs');
 const path = require('path');
+const { hasDirectResearchAccess } = require('../utils/access-control.helper');
 
 /**
  * Get current user profile
@@ -25,7 +26,7 @@ const getProfile = async (req, res, next) => {
     
     const users = await query(
       `SELECT u.id, u.email, u.first_name, u.last_name, ur.role_name as role, 
-       u.student_id, u.phone, u.created_at
+       u.student_id, u.degree_type, u.department, u.academic_year, u.phone, u.profile_image_url, u.created_at
        FROM users u
        LEFT JOIN user_roles ur ON u.role_id = ur.id
        WHERE u.id = ?`,
@@ -40,15 +41,31 @@ const getProfile = async (req, res, next) => {
     }
 
     const user = users[0];
+    const isDirectResearchEligible = hasDirectResearchAccess(user);
+    const isStudentRole = ['student', 'me_student', 'research_scholar'].includes(
+      String(user.role || '').toLowerCase()
+    );
+    const degreeType = isStudentRole ? (user.degree_type || 'BE') : null;
+    const academicYear = isStudentRole ? (user.academic_year || '3rd Year') : null;
+    const department = user.department || (isStudentRole ? 'CSE' : (user.role === 'admin' ? 'Administration' : 'Library'));
 
     res.json({
       id: user.id,
-      email: user.email,
+      name: `${user.first_name} ${user.last_name}`,
       firstName: user.first_name,
       lastName: user.last_name,
+      email: user.email,
       role: user.role,
       studentId: user.student_id,
+      student_id: user.student_id,
+      degree_type: degreeType,
+      degreeType: degreeType,
+      department: department,
+      academic_year: academicYear,
+      academicYear: academicYear,
+      is_direct_research_eligible: isDirectResearchEligible,
       phone: user.phone,
+      profile_image_url: user.profile_image_url || null,
       createdAt: user.created_at
     });
 
@@ -64,7 +81,7 @@ const getUserById = async (req, res, next) => {
   try {
     const users = await query(
       `SELECT u.id, u.email, u.first_name, u.last_name, ur.role_name as role, 
-       u.student_id, u.phone, u.status, u.created_at
+       u.student_id, u.degree_type, u.department, u.academic_year, u.phone, u.profile_image_url, u.status, u.created_at
        FROM users u
        LEFT JOIN user_roles ur ON u.role_id = ur.id
        WHERE u.id = ?`,
@@ -79,15 +96,30 @@ const getUserById = async (req, res, next) => {
     }
 
     const user = users[0];
+    const isStudentRole = ['student', 'me_student', 'research_scholar'].includes(
+      String(user.role || '').toLowerCase()
+    );
+    const degreeType = isStudentRole ? (user.degree_type || 'BE') : null;
+    const academicYear = isStudentRole ? (user.academic_year || '3rd Year') : null;
+    const department = user.department || (isStudentRole ? 'CSE' : (user.role === 'admin' ? 'Administration' : 'Library'));
 
     res.json({
       id: user.id,
-      email: user.email,
+      name: `${user.first_name} ${user.last_name}`,
       firstName: user.first_name,
       lastName: user.last_name,
+      email: user.email,
       role: user.role,
       studentId: user.student_id,
+      student_id: user.student_id,
+      degree_type: degreeType,
+      degreeType: degreeType,
+      department: department,
+      academic_year: academicYear,
+      academicYear: academicYear,
+      is_direct_research_eligible: hasDirectResearchAccess(user),
       phone: user.phone,
+      profile_image_url: user.profile_image_url || null,
       status: user.status,
       createdAt: user.created_at
     });
@@ -102,7 +134,22 @@ const getUserById = async (req, res, next) => {
  */
 const updateProfile = async (req, res, next) => {
   try {
-    const { first_name, last_name, firstName, lastName, phone, email, student_id, profile_image_url, profileImageUrl } = req.body;
+    const {
+      first_name,
+      last_name,
+      firstName,
+      lastName,
+      phone,
+      email,
+      student_id,
+      profile_image_url,
+      profileImageUrl,
+      degree_type,
+      degreeType,
+      department,
+      academic_year,
+      academicYear,
+    } = req.body;
     
     // SECURITY: Role changes are NOT allowed from profile updates
     // Role can only be changed by admins through user management endpoints
@@ -131,6 +178,20 @@ const updateProfile = async (req, res, next) => {
     if (phone) {
       updates.push('phone = ?');
       values.push(phone);
+    }
+    const degreeValue = degree_type || degreeType;
+    if (degreeValue !== undefined) {
+      updates.push('degree_type = ?');
+      values.push(degreeValue);
+    }
+    if (department !== undefined) {
+      updates.push('department = ?');
+      values.push(department);
+    }
+    const yearValue = academic_year || academicYear;
+    if (yearValue !== undefined) {
+      updates.push('academic_year = ?');
+      values.push(yearValue);
     }
     // profile image URL support (creates column if needed)
     const profileImageValue = profile_image_url || profileImageUrl;
@@ -173,25 +234,35 @@ const updateProfile = async (req, res, next) => {
     // Get updated user data
     const users = await query(
       `SELECT u.id, u.email, u.first_name, u.last_name, ur.role_name as role, 
-       u.student_id, u.phone
+       u.student_id, u.degree_type, u.department, u.academic_year, u.phone, u.profile_image_url
        FROM users u
        LEFT JOIN user_roles ur ON u.role_id = ur.id
        WHERE u.id = ?`,
       [userId]
     );
 
+    const updatedUser = users[0];
+    const isDirectResearchEligible = hasDirectResearchAccess(updatedUser);
+
     res.json({
       message: 'Profile updated successfully',
       user: {
-        id: users[0].id,
-        name: `${users[0].first_name} ${users[0].last_name}`,
-        first_name: users[0].first_name,
-        last_name: users[0].last_name,
-        email: users[0].email,
-        role: users[0].role,
-        student_id: users[0].student_id,
-        phone: users[0].phone,
-        profile_image_url: users[0].profile_image_url || null
+        id: updatedUser.id,
+        name: `${updatedUser.first_name} ${updatedUser.last_name}`,
+        first_name: updatedUser.first_name,
+        last_name: updatedUser.last_name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        student_id: updatedUser.student_id,
+        studentId: updatedUser.student_id,
+        degree_type: updatedUser.degree_type || 'BE',
+        degreeType: updatedUser.degree_type || 'BE',
+        department: updatedUser.department || 'CSE',
+        academic_year: updatedUser.academic_year || '3rd Year',
+        academicYear: updatedUser.academic_year || '3rd Year',
+        is_direct_research_eligible: isDirectResearchEligible,
+        phone: updatedUser.phone,
+        profile_image_url: updatedUser.profile_image_url || null
       }
     });
 
@@ -210,7 +281,7 @@ const listUsers = async (req, res, next) => {
     const role = req.query.role;
 
     let sql = `SELECT u.id, u.email, u.first_name, u.last_name, ur.role_name as role, 
-               u.student_id, u.status, u.created_at
+               u.student_id, u.degree_type, u.department, u.academic_year, u.status, u.created_at
                FROM users u
                LEFT JOIN user_roles ur ON u.role_id = ur.id`;
     const params = [];

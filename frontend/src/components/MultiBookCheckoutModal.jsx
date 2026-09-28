@@ -1,424 +1,472 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { bookService } from '../services';
-import { 
-  BookOpen, 
-  Calendar, 
-  Plus, 
-  Trash2, 
-  X, 
-  ShoppingCart, 
-  AlertCircle, 
-  CheckCircle2, 
-  Loader2 
+import React, { useState, useMemo, useEffect } from 'react';
+import { format, addDays } from 'date-fns';
+import {
+  X,
+  BookOpen,
+  Plus,
+  Trash2,
+  Calendar,
+  AlertCircle,
+  CheckCircle,
+  Loader2,
+  User,
+  ShoppingBag,
 } from 'lucide-react';
+import { bookService, transactionService } from '../services';
 
 const MultiBookCheckoutModal = ({
   isOpen,
   onClose,
   onSuccess,
-  initialUserId = '',
-  initialBook = null
+  currentUser,
+  isAdminOrLibrarian,
+  initialBook = null,
+  initialLoanDays = 14,
 }) => {
-  const [userId, setUserId] = useState(initialUserId || '');
+  const [userId, setUserId] = useState('');
   const [bookInput, setBookInput] = useState('');
-  const [loanDays, setLoanDays] = useState(14);
   const [cart, setCart] = useState([]);
+  const [loanDays, setLoanDays] = useState(14);
+
   const [loadingBook, setLoadingBook] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [warningMessage, setWarningMessage] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
 
-  // Synchronize initial values when modal opens
+  // Initialize or reset form state when modal opens
   useEffect(() => {
     if (isOpen) {
-      setUserId(initialUserId || '');
+      const defaultId = currentUser?.id ? String(currentUser.id) : '';
+      setUserId(defaultId);
       setBookInput('');
-      setLoanDays(14);
-      setWarningMessage('');
-      setSuccessMessage('');
       if (initialBook && initialBook.id) {
-        setCart([initialBook]);
+        setCart([
+          {
+            id: initialBook.id,
+            title: initialBook.title,
+            author: initialBook.author || 'Unknown Author',
+            isbn: initialBook.isbn || 'N/A',
+            category: initialBook.category || '',
+            is_restricted: Boolean(initialBook.is_restricted_research),
+          },
+        ]);
       } else {
         setCart([]);
       }
+      setLoanDays(initialLoanDays || 14);
+      setErrorMsg('');
+      setSuccessMsg('');
     }
-  }, [isOpen, initialUserId, initialBook]);
+  }, [isOpen, currentUser, initialBook, initialLoanDays]);
 
-  // Real-time calculated return due date (Current Date + Loan Days)
+  // Real-time calculation of Return Due Date based on Loan Days
   const calculatedDueDate = useMemo(() => {
     const days = parseInt(loanDays, 10);
-    const validDays = Number.isFinite(days) && days > 0 ? days : 14;
-    const targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + validDays);
-    return targetDate.toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    });
+    const validDays = isNaN(days) || days < 1 ? 0 : days;
+    const target = addDays(new Date(), validDays);
+    return format(target, 'dd MMM yyyy');
   }, [loanDays]);
 
   if (!isOpen) return null;
 
-  // Add book to cart by ID / Accession Number
+  // Add book to checkout cart
   const handleAddBook = async (e) => {
     if (e) e.preventDefault();
-    setWarningMessage('');
-    setSuccessMessage('');
-
-    const trimmedInput = bookInput.trim();
-    if (!trimmedInput) {
-      setWarningMessage('Please enter a Book ID or Accession Number.');
+    const identifier = bookInput.trim();
+    if (!identifier) {
+      setErrorMsg('Please enter a Book ID or Accession / ISBN number.');
       return;
     }
 
-    // Check if book already added to cart
-    const isAlreadyAdded = cart.some(
-      (b) => String(b.id) === trimmedInput || String(b.isbn) === trimmedInput
-    );
-    if (isAlreadyAdded) {
-      setWarningMessage(`Book ID/Accession "${trimmedInput}" is already in your checkout cart.`);
-      return;
-    }
-
+    setErrorMsg('');
     setLoadingBook(true);
+
     try {
-      let bookData = null;
+      const res = await bookService.getBookById(identifier);
+      const book = res?.book || res;
 
-      // 1. Try direct fetch by ID
-      try {
-        const response = await bookService.getBookById(trimmedInput);
-        bookData = response?.book || response?.data?.book || response;
-      } catch (err) {
-        // 2. If not found by direct ID, search by ISBN / Title
-        const searchRes = await bookService.getAllBooks({ search: trimmedInput, limit: 1 });
-        const list = searchRes?.books || searchRes?.data || [];
-        if (list.length > 0) {
-          bookData = list[0];
-        }
-      }
-
-      if (!bookData || !bookData.id) {
-        setWarningMessage(`Invalid Book ID: "${trimmedInput}" was not found in library catalog.`);
+      if (!book || !book.id) {
+        setErrorMsg(`Book #${identifier} not found in catalog.`);
         return;
       }
 
-      // Check current availability
-      const isAvailable = bookData.is_available === true || bookData.is_available === 1 || bookData.status === 'available';
-      if (!isAvailable) {
-        setWarningMessage(`Book "${bookData.title}" (ID: ${bookData.id}) is currently checked out or unavailable.`);
+      // Check if already in current cart
+      if (cart.some((item) => item.id === book.id)) {
+        setErrorMsg(`"${book.title}" (ID: ${book.id}) is already in your checkout list.`);
         return;
       }
 
-      // Check if duplicate with resolved ID
-      if (cart.some((b) => b.id === bookData.id)) {
-        setWarningMessage(`Book "${bookData.title}" (ID: ${bookData.id}) is already in your cart.`);
+      // Check availability status
+      if (book.status === 'checked_out' || book.is_available === false) {
+        setErrorMsg(`"${book.title}" is currently checked out or unavailable.`);
         return;
       }
 
-      setCart((prev) => [...prev, {
-        id: bookData.id,
-        title: bookData.title,
-        author: bookData.author || 'Unknown Author',
-        isbn: bookData.isbn || '',
-        category: bookData.category || ''
-      }]);
+      // Add to cart
+      setCart((prev) => [
+        ...prev,
+        {
+          id: book.id,
+          title: book.title,
+          author: book.author || 'Unknown Author',
+          isbn: book.isbn || 'N/A',
+          category: book.category || '',
+          is_restricted: Boolean(book.is_restricted_research),
+        },
+      ]);
       setBookInput('');
-      setWarningMessage('');
-    } catch (error) {
-      console.error('Failed to lookup book:', error);
-      setWarningMessage('Failed to fetch book details. Please check the ID and try again.');
+    } catch (err) {
+      console.error('Failed to fetch book details:', err);
+      const msg =
+        err.response?.data?.message ||
+        err.response?.data?.error ||
+        `Book #${identifier} could not be found or verified.`;
+      setErrorMsg(msg);
     } finally {
       setLoadingBook(false);
     }
   };
 
-  // Remove a book from cart
+  // Remove a book from the cart
   const handleRemoveBook = (bookId) => {
-    setCart((prev) => prev.filter((b) => b.id !== bookId));
-    setWarningMessage('');
+    setCart((prev) => prev.filter((item) => item.id !== bookId));
+    setErrorMsg('');
   };
 
-  // Batch checkout submission
+  // Execute batch checkout
   const handleProceedCheckout = async () => {
-    setWarningMessage('');
-    setSuccessMessage('');
-
-    if (!userId.trim()) {
-      setWarningMessage('Please enter a valid User ID to checkout books.');
+    const trimmedUserId = String(userId).trim();
+    if (!trimmedUserId) {
+      setErrorMsg('Please enter a valid User ID / Borrower ID.');
       return;
     }
 
     if (cart.length === 0) {
-      setWarningMessage('Please add at least one book to the cart.');
+      setErrorMsg('Checkout list is empty. Add at least one book.');
       return;
     }
 
-    const parsedLoanDays = parseInt(loanDays, 10);
-    if (!parsedLoanDays || parsedLoanDays <= 0) {
-      setWarningMessage('Please provide a valid loan duration in days.');
+    const days = parseInt(loanDays, 10);
+    if (isNaN(days) || days < 1) {
+      setErrorMsg('Please specify a valid loan period in days (minimum 1 day).');
       return;
     }
 
     setSubmitting(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
     try {
       const payload = {
-        userId: userId.trim(),
+        userId: trimmedUserId,
         bookIds: cart.map((b) => b.id),
-        loanDays: parsedLoanDays
+        loanDays: days,
       };
 
-      const result = await bookService.checkoutBatch(payload);
+      const res = await transactionService.checkoutBatch(payload);
+      setSuccessMsg(
+        res.message ||
+          `Successfully checked out ${cart.length} book(s)! Return Due Date: ${calculatedDueDate}`
+      );
 
-      if (result.success || result.status === 'success' || result.transactions) {
-        setSuccessMessage(`Checkout completed successfully! ${cart.length} book(s) issued.`);
-        if (onSuccess) {
-          onSuccess(result);
-        }
-        setTimeout(() => {
-          onClose();
-        }, 1200);
-      } else {
-        setWarningMessage(result.message || result.error || 'Failed to complete checkout');
-      }
-    } catch (error) {
-      console.error('Batch checkout error:', error);
-      const errMsg =
-        error.response?.data?.message ||
-        error.response?.data?.error ||
-        error.message ||
-        'Batch checkout failed. Please verify user eligibility and try again.';
-      setWarningMessage(errMsg);
+      setTimeout(() => {
+        if (onSuccess) onSuccess();
+        onClose();
+      }, 1500);
+    } catch (err) {
+      console.error('Batch checkout failed:', err);
+      const msg =
+        err.response?.data?.message ||
+        err.response?.data?.error ||
+        'Batch checkout failed. Please check borrowing limits and availability.';
+      setErrorMsg(msg);
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden border border-gray-100">
-        
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden border border-gray-100 flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 px-6 py-4 text-white flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-blue-600 to-indigo-700 text-white">
+          <div className="flex items-center space-x-3">
             <div className="p-2 bg-white/10 rounded-lg">
-              <ShoppingCart size={22} className="text-white" />
+              <ShoppingBag className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h2 className="text-lg font-bold tracking-tight">Multi-Book Cart Checkout</h2>
-              <p className="text-xs text-blue-100">Add multiple items and issue together in one transaction</p>
+              <h2 className="text-lg font-bold text-white">Multi-Book Checkout</h2>
+              <p className="text-xs text-blue-100">
+                Issue multiple books in a single batch transaction
+              </p>
             </div>
           </div>
-          <button 
-            type="button" 
+          <button
             onClick={onClose}
-            className="text-white/80 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition-colors"
-            aria-label="Close checkout modal"
+            disabled={submitting}
+            className="p-1.5 rounded-full hover:bg-white/20 transition-colors text-white"
           >
-            <X size={20} />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Content Body */}
-        <div className="p-6 space-y-5">
-          
-          {/* Success Banner */}
-          {successMessage && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-green-800 text-sm flex items-center gap-2">
-              <CheckCircle2 size={18} className="text-green-600 flex-shrink-0" />
-              <span>{successMessage}</span>
-            </div>
-          )}
-
-          {/* Warning Banner */}
-          {warningMessage && (
-            <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-amber-900 text-sm flex items-start gap-2">
-              <AlertCircle size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <span className="font-medium">{warningMessage}</span>
+        {/* Modal Body */}
+        <div className="p-6 overflow-y-auto space-y-5 flex-1">
+          {/* User ID Field */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
+              Borrower User ID / Student ID <span className="text-red-500">*</span>
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                <User className="w-4 h-4" />
               </div>
-            </div>
-          )}
-
-          {/* 1. User ID Input */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">
-              User ID <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              className="input w-full border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm"
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              placeholder="Enter student or staff User ID (e.g. 4, UID-102)"
-            />
-          </div>
-
-          {/* 2. Add Book Cart Input Workflow */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">
-              Book ID / Accession Number
-            </label>
-            <form onSubmit={handleAddBook} className="flex gap-2">
               <input
                 type="text"
-                className="input flex-1 border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm"
-                value={bookInput}
-                onChange={(e) => setBookInput(e.target.value)}
-                placeholder="Enter Book ID or Accession (e.g. 101, 2)"
+                required
+                value={userId}
+                onChange={(e) => {
+                  setUserId(e.target.value);
+                  setErrorMsg('');
+                }}
+                placeholder="Enter User ID, Student ID, or Email"
+                className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-gray-800"
               />
+            </div>
+          </div>
+
+          {/* Book Input & Add Button */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
+              Book ID / Accession Number / ISBN <span className="text-red-500">*</span>
+            </label>
+            <form onSubmit={handleAddBook} className="flex gap-2">
+              <div className="relative flex-1">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                  <BookOpen className="w-4 h-4" />
+                </div>
+                <input
+                  type="text"
+                  value={bookInput}
+                  onChange={(e) => {
+                    setBookInput(e.target.value);
+                    setErrorMsg('');
+                  }}
+                  placeholder="e.g. 1, 14, 978-0132350884"
+                  className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium text-gray-800"
+                  disabled={loadingBook || submitting}
+                />
+              </div>
               <button
                 type="submit"
-                disabled={loadingBook || !bookInput.trim()}
-                className="btn bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium px-4 py-2 rounded-lg flex items-center gap-1.5 transition-colors text-sm shadow-sm"
+                disabled={loadingBook || submitting || !bookInput.trim()}
+                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-sm font-semibold flex items-center gap-1.5 transition-all shadow-sm shadow-blue-500/20"
               >
                 {loadingBook ? (
-                  <Loader2 size={16} className="animate-spin" />
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Verifying...</span>
+                  </>
                 ) : (
-                  <Plus size={16} />
+                  <>
+                    <Plus className="w-4 h-4" />
+                    <span>Add Book</span>
+                  </>
                 )}
-                <span>Add Book</span>
               </button>
             </form>
           </div>
 
-          {/* Cart Table */}
-          <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-            <div className="bg-gray-50 px-4 py-2.5 border-b border-gray-200 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <BookOpen size={16} className="text-gray-500" />
-                <span className="text-xs font-bold text-gray-700 uppercase tracking-wider">
-                  Checkout Cart ({cart.length} {cart.length === 1 ? 'item' : 'items'})
-                </span>
-              </div>
+          {/* Books Cart Table */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                Books to Checkout ({cart.length})
+              </span>
               {cart.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setCart([])}
-                  className="text-xs text-gray-500 hover:text-red-600 font-medium"
+                  className="text-xs text-red-600 hover:text-red-700 font-medium"
                 >
                   Clear All
                 </button>
               )}
             </div>
 
-            {cart.length === 0 ? (
-              <div className="p-6 text-center text-gray-400">
-                <ShoppingCart size={32} className="mx-auto mb-2 opacity-40" />
-                <p className="text-sm font-medium text-gray-500">Cart is empty</p>
-                <p className="text-xs text-gray-400 mt-0.5">Enter a Book ID or Accession Number above to add items</p>
+            {cart.length > 0 ? (
+              <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                <div className="max-h-48 overflow-y-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="bg-gray-50 text-xs text-gray-500 uppercase font-semibold sticky top-0 border-b border-gray-200">
+                      <tr>
+                        <th className="py-2.5 px-3">Book ID</th>
+                        <th className="py-2.5 px-3">Title</th>
+                        <th className="py-2.5 px-3">Author</th>
+                        <th className="py-2.5 px-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 text-sm">
+                      {cart.map((book) => (
+                        <tr key={book.id} className="hover:bg-gray-50/80 transition-colors">
+                          <td className="py-2.5 px-3 font-mono font-semibold text-blue-600 text-xs">
+                            #{book.id}
+                          </td>
+                          <td className="py-2.5 px-3 font-medium text-gray-900 max-w-[200px] truncate" title={book.title}>
+                            {book.title}
+                            {book.is_restricted && (
+                              <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-amber-100 text-amber-800 rounded font-medium">
+                                Restricted
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-gray-600 text-xs max-w-[150px] truncate" title={book.author}>
+                            {book.author}
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveBook(book.id)}
+                              className="px-2.5 py-1 text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg inline-flex items-center gap-1 transition-colors"
+                              title="Remove book from checkout list"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ) : (
-              <div className="max-h-52 overflow-y-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-gray-100/75 text-gray-600 text-xs font-semibold uppercase tracking-wider sticky top-0">
-                    <tr>
-                      <th className="px-4 py-2.5">Book ID</th>
-                      <th className="px-4 py-2.5">Title</th>
-                      <th className="px-4 py-2.5">Author</th>
-                      <th className="px-4 py-2.5 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {cart.map((book) => (
-                      <tr key={book.id} className="hover:bg-blue-50/50 transition-colors">
-                        <td className="px-4 py-2.5 whitespace-nowrap">
-                          <span className="font-mono text-xs font-semibold bg-gray-100 text-gray-800 px-2 py-0.5 rounded border border-gray-200">
-                            #{book.id}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <p className="font-medium text-gray-900 line-clamp-1">{book.title}</p>
-                          {book.category && (
-                            <span className="text-[11px] text-gray-400">{book.category}</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">
-                          <span className="line-clamp-1 text-sm">{book.author}</span>
-                        </td>
-                        <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveBook(book.id)}
-                            className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded transition-colors"
-                            title="Remove book from cart"
-                          >
-                            <Trash2 size={13} />
-                            <span>Remove</span>
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center bg-gray-50/50">
+                <BookOpen className="w-8 h-8 text-gray-300 mx-auto mb-1.5" />
+                <p className="text-sm font-medium text-gray-500">
+                  No books added yet
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Enter a Book ID or Accession Number above to add books to this checkout session.
+                </p>
               </div>
             )}
           </div>
 
-          {/* 3. Loan Days & Dynamic Red Return Date Alert */}
-          <div className="space-y-2 pt-1">
-            <label className="block text-sm font-semibold text-gray-700">
-              Loan Days
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="90"
-              required
-              className="input w-full border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-sm"
-              value={loanDays}
-              onChange={(e) => setLoanDays(e.target.value)}
-              placeholder="14"
-            />
-
-            {/* Dynamic Prominent Red Alert Box */}
-            <div className="bg-red-50 border-2 border-red-300 rounded-lg p-3 text-red-700 font-medium flex items-center justify-between shadow-sm transition-all">
-              <div className="flex items-center gap-2">
-                <Calendar className="text-red-600 flex-shrink-0" size={19} />
-                <span className="text-sm font-bold text-red-800">Return Due Date:</span>
+          {/* Loan Days Configuration */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
+                Loan Period (Days)
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="1"
+                  max="180"
+                  required
+                  value={loanDays}
+                  onChange={(e) => setLoanDays(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-gray-800"
+                />
               </div>
-              <span className="text-red-700 font-extrabold text-base tracking-wide bg-red-100/90 border border-red-200 px-3 py-1 rounded shadow-inner">
-                {calculatedDueDate}
-              </span>
+            </div>
+
+            {/* Quick Presets */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                Quick Select
+              </label>
+              <div className="flex gap-2">
+                {[7, 14, 30, 60].map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setLoanDays(d)}
+                    className={`flex-1 py-2 text-xs font-semibold rounded-lg border transition-all ${
+                      Number(loanDays) === d
+                        ? 'bg-blue-50 border-blue-400 text-blue-700'
+                        : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    {d}d
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
+          {/* Dynamic Prominent RED ALERT BOX for Return Due Date */}
+          <div className="bg-red-50 border-2 border-red-500 rounded-xl p-4 shadow-sm flex items-center justify-between text-red-800 transition-all">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-red-100 rounded-lg text-red-600">
+                <Calendar className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-xs uppercase font-extrabold tracking-wider text-red-600">
+                  Return Due Date
+                </div>
+                <div className="text-base font-bold text-red-900 mt-0.5">
+                  {calculatedDueDate}
+                </div>
+              </div>
+            </div>
+            <div className="text-xs font-semibold bg-red-100/80 text-red-700 px-2.5 py-1 rounded-full">
+              {Number(loanDays) || 0} Days Loan
+            </div>
+          </div>
+
+          {/* Error Message */}
+          {errorMsg && (
+            <div className="p-3.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs flex items-start gap-2 animate-in fade-in">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-red-500" />
+              <div className="font-medium">{errorMsg}</div>
+            </div>
+          )}
+
+          {/* Success Message */}
+          {successMsg && (
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-xs flex items-start gap-2 animate-in fade-in">
+              <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-emerald-500" />
+              <div className="font-semibold">{successMsg}</div>
+            </div>
+          )}
         </div>
 
-        {/* Modal Footer / Actions */}
-        <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between">
-          <span className="text-xs text-gray-500">
-            {cart.length} book(s) ready to checkout
-          </span>
-          <div className="flex gap-2.5">
+        {/* Modal Footer */}
+        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+          <div className="text-xs text-gray-500">
+            Total Books: <span className="font-bold text-gray-800">{cart.length}</span>
+          </div>
+          <div className="flex gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="btn bg-white hover:bg-gray-100 text-gray-700 border border-gray-300 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              disabled={submitting}
+              className="px-4 py-2 bg-gray-200 hover:bg-gray-300 disabled:opacity-50 text-gray-700 rounded-xl text-sm font-semibold transition-colors"
             >
               Cancel
             </button>
             <button
               type="button"
-              disabled={submitting || cart.length === 0 || !userId.trim()}
               onClick={handleProceedCheckout}
-              className="btn bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium px-5 py-2 rounded-lg text-sm flex items-center gap-2 shadow-sm transition-all"
+              disabled={submitting || cart.length === 0 || !String(userId).trim()}
+              className="px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-sm font-bold flex items-center gap-2 transition-all shadow-md shadow-blue-500/20"
             >
               {submitting ? (
                 <>
-                  <Loader2 size={16} className="animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin" />
                   <span>Processing Checkout...</span>
                 </>
               ) : (
                 <>
-                  <ShoppingCart size={16} />
-                  <span>Proceed Checkout</span>
+                  <CheckCircle className="w-4 h-4" />
+                  <span>Proceed Checkout ({cart.length})</span>
                 </>
               )}
             </button>
           </div>
         </div>
-
       </div>
     </div>
   );

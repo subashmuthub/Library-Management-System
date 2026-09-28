@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { BarChart3, BookOpen, CalendarDays, CheckCircle, Menu, Settings, ShieldCheck, Users, X } from 'lucide-react';
+import { BarChart3, BookOpen, CalendarDays, Menu, Settings, ShieldCheck, Users, X } from 'lucide-react';
 import { useAuth } from '../contexts';
 
 const slides = [
@@ -11,29 +11,190 @@ const slides = [
 
 const features = [
   ['Library Management', 'Manage books, journals, reservations, and circulation from one organized library workspace.', BookOpen],
-  ['Equipment Inventory', 'Real-time tracking of books, journals, resources, and supplies.', Settings],
-  ['Booking System', 'Schedule sessions, equipment usage, and manage conflicts automatically.', CalendarDays],
-  ['Analytics & Reports', 'Comprehensive reports on usage, utilization, and maintenance.', BarChart3],
-  ['User Management', 'Role-based access for administrators, faculty, and students.', Users],
-  ['Maintenance Tracking', 'Schedule and track maintenance to ensure optimal performance.', ShieldCheck],
+  ['Book Inventory', 'Real-time tracking of books, journals, resources, and supplies.', Settings],
+  ['Reservation System', 'Reserve books, manage due dates, and handle conflicts automatically.', CalendarDays],
+  ['Analytics & Reports', 'Comprehensive reports on usage, circulation, and overdue trends.', BarChart3],
+  ['User Management', 'Role-based access for administrators, librarians, staff, and students.', Users],
+  ['Fines & Security', 'Track fines, payments, and library entry to keep the collection safe.', ShieldCheck],
 ];
 
 const recruiters = ['Zoho', 'TCS', 'Cognizant', 'Wipro', 'Infosys', 'Accenture', 'IBM', 'HCL', 'Hexaware', 'Atos', 'Tech Mahindra', 'Tessolve', 'AstraZeneca', 'Cadence', 'Broadcom', 'VVDN', 'Caliber', 'FSS'];
+
+const stats = [['50+', 'Shelves Managed'], ['500+', 'Books & Journals'], ['1000+', 'Active Users'], ['99.9%', 'Uptime']];
 
 const HomePage = () => {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
-  useEffect(() => { document.title = 'Home | NEC LibMS'; document.body.classList.add('home-page-text'); const replaceBrand = () => { const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); let node; while ((node = walker.nextNode())) node.nodeValue = node.nodeValue.replaceAll('LabMS', 'LibMS').replaceAll('Laboratory Management System', 'Library Management System').replaceAll('Lab Management System', 'Library Management System').replaceAll('Powerful Features', 'Powerful Library Features').replaceAll('About Lab Management System', 'About Library Management System').replaceAll('laboratory operations', 'library operations').replaceAll('Ready to Transform Your Lab Management?', 'Ready to Transform Your Library Management?'); }; replaceBrand(); const timer = setInterval(() => { replaceBrand(); setCurrentSlide((value) => (value + 1) % slides.length); }, 5000); return () => { clearInterval(timer); document.body.classList.remove('home-page-text'); }; }, []);
 
-  return <div className="min-h-screen bg-white text-slate-900"><nav className="fixed top-0 z-50 w-full bg-white/95 shadow-lg backdrop-blur-sm"><div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8"><Link to="/" className="flex items-center gap-3"><img src="/pic/NEC%20LOGO.png" alt="NEC Logo" className="h-10 w-10 object-contain" /><strong className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-2xl text-transparent">NEC LabMS</strong></Link><div className="hidden items-center gap-5 md:flex"><a href="#about" className="text-sm font-medium hover:text-blue-600">About</a><a href="#features" className="text-sm font-medium hover:text-blue-600">Features</a><a href="#stats" className="text-sm font-medium hover:text-blue-600">Statistics</a><a href="#contact" className="text-sm font-medium hover:text-blue-600">Contact</a>{user ? <button onClick={() => navigate('/dashboard')} className="rounded-full bg-gradient-to-r from-blue-600 to-purple-600 px-5 py-2 font-medium text-white">Dashboard</button> : <><Link to="/login" className="font-medium hover:text-blue-600">Login</Link><Link to="/register" className="rounded-full bg-gradient-to-r from-blue-600 to-purple-600 px-5 py-2 font-medium text-white">Get Started</Link></>}</div><button className="md:hidden" onClick={() => setMenuOpen((value) => !value)} aria-label="Toggle menu">{menuOpen ? <X /> : <Menu />}</button></div>{menuOpen && <div className="border-t bg-white p-4 md:hidden"><div className="flex flex-col gap-3"><a href="#about">About</a><a href="#features">Features</a><a href="#stats">Statistics</a><a href="#contact">Contact</a><Link to="/login">Login</Link><Link to="/register" className="font-semibold text-blue-600">Register</Link></div></div>}</nav>
-  <section className="relative flex h-screen min-h-[620px] items-center justify-center overflow-hidden bg-cover bg-center pt-16">{slides.map((slide, index) => <div key={slide.title} className={`absolute inset-0 transition-opacity duration-1000 ${index === currentSlide ? 'opacity-100' : 'opacity-0'}`}><img src={slide.image} alt="" className="h-full w-full object-cover" /><div className="absolute inset-0 bg-gradient-to-r from-blue-950/90 via-blue-900/70 to-purple-950/75" /></div>)}{slides.map((slide, index) => <div key={`${slide.title}-content`} className={`absolute inset-0 flex items-center justify-center px-4 text-center text-white transition-opacity duration-1000 ${index === currentSlide ? 'opacity-100' : 'pointer-events-none opacity-0'}`}><div className="max-w-4xl"><h1 className="mb-5 text-4xl font-bold sm:text-6xl lg:text-7xl">{slide.title}</h1><p className="mb-4 text-xl text-yellow-300 sm:text-3xl">{slide.subtitle}</p><p className="mb-8 text-base sm:text-xl">{slide.description}</p><div className="flex justify-center gap-4">{user ? <button onClick={() => navigate('/dashboard')} className="rounded-full bg-white px-7 py-3 font-semibold text-slate-800">Go to Dashboard</button> : <><Link to="/login" className="rounded-full bg-white px-7 py-3 font-semibold text-slate-800">Login Now</Link><Link to="/register" className="rounded-full border-2 border-white px-7 py-3 font-semibold text-white">Register</Link></>}</div></div></div>)}<div className="absolute bottom-10 flex gap-2">{slides.map((slide, index) => <button key={slide.title} onClick={() => setCurrentSlide(index)} aria-label={`Show slide ${index + 1}`} className={`h-3 rounded-full transition-all ${index === currentSlide ? 'w-8 bg-white' : 'w-3 bg-white/50'}`} />)}</div></section>
-+    <section id="about" className="bg-slate-50 py-20"><div className="mx-auto max-w-7xl px-4 text-center sm:px-6 lg:px-8"><h2 className="text-4xl font-bold">About Lab Management System</h2><div className="mx-auto my-6 h-1 w-24 bg-gradient-to-r from-blue-600 to-purple-600" /><p className="mx-auto max-w-3xl text-lg text-slate-600">Our comprehensive system streamlines laboratory operations, making it easier for administrators, faculty, and students to manage and use resources effectively.</p></div></section>
-+    <section id="features" className="bg-white py-20"><div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"><div className="mb-14 text-center"><h2 className="text-4xl font-bold">Powerful Features</h2><p className="mt-4 text-lg text-slate-600">Everything you need in one platform</p></div><div className="grid gap-7 sm:grid-cols-2 lg:grid-cols-3">{features.map(([title, description, Icon]) => <article key={title} className="rounded-xl border border-slate-100 bg-white p-6 shadow-lg transition hover:-translate-y-1 hover:shadow-2xl"><div className="mb-5 flex h-14 w-14 items-center justify-center rounded-lg bg-blue-100 text-blue-600"><Icon size={29} /></div><h3 className="mb-3 text-xl font-semibold">{title}</h3><p className="text-slate-600">{description}</p></article>)}</div></div></section>
-+    <section id="stats" className="bg-gradient-to-r from-blue-600 to-purple-600 py-20 text-white"><div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"><h2 className="mb-14 text-center text-4xl font-bold">Our Impact in Numbers</h2><div className="grid grid-cols-2 gap-8 text-center md:grid-cols-4">{[['50+', 'Labs Managed'], ['500+', 'Equipment Items'], ['1000+', 'Active Users'], ['99.9%', 'Uptime']].map(([value, label]) => <div key={label}><div className="text-4xl font-bold">{value}</div><div className="mt-2 text-white/80">{label}</div></div>)}</div></div></section>
-+    <section className="bg-slate-50 py-20"><div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"><h2 className="text-center text-4xl font-bold text-blue-900">Recruiters</h2><p className="mx-auto mb-12 mt-4 max-w-3xl text-center text-lg text-slate-600">Our prestigious recruitment partners who trust our graduates</p><div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">{recruiters.map((name) => <div key={name} className="rounded-lg border-2 border-slate-200 bg-white p-5 text-center text-lg font-bold text-blue-700 shadow-sm transition hover:border-blue-500 hover:shadow-lg">{name}</div>)}</div></div></section>
-+    <section className="bg-white py-20 text-center"><h2 className="text-4xl font-bold">Ready to Transform Your Lab Management?</h2><p className="mb-8 mt-4 text-lg text-slate-600">Join hundreds of institutions already using our platform</p><Link to="/register" className="rounded-full bg-gradient-to-r from-blue-600 to-purple-600 px-8 py-4 font-semibold text-white">Get Started Free</Link></section><footer id="contact" className="bg-slate-900 py-12 text-white"><div className="mx-auto grid max-w-7xl gap-8 px-4 sm:grid-cols-2 lg:grid-cols-4 lg:px-8"><div><h3 className="mb-4 text-lg font-semibold">For Technical Support</h3><p className="text-slate-300">Dr. S. Kalaiselvi M.E., Ph.D</p><p className="mt-2 text-slate-400">sks@nec.edu.in</p></div><div><h3 className="mb-4 text-lg font-semibold text-blue-400">Info</h3><a href="https://nec.edu.in" target="_blank" rel="noreferrer" className="text-slate-300 hover:text-blue-400">NEC Website</a></div><div><h3 className="mb-4 text-lg font-semibold text-green-400">Contact Us</h3><p className="text-slate-300">National Engineering College, K.R. Nagar, Kovilpatti - 628503</p><p className="mt-2 text-slate-400">principal@nec.edu.in</p></div><div><h3 className="mb-4 text-lg font-semibold text-purple-400">Follow Us</h3><div className="flex gap-3"><a href="https://www.linkedin.com/school/national-engineering-college/posts/?feedView=all" target="_blank" rel="noreferrer" className="rounded bg-blue-700 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-800">LinkedIn</a><a href="https://www.facebook.com/neckvpt" target="_blank" rel="noreferrer" className="rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">Facebook</a></div></div></div><p className="mx-auto mt-10 max-w-7xl border-t border-slate-700 px-4 pt-6 text-center text-sm text-slate-500">© 2026 National Engineering College Lab Management System. All rights reserved.</p></footer></div>;
+  useEffect(() => {
+    document.title = 'Home | NEC LibMS';
+    document.body.classList.add('home-page-text');
+    const timer = setInterval(() => setCurrentSlide((value) => (value + 1) % slides.length), 5000);
+    return () => {
+      clearInterval(timer);
+      document.body.classList.remove('home-page-text');
+    };
+  }, []);
+
+  const gradientBtn = 'rounded-full bg-gradient-to-r from-blue-600 to-purple-600 px-5 py-2 font-medium text-white';
+
+  return (
+    <div className="min-h-screen bg-white text-slate-900">
+      <nav className="fixed top-0 z-50 w-full bg-white/95 shadow-lg backdrop-blur-sm">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+          <Link to="/" className="flex items-center gap-3">
+            <img src="/Images/Logo.png" alt="NEC Logo" className="h-10 w-10 object-contain" />
+            <strong className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-2xl text-transparent">NEC LibMS</strong>
+          </Link>
+          <div className="hidden items-center gap-5 md:flex">
+            <a href="#about" className="text-sm font-medium hover:text-blue-600">About</a>
+            <a href="#features" className="text-sm font-medium hover:text-blue-600">Features</a>
+            <a href="#stats" className="text-sm font-medium hover:text-blue-600">Statistics</a>
+            <a href="#contact" className="text-sm font-medium hover:text-blue-600">Contact</a>
+            {user ? (
+              <button onClick={() => navigate('/dashboard')} className={gradientBtn}>Dashboard</button>
+            ) : (
+              <>
+                <Link to="/login" className="font-medium hover:text-blue-600">Login</Link>
+                <Link to="/register" className={gradientBtn}>Get Started</Link>
+              </>
+            )}
+          </div>
+          <button className="md:hidden" onClick={() => setMenuOpen((value) => !value)} aria-label="Toggle menu">{menuOpen ? <X /> : <Menu />}</button>
+        </div>
+        {menuOpen && (
+          <div className="border-t bg-white p-4 md:hidden">
+            <div className="flex flex-col gap-3">
+              <a href="#about">About</a>
+              <a href="#features">Features</a>
+              <a href="#stats">Statistics</a>
+              <a href="#contact">Contact</a>
+              {user ? <Link to="/dashboard" className="font-semibold text-blue-600">Dashboard</Link> : <><Link to="/login">Login</Link><Link to="/register" className="font-semibold text-blue-600">Register</Link></>}
+            </div>
+          </div>
+        )}
+      </nav>
+
+      <main>
+        <section className="relative flex h-screen min-h-[620px] items-center justify-center overflow-hidden bg-cover bg-center pt-16">
+          {slides.map((slide, index) => (
+            <div key={slide.title} className={`absolute inset-0 transition-opacity duration-1000 ${index === currentSlide ? 'opacity-100' : 'opacity-0'}`}>
+              <img src={slide.image} alt="" className="h-full w-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-950/90 via-blue-900/70 to-purple-950/75" />
+            </div>
+          ))}
+          {slides.map((slide, index) => (
+            <div key={`${slide.title}-content`} className={`absolute inset-0 flex items-center justify-center px-4 text-center text-white transition-opacity duration-1000 ${index === currentSlide ? 'opacity-100' : 'pointer-events-none opacity-0'}`}>
+              <div className="max-w-4xl">
+                <h1 className="mb-5 text-4xl font-bold sm:text-6xl lg:text-7xl">{slide.title}</h1>
+                <p className="mb-4 text-xl text-yellow-300 sm:text-3xl">{slide.subtitle}</p>
+                <p className="mb-8 text-base sm:text-xl">{slide.description}</p>
+                <div className="flex justify-center gap-4">
+                  {user ? (
+                    <button onClick={() => navigate('/dashboard')} className="rounded-full bg-white px-7 py-3 font-semibold text-slate-800">Go to Dashboard</button>
+                  ) : (
+                    <>
+                      <Link to="/login" className="rounded-full bg-white px-7 py-3 font-semibold text-slate-800">Login Now</Link>
+                      <Link to="/register" className="rounded-full border-2 border-white px-7 py-3 font-semibold text-white">Register</Link>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+          <div className="absolute bottom-10 flex gap-2">
+            {slides.map((slide, index) => (
+              <button key={slide.title} onClick={() => setCurrentSlide(index)} aria-label={`Show slide ${index + 1}`} className={`h-3 rounded-full transition-all ${index === currentSlide ? 'w-8 bg-white' : 'w-3 bg-white/50'}`} />
+            ))}
+          </div>
+        </section>
+      </main>
+
+      <section id="about" className="bg-slate-50 py-20">
+        <div className="mx-auto max-w-7xl px-4 text-center sm:px-6 lg:px-8">
+          <h2 className="text-4xl font-bold">About Library Management System</h2>
+          <div className="mx-auto my-6 h-1 w-24 bg-gradient-to-r from-blue-600 to-purple-600" />
+          <p className="mx-auto max-w-3xl text-lg text-slate-600">Our comprehensive system streamlines library operations, making it easier for administrators, librarians, faculty, and students to manage and use resources effectively.</p>
+        </div>
+      </section>
+
+      <section id="features" className="bg-white py-20">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mb-14 text-center">
+            <h2 className="text-4xl font-bold">Powerful Library Features</h2>
+            <p className="mt-4 text-lg text-slate-600">Everything you need in one platform</p>
+          </div>
+          <div className="grid gap-7 sm:grid-cols-2 lg:grid-cols-3">
+            {features.map(([title, description, Icon]) => (
+              <article key={title} className="rounded-xl border border-slate-100 bg-white p-6 shadow-lg transition hover:-translate-y-1 hover:shadow-2xl">
+                <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-lg bg-blue-100 text-blue-600"><Icon size={29} /></div>
+                <h3 className="mb-3 text-xl font-semibold">{title}</h3>
+                <p className="text-slate-600">{description}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="stats" className="bg-gradient-to-r from-blue-600 to-purple-600 py-20 text-white">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <h2 className="mb-14 text-center text-4xl font-bold">Our Impact in Numbers</h2>
+          <div className="grid grid-cols-2 gap-8 text-center md:grid-cols-4">
+            {stats.map(([value, label]) => (
+              <div key={label}><div className="text-4xl font-bold">{value}</div><div className="mt-2 text-white/80">{label}</div></div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-slate-50 py-20">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <h2 className="text-center text-4xl font-bold text-blue-900">Recruiters</h2>
+          <p className="mx-auto mb-12 mt-4 max-w-3xl text-center text-lg text-slate-600">Our prestigious recruitment partners who trust our graduates</p>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+            {recruiters.map((name) => (
+              <div key={name} className="rounded-lg border-2 border-slate-200 bg-white p-5 text-center text-lg font-bold text-blue-700 shadow-sm transition hover:border-blue-500 hover:shadow-lg">{name}</div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white py-20 text-center">
+        <h2 className="text-4xl font-bold">Ready to Transform Your Library Management?</h2>
+        <p className="mb-8 mt-4 text-lg text-slate-600">Join hundreds of institutions already using our platform</p>
+        <Link to="/register" className="rounded-full bg-gradient-to-r from-blue-600 to-purple-600 px-8 py-4 font-semibold text-white">Get Started Free</Link>
+      </section>
+
+      <footer id="contact" className="bg-slate-900 py-12 text-white">
+        <div className="mx-auto grid max-w-7xl gap-8 px-4 sm:grid-cols-2 lg:grid-cols-4 lg:px-8">
+          <div>
+            <h3 className="mb-4 text-lg font-semibold">For Technical Support</h3>
+            <p className="text-slate-300">Dr. S. Kalaiselvi M.E., Ph.D</p>
+            <p className="mt-2 text-slate-400">sks@nec.edu.in</p>
+          </div>
+          <div>
+            <h3 className="mb-4 text-lg font-semibold text-blue-400">Info</h3>
+            <a href="https://nec.edu.in" target="_blank" rel="noreferrer" className="text-slate-300 hover:text-blue-400">NEC Website</a>
+          </div>
+          <div>
+            <h3 className="mb-4 text-lg font-semibold text-green-400">Contact Us</h3>
+            <p className="text-slate-300">National Engineering College, K.R. Nagar, Kovilpatti - 628503</p>
+            <p className="mt-2 text-slate-400">principal@nec.edu.in</p>
+          </div>
+          <div>
+            <h3 className="mb-4 text-lg font-semibold text-purple-400">Follow Us</h3>
+            <div className="flex gap-3">
+              <a href="https://www.linkedin.com/school/national-engineering-college/posts/?feedView=all" target="_blank" rel="noreferrer" className="rounded bg-blue-700 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-800">LinkedIn</a>
+              <a href="https://www.facebook.com/neckvpt" target="_blank" rel="noreferrer" className="rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">Facebook</a>
+            </div>
+          </div>
+        </div>
+        <p className="mx-auto mt-10 max-w-7xl border-t border-slate-700 px-4 pt-6 text-center text-sm text-slate-500">© 2026 National Engineering College Library Management System. All rights reserved.</p>
+      </footer>
+    </div>
+  );
 };
 
 export default HomePage;
