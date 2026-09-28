@@ -13,7 +13,8 @@ class BookController {
             const { 
                 search, 
                 q, // Also support 'q' parameter for search
-                category, 
+                category,
+                department,
                 author, 
                 availability,
                 page = 1, 
@@ -36,10 +37,16 @@ class BookController {
                 queryParams.push(searchParam, searchParam, searchParam);
             }
 
-            // Filter by category/department
+            // Filter by category
             if (category && category.trim()) {
                 whereConditions.push('b.category = ?');
                 queryParams.push(category.trim());
+            }
+
+            // Filter by academic department
+            if (department && department.trim()) {
+                whereConditions.push('b.department = ?');
+                queryParams.push(department.trim());
             }
 
             // Filter by author

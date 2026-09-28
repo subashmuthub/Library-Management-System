@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts';
-import { authService, entryService, transactionService } from '../services';
-import { User, Mail, CreditCard, Shield, CheckCircle, AlertCircle } from 'lucide-react';
+import { authService, entryService, transactionService, feedbackService } from '../services';
+import { User, Mail, CreditCard, Shield, CheckCircle, AlertCircle, Download } from 'lucide-react';
+import { jsPDF } from 'jspdf';
 
 const Profile = () => {
   const { user, updateUser } = useAuth();
@@ -19,6 +20,8 @@ const Profile = () => {
   const displayName = user?.name || [user?.first_name || user?.firstName, user?.last_name || user?.lastName].filter(Boolean).join(' ');
   const displayRole = user?.role?.role_name || user?.role;
   const [borrowedBooks, setBorrowedBooks] = useState([]);
+  const [suggestion, setSuggestion] = useState({ title: '', author: '', isbn: '', department: '', justification: '' });
+  const [suggestionMessage, setSuggestionMessage] = useState('');
 
   // Load user stats on mount
   useEffect(() => {
@@ -94,6 +97,42 @@ const Profile = () => {
       setResult({ success: false, message: err.response?.data?.message || 'Upload failed' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDownloadReport = async () => {
+    if (!user?.id) return;
+    try {
+      const response = await transactionService.getAllTransactions({ user_id: user.id, limit: 200 });
+      const history = response.transactions || response.data || [];
+      const doc = new jsPDF();
+      doc.setFontSize(18);
+      doc.text('Smart Library Activity Report', 20, 20);
+      doc.setFontSize(11);
+      doc.text(`Student: ${displayName || 'User'}`, 20, 30);
+      doc.text(`Student ID: ${user.student_id || user.studentId || 'N/A'}`, 20, 37);
+      doc.text(`Generated: ${new Date().toLocaleDateString('en-IN')}`, 20, 44);
+      let y = 58;
+      history.forEach((item, index) => {
+        if (y > 275) { doc.addPage(); y = 20; }
+        doc.text(`${index + 1}. ${item.title || `Book #${item.book_id}`}`, 20, y);
+        doc.text(`Checked out: ${item.checkout_date || 'N/A'} | Returned: ${item.return_date || 'Not returned'}`, 28, y + 7);
+        y += 16;
+      });
+      doc.save(`library-activity-${user.student_id || user.id}.pdf`);
+    } catch (error) {
+      setResult({ success: false, message: error.response?.data?.error || 'Unable to create activity report' });
+    }
+  };
+
+  const handleSuggestionSubmit = async (event) => {
+    event.preventDefault();
+    try {
+      await feedbackService.createPurchaseSuggestion(suggestion);
+      setSuggestion({ title: '', author: '', isbn: '', department: '', justification: '' });
+      setSuggestionMessage('Suggestion submitted for librarian review.');
+    } catch (error) {
+      setSuggestionMessage(error.response?.data?.error || 'Unable to submit suggestion.');
     }
   };
 
@@ -279,7 +318,12 @@ const Profile = () => {
 
       {/* Account Stats */}
       <div className="card">
-        <h2 className="text-xl font-bold mb-4">Account Statistics</h2>
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <h2 className="text-xl font-bold">Account Statistics</h2>
+          <button type="button" onClick={handleDownloadReport} className="btn btn-secondary">
+            <Download size={16} className="mr-2" /> Export PDF
+          </button>
+        </div>
         <div className="grid grid-cols-2 gap-4">
           <div className="text-center p-4 bg-primary-50 rounded-lg">
             <p className="text-3xl font-bold text-primary-600">{stats.borrowed}</p>
@@ -290,6 +334,21 @@ const Profile = () => {
             <p className="text-sm text-gray-600 mt-1">Library Visits</p>
           </div>
         </div>
+      </div>
+
+      <div className="card">
+        <h2 className="text-xl font-bold mb-2">Suggest a Book Purchase</h2>
+        <p className="text-sm text-gray-600 mb-4">Recommend a title for the library collection.</p>
+        <form onSubmit={handleSuggestionSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {['title', 'author', 'isbn', 'department'].map((field) => (
+            <input key={field} required={field === 'title'} className="input" placeholder={field.replace('_', ' ').replace(/^[a-z]/, (letter) => letter.toUpperCase())} value={suggestion[field]} onChange={(event) => setSuggestion({ ...suggestion, [field]: event.target.value })} />
+          ))}
+          <textarea className="input md:col-span-2" rows="3" placeholder="Why should the library buy this?" value={suggestion.justification} onChange={(event) => setSuggestion({ ...suggestion, justification: event.target.value })} />
+          <div className="md:col-span-2 flex items-center gap-3">
+            <button type="submit" className="btn btn-primary">Submit Suggestion</button>
+            {suggestionMessage && <span className="text-sm text-gray-600">{suggestionMessage}</span>}
+          </div>
+        </form>
       </div>
 
       <div className="card">

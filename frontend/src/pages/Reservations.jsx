@@ -139,9 +139,21 @@ const Reservations = () => {
 
   const queueBadge = (pos) => {
     if (!pos) return null;
-    if (pos === 1) return <span className="px-2 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700">#{pos} · HIGH</span>;
-    if (pos <= 3) return <span className="px-2 py-1 rounded-full text-xs font-bold bg-yellow-100 text-yellow-700">#{pos} · MED</span>;
-    return <span className="px-2 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-700">#{pos} · NORMAL</span>;
+    const color = pos === 1
+      ? 'bg-red-100 text-red-700'
+      : pos <= 3
+        ? 'bg-yellow-100 text-yellow-700'
+        : 'bg-blue-100 text-blue-700';
+    return <span className={`px-2 py-1 rounded-full text-xs font-bold ${color}`}>#{pos} in queue</span>;
+  };
+
+  const getQueuePosition = (reservation) => {
+    if (reservation.queue_position) return reservation.queue_position;
+    const sameBook = reservations
+      .filter((item) => item.book_id === reservation.book_id && ['active', 'ready'].includes(item.status))
+      .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+    const position = sameBook.findIndex((item) => item.id === reservation.id);
+    return position >= 0 ? position + 1 : null;
   };
 
   return (
@@ -255,7 +267,7 @@ const Reservations = () => {
                       )}
                     </td>
 
-                    <td className="px-4 py-3">{queueBadge(r.queue_position)}</td>
+                    <td className="px-4 py-3">{queueBadge(getQueuePosition(r))}</td>
 
                     <td className="px-4 py-3 text-xs text-gray-500">
                       {r.created_at ? new Date(r.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}

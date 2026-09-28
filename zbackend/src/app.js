@@ -174,7 +174,7 @@ app.use("/api/v1", (req, res, next) => {
   if (
     role === "student" &&
     req.method === "POST" &&
-    (req.path === "/transactions/checkout" || req.path === "/books/checkout-batch" || req.path.startsWith("/reservations"))
+    (req.path === "/transactions/checkout" || req.path === "/books/checkout-batch" || req.path.startsWith("/reservations") || req.path.match(/^\/feedback\/books\/\d+\/reviews$/) || req.path === "/feedback/purchase-suggestions" || req.path === "/feedback/disputes")
   ) {
     return next();
   }
@@ -219,6 +219,7 @@ app.use("/api/v1/readers", require("./routes/reader.routes"));
 app.use("/api/v1/shelves", require("./routes/shelf.routes"));
 app.use("/api/v1/beacons", require("./routes/beacon.routes"));
 app.use("/api/v1/certificates", require("./routes/certificate.routes"));
+app.use("/api/v1/feedback", require("./routes/feedback.routes"));
 
 // 404 handler
 app.use((req, res) => {

@@ -455,6 +455,41 @@ export const recommendationService = {
   },
 };
 
+export const feedbackService = {
+  getBookReviews: async (bookId) => {
+    const response = await api.get(`/feedback/books/${bookId}/reviews`);
+    return response.data;
+  },
+  saveBookReview: async (bookId, payload) => {
+    const response = await api.post(`/feedback/books/${bookId}/reviews`, payload);
+    return response.data;
+  },
+  createPurchaseSuggestion: async (payload) => {
+    const response = await api.post('/feedback/purchase-suggestions', payload);
+    return response.data;
+  },
+  getPurchaseSuggestions: async () => {
+    const response = await api.get('/feedback/purchase-suggestions');
+    return response.data;
+  },
+  updatePurchaseSuggestion: async (id, payload) => {
+    const response = await api.patch(`/feedback/purchase-suggestions/${id}`, payload);
+    return response.data;
+  },
+  getDisputes: async () => {
+    const response = await api.get('/feedback/disputes');
+    return response.data;
+  },
+  createDispute: async (payload) => {
+    const response = await api.post('/feedback/disputes', payload);
+    return response.data;
+  },
+  updateDispute: async (id, payload) => {
+    const response = await api.patch(`/feedback/disputes/${id}`, payload);
+    return response.data;
+  },
+};
+
 // Overdue Alert System
 export const overdueAlertService = {
   getSummary: async () => {

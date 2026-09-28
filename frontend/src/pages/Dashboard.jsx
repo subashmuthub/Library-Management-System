@@ -26,6 +26,7 @@ import {
   fineService,
   reservationService,
   transactionService,
+  feedbackService,
 } from "../services";
 
 const AnalyticsSections = lazy(
@@ -90,6 +91,8 @@ const Dashboard = () => {
   const [reservationStats, setReservationStats] = useState(null);
   const [topPendingFines, setTopPendingFines] = useState([]);
   const [readyReservations, setReadyReservations] = useState([]);
+  const [dueSoonTransactions, setDueSoonTransactions] = useState([]);
+  const [purchaseSuggestions, setPurchaseSuggestions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -133,6 +136,26 @@ const Dashboard = () => {
       setReadyReservations(
         readyReservationsData?.reservations || readyReservationsData?.data || [],
       );
+
+      if (!canManageCirculation && user?.id) {
+        const personalTransactions = await transactionService
+          .getUserCheckouts(user.id)
+          .catch(() => ({ transactions: [] }));
+        const activeTransactions = personalTransactions?.transactions || personalTransactions?.data || [];
+        setDueSoonTransactions(
+          activeTransactions.filter((transaction) => {
+            if (!transaction.due_date) return false;
+            const daysUntilDue = differenceInCalendarDays(new Date(transaction.due_date), new Date());
+            return daysUntilDue >= 0 && daysUntilDue <= 7;
+          }),
+        );
+      } else {
+        setDueSoonTransactions([]);
+      }
+      if (canManageCirculation) {
+        const suggestions = await feedbackService.getPurchaseSuggestions().catch(() => ({ suggestions: [] }));
+        setPurchaseSuggestions(suggestions.suggestions || []);
+      }
     } catch (error) {
       console.error("Failed to load dashboard data:", error);
     } finally {
@@ -144,6 +167,11 @@ const Dashboard = () => {
   const handleRefresh = async () => {
     setRefreshing(true);
     await loadDashboardData();
+  };
+
+  const updatePurchaseSuggestion = async (id, status) => {
+    await feedbackService.updatePurchaseSuggestion(id, { status });
+    setPurchaseSuggestions((items) => items.map((item) => item.id === id ? { ...item, status } : item));
   };
 
   const applyFilters = () => {
@@ -457,6 +485,30 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {!canManageCirculation && dueSoonTransactions.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+          <div className="flex items-start gap-3">
+            <Clock className="mt-0.5 shrink-0 text-amber-600" size={20} />
+            <div>
+              <h2 className="font-semibold">Books due soon</h2>
+              <p className="mt-1 text-sm text-amber-800">
+                Please return the following book{dueSoonTransactions.length === 1 ? '' : 's'} within the next 7 days.
+              </p>
+              <ul className="mt-2 space-y-1 text-sm">
+                {dueSoonTransactions.map((transaction) => (
+                  <li key={transaction.id} className="flex flex-wrap items-center gap-x-2">
+                    <span className="font-medium">{transaction.title || `Book #${transaction.book_id}`}</span>
+                    <span className="text-amber-700">
+                      due {format(new Date(transaction.due_date), "dd MMM yyyy")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold tracking-tight text-slate-900">Key Metrics</h2>
         <button
@@ -488,6 +540,43 @@ const Dashboard = () => {
           />
         ))}
       </div>
+
+      {canManageCirculation && (
+        <div className="card border border-slate-200">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-xl font-bold">Morning Briefing</h2>
+              <p className="text-sm text-slate-600">Today&apos;s circulation priorities in one view.</p>
+            </div>
+            <Clock className="text-primary-600" size={22} />
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div className="rounded-lg bg-red-50 p-3"><p className="text-red-700">Overdue</p><p className="text-2xl font-bold text-red-800">{transactionStats?.overall_statistics?.overdue_books || 0}</p></div>
+            <div className="rounded-lg bg-amber-50 p-3"><p className="text-amber-700">Due today</p><p className="text-2xl font-bold text-amber-800">{transactionStats?.overall_statistics?.due_today || 0}</p></div>
+            <div className="rounded-lg bg-rose-50 p-3"><p className="text-rose-700">Pending fines</p><p className="text-2xl font-bold text-rose-800">{fineStats?.overall_statistics?.pending_count || 0}</p></div>
+            <div className="rounded-lg bg-emerald-50 p-3"><p className="text-emerald-700">Ready reservations</p><p className="text-2xl font-bold text-emerald-800">{reservationStats?.overall_statistics?.ready_reservations || 0}</p></div>
+          </div>
+        </div>
+      )}
+
+      {canManageCirculation && (
+        <div className="card border border-slate-200">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold">Purchase Suggestions</h2>
+            <span className="text-sm text-slate-500">{purchaseSuggestions.filter((item) => item.status === "pending").length} pending</span>
+          </div>
+          {purchaseSuggestions.length ? (
+            <div className="space-y-2">
+              {purchaseSuggestions.map((item) => (
+                <div key={item.id} className="border rounded-lg p-3 flex flex-wrap items-center justify-between gap-3">
+                  <div><p className="font-medium">{item.title}</p><p className="text-sm text-slate-600">{item.author || "Unknown author"} · {item.department || "General"}</p><p className="text-xs text-slate-500">{item.justification || "No justification provided"}</p></div>
+                  {item.status === "pending" ? <div className="flex gap-2"><button type="button" className="btn btn-primary py-1 px-2 text-xs" onClick={() => updatePurchaseSuggestion(item.id, "approved")}>Approve</button><button type="button" className="btn btn-secondary py-1 px-2 text-xs" onClick={() => updatePurchaseSuggestion(item.id, "rejected")}>Reject</button></div> : <span className="badge badge-info capitalize">{item.status}</span>}
+                </div>
+              ))}
+            </div>
+          ) : <p className="text-slate-500">No purchase suggestions.</p>}
+        </div>
+      )}
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
@@ -972,7 +1061,7 @@ const Dashboard = () => {
         <div className="card">
           <h3 className="text-base font-semibold mb-1">Fine Metrics</h3>
           <p className="text-sm text-slate-600">
-            Pending {fineStats?.overall_statistics?.pending_count || 0} | Collected ${Number(fineStats?.overall_statistics?.collected_amount || 0).toFixed(2)}
+            Pending {fineStats?.overall_statistics?.pending_count || 0} | Collected ₹{Number(fineStats?.overall_statistics?.collected_amount || 0).toFixed(2)}
           </p>
         </div>
         <div className="card">

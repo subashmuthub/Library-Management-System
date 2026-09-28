@@ -26,6 +26,7 @@ import LibraryHeatmap from './pages/LibraryHeatmap';
 import OverduePrediction from './pages/OverduePrediction';
 import ShelfLocator from './pages/ShelfLocator';
 import ActiveUserCertificate from './pages/ActiveUserCertificate';
+import HomePage from './pages/HomePage';
 
 function App() {
   return (
@@ -39,19 +40,12 @@ function App() {
         <ModeProvider>
           <Routes>
             {/* Public routes */}
+            <Route path="/" element={<HomePage />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
 
             {/* Protected routes */}
-            <Route
-              path="/"
-              element={
-                <PrivateRoute>
-                  <Layout />
-                </PrivateRoute>
-              }
-            >
-              <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route element={<PrivateRoute><Layout /></PrivateRoute>}>
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="books" element={<Books />} />
               <Route path="books/:id" element={<BookDetails />} />

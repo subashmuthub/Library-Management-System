@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { transactionService, bookService, userManagementService } from '../services';
+import { transactionService, bookService, userManagementService, feedbackService } from '../services';
 import { useAuth } from '../contexts';
 import { BookOpen, User, Calendar, CheckCircle, XCircle, Clock, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
@@ -28,10 +28,29 @@ const Transactions = () => {
     book_id: '',
     loan_days: 14
   });
+  const [disputes, setDisputes] = useState([]);
 
   useEffect(() => {
     loadTransactions();
+    feedbackService.getDisputes().then((response) => setDisputes(response.disputes || [])).catch(() => setDisputes([]));
   }, [filter]);
+
+  const raiseDispute = async (transactionId) => {
+    const reason = window.prompt('Describe the transaction dispute:');
+    if (!reason?.trim()) return;
+    try {
+      await feedbackService.createDispute({ transaction_id: transactionId, reason });
+      const response = await feedbackService.getDisputes();
+      setDisputes(response.disputes || []);
+    } catch (error) { alert(error.response?.data?.error || 'Unable to raise dispute.'); }
+  };
+
+  const updateDispute = async (id, status) => {
+    try {
+      await feedbackService.updateDispute(id, { status, resolution_notes: status === 'resolved' ? 'Resolved by library staff.' : '' });
+      setDisputes((items) => items.map((item) => item.id === id ? { ...item, status } : item));
+    } catch (error) { alert(error.response?.data?.error || 'Unable to update dispute.'); }
+  };
 
   const loadTransactions = async () => {
     setLoading(true);
@@ -275,6 +294,9 @@ const Transactions = () => {
                             </button>
                           </>
                         )}
+                        <button onClick={() => raiseDispute(transaction.id)} className="text-orange-600 hover:text-orange-700 font-medium">
+                          Dispute
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -288,6 +310,23 @@ const Transactions = () => {
             <p className="text-gray-500">No transactions found</p>
           </div>
         )}
+      </div>
+
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">Transaction Disputes</h2>
+          <span className="text-sm text-gray-500">{disputes.filter((item) => !['resolved', 'rejected'].includes(item.status)).length} open</span>
+        </div>
+        {disputes.length ? disputes.map((dispute) => (
+          <div key={dispute.id} className="border rounded-lg p-3 mb-2 flex flex-wrap items-center justify-between gap-3">
+            <div><p className="font-medium">Transaction #{dispute.transaction_id} · {dispute.title || `Book #${dispute.book_id}`}</p><p className="text-sm text-gray-600">{dispute.reason}</p></div>
+            {isAdminOrLibrarian ? (
+              <select className="input w-auto" value={dispute.status} onChange={(event) => updateDispute(dispute.id, event.target.value)}>
+                {['open', 'investigating', 'resolved', 'rejected'].map((status) => <option key={status} value={status}>{status}</option>)}
+              </select>
+            ) : <span className="badge badge-info capitalize">{dispute.status}</span>}
+          </div>
+        )) : <p className="text-gray-500">No disputes logged.</p>}
       </div>
 
       {/* Multi-Book Cart Checkout Modal */}
@@ -452,12 +491,15 @@ const Transactions = () => {
                   value={returnForm.condition}
                   onChange={(e) => setReturnForm({ ...returnForm, condition: e.target.value })}
                 >
-                  <option value="excellent">Excellent - Like new</option>
                   <option value="good">Good - Normal wear</option>
-                  <option value="fair">Fair - Visible wear</option>
-                  <option value="poor">Poor - Damaged</option>
+                  <option value="damaged">Damaged - Requires review</option>
+                  <option value="lost">Lost - Book not returned</option>
                 </select>
               </div>
+
+              {(returnForm.condition === 'damaged' || returnForm.condition === 'lost') && (
+                <div className="bg-red-50 border border-red-200 p-3 rounded-lg text-sm text-red-800">Attention required: this return will be escalated for staff review.</div>
+              )}
 
               {/* Notes */}
               <div>

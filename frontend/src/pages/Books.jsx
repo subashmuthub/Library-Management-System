@@ -119,6 +119,7 @@ const Books = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [filters, setFilters] = useState({
     category: "",
+    department: "",
     available: "",
   });
 
@@ -180,7 +181,7 @@ const Books = () => {
 
   useEffect(() => {
     loadBooks();
-  }, [searchTerm, filters.category, filters.available, sortBy, sortOrder]);
+  }, [searchTerm, filters.category, filters.department, filters.available, sortBy, sortOrder]);
 
   const loadBooks = async () => {
     setLoading(true);
@@ -188,6 +189,7 @@ const Books = () => {
       const params = {
         q: searchTerm || undefined,
         category: filters.category || undefined,
+        department: filters.department || undefined,
         availability: filters.available || undefined,
         limit: 100,
         sortBy: sortBy,
@@ -251,7 +253,7 @@ const Books = () => {
   // Quick search as user types (debounced)
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
-      if (searchTerm || filters.category) {
+      if (searchTerm || filters.category || filters.department) {
         loadBooks();
       }
     }, 300);
@@ -368,6 +370,22 @@ const Books = () => {
         "Failed to delete book: " +
           (error.response?.data?.message || error.message),
       );
+    }
+  };
+
+  const handleAddCopies = async (book) => {
+    const copiesToAdd = Number(window.prompt(`How many copies should be added to "${book.title}"?`, "1"));
+    if (!Number.isInteger(copiesToAdd) || copiesToAdd < 1) return;
+
+    try {
+      await bookService.updateBook(book.id, {
+        ...book,
+        total_copies: Number(book.total_copies || 0) + copiesToAdd,
+      });
+      alert(`${copiesToAdd} cop${copiesToAdd === 1 ? 'y' : 'ies'} added successfully!`);
+      loadBooks();
+    } catch (error) {
+      alert(`Failed to add copies: ${error.response?.data?.message || error.message}`);
     }
   };
 
@@ -533,7 +551,7 @@ const Books = () => {
   // Clear all filters
   const handleClearFilters = () => {
     setSearchTerm("");
-    setFilters({ category: "", available: "" });
+    setFilters({ category: "", department: "", available: "" });
   };
 
   const handleOpenImportModal = () => {
@@ -592,9 +610,9 @@ const Books = () => {
           {/* Filter Dropdowns */}
           <select
             className="input w-64"
-            value={filters.category}
+            value={filters.department}
             onChange={(e) =>
-              setFilters({ ...filters, category: e.target.value })
+              setFilters({ ...filters, department: e.target.value })
             }
           >
             <option value="">All Departments</option>
@@ -618,7 +636,7 @@ const Books = () => {
           </select>
 
           {/* Clear Button */}
-          {(searchTerm || filters.category || filters.available) && (
+          {(searchTerm || filters.category || filters.department || filters.available) && (
             <button
               type="button"
               onClick={handleClearFilters}
@@ -875,6 +893,13 @@ const Books = () => {
                                     : "text-gray-400"
                                 }
                               />
+                            </button>
+                            <button
+                              onClick={() => handleAddCopies(book)}
+                              className="p-1.5 rounded hover:bg-green-100 text-green-600 transition-colors"
+                              title="Add Copies"
+                            >
+                              <Plus size={15} />
                             </button>
                             <button
                               onClick={() => handleEditBook(book)}

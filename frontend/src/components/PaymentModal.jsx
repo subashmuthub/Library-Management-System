@@ -631,7 +631,7 @@ Thank you for your payment!
                 <div className="border-t border-b py-4 mb-6">
                   <div className="flex justify-between items-center">
                     <span className="text-lg font-semibold">Amount Paid</span>
-                    <span className="text-3xl font-bold text-green-600 print:text-black">${receiptData.amount}</span>
+                    <span className="text-3xl font-bold text-green-600 print:text-black">₹{receiptData.amount}</span>
                   </div>
                   <div className="flex justify-between items-center mt-2">
                     <span className="text-sm text-gray-600 print:text-black">Status</span>

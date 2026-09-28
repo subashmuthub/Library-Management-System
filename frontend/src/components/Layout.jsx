@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts';
 import {
@@ -52,6 +52,13 @@ const Layout = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState({ Books: true, 'Issue Management': true, 'Analytics & Reports': true });
   const [profileOpen, setProfileOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState([
+    { id: 1, title: 'Overdue books need attention', detail: 'Review the overdue circulation queue.', path: '/transactions', tone: 'danger', unread: true },
+    { id: 2, title: 'Reservations ready for pickup', detail: 'Check the latest ready reservations.', path: '/reservations', tone: 'warning', unread: true },
+    { id: 3, title: 'Fine review available', detail: 'There are pending fines to review.', path: '/fines', tone: 'info', unread: true },
+  ]);
+  const notificationsRef = useRef(null);
   const [search, setSearch] = useState('');
 
   const roleName = typeof user?.role === 'string' ? user.role : user?.role?.role_name;
@@ -73,6 +80,23 @@ const Layout = () => {
   const searchResults = search.trim()
     ? flattenNavigation(visibleNavigation).filter((item) => item.label.toLowerCase().includes(search.toLowerCase()))
     : [];
+  const unreadNotifications = notifications.filter((notification) => notification.unread).length;
+
+  useEffect(() => {
+    const handleOutsideClick = (event) => {
+      if (notificationsRef.current && !notificationsRef.current.contains(event.target)) {
+        setNotificationsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  const openNotification = (notification) => {
+    setNotifications((items) => items.map((item) => item.id === notification.id ? { ...item, unread: false } : item));
+    setNotificationsOpen(false);
+    navigate(notification.path);
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -147,7 +171,36 @@ const Layout = () => {
               {searchResults.length > 0 && <div className="app-search-results">{searchResults.slice(0, 6).map((result) => <Link key={result.path} to={result.path} onClick={() => setSearch('')}>{result.label}</Link>)}</div>}
             </div>
             <div className="app-date"><CalendarDays size={16} /><span>{todayLabel}</span></div>
-            <button className="app-icon-button" aria-label="Notifications"><Bell size={18} /><span className="app-notification-badge">3</span></button>
+            <div className="app-notifications-wrap" ref={notificationsRef}>
+              <button
+                className="app-icon-button"
+                onClick={() => setNotificationsOpen((value) => !value)}
+                aria-label={`${unreadNotifications} unread notifications`}
+                aria-expanded={notificationsOpen}
+                aria-haspopup="true"
+              >
+                <Bell size={18} />
+                {unreadNotifications > 0 && <span className="app-notification-badge">{unreadNotifications}</span>}
+              </button>
+              {notificationsOpen && (
+                <div className="app-notifications-panel" role="dialog" aria-label="Notifications">
+                  <div className="app-notifications-heading">
+                    <div><strong>Notifications</strong><span>{unreadNotifications} unread</span></div>
+                    <button onClick={() => setNotifications((items) => items.map((item) => ({ ...item, unread: false })))}>Mark all read</button>
+                  </div>
+                  <div className="app-notifications-list">
+                    {notifications.map((notification) => (
+                      <button key={notification.id} className={`app-notification-item ${notification.unread ? 'is-unread' : ''}`} onClick={() => openNotification(notification)}>
+                        <span className={`app-notification-dot app-notification-${notification.tone}`} />
+                        <span><strong>{notification.title}</strong><small>{notification.detail}</small></span>
+                        {notification.unread && <i aria-label="Unread" />}
+                      </button>
+                    ))}
+                  </div>
+                  <Link className="app-notifications-footer" to="/dashboard" onClick={() => setNotificationsOpen(false)}>View dashboard alerts</Link>
+                </div>
+              )}
+            </div>
             <div className="app-profile-wrap">
               <button className="app-profile-button" onClick={() => setProfileOpen((value) => !value)} aria-expanded={profileOpen}>
                 <span className="app-avatar">{user?.profile_image_url ? <img src={user.profile_image_url} alt="" /> : <User size={17} />}</span>

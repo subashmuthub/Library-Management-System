@@ -250,7 +250,7 @@ const Fines = () => {
                         <td className="px-4 py-3 text-sm">#{fine.id}</td>
                         <td className="px-4 py-3 text-sm">{fine.user_name || `User #${fine.user_id}`}</td>
                         <td className="px-4 py-3 text-sm">Transaction #{fine.transaction_id}</td>
-                        <td className="px-4 py-3 text-sm font-semibold">${fine.amount}</td>
+                        <td className="px-4 py-3 text-sm font-semibold">₹{fine.amount}</td>
                         <td className="px-4 py-3 text-sm">{fine.days_overdue || 'N/A'}</td>
                         <td className="px-4 py-3">{getStatusBadge(fine.status)}</td>
                         <td className="px-4 py-3 text-sm">

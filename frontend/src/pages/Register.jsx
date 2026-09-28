@@ -1,369 +1,84 @@
-import React, { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts';
-import { AlertCircle, ArrowRight, Library, Mail, Lock, User, CreditCard, CheckCircle } from 'lucide-react';
+
+const backgroundImages = ['/Images/Home.jpg', '/Images/nec-achievements.png', '/Images/NEC-Front-Mobile-Slider-scaled.webp'];
 
 const Register = () => {
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-    student_id: '',
-  });
-  const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
-  const [pendingEmail, setPendingEmail] = useState('');
-  const [otp, setOtp] = useState('');
-  const [otpStep, setOtpStep] = useState(false);
+  const [step, setStep] = useState('form');
+  const [formData, setFormData] = useState({ name: '', email: '', password: '', confirmPassword: '', student_id: '', role: 'student' });
+  const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [backgroundIndex, setBackgroundIndex] = useState(0);
+  const [agreeToTerms, setAgreeToTerms] = useState(false);
+  const [otp, setOtp] = useState('');
   const { register, verifyEmailOtp, resendEmailOtp } = useAuth();
   const navigate = useNavigate();
+  useEffect(() => { document.title = 'Register | NEC LibMS'; const timer = setTimeout(() => { const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); let node; while ((node = walker.nextNode())) node.nodeValue = node.nodeValue.replaceAll('LabMS', 'LibMS').replaceAll('Laboratory Management System', 'Library Management System').replaceAll('Lab Management System', 'Library Management System').replaceAll('Faculty', 'Admin').replaceAll('Lab Technician', 'Library Technician'); const roleSelect = document.querySelector('select[name="role"]'); if (roleSelect) { roleSelect.querySelector('option[value="faculty"]')?.setAttribute('value', 'admin'); roleSelect.querySelector('option[value="lab_technician"]')?.setAttribute('value', 'library_technician'); } }, 0); return () => clearTimeout(timer); }, []);
+  useEffect(() => { const nav = document.querySelector('nav'); if (!nav) return; nav.className = 'relative z-10 border-b border-white/10 bg-blue-950/90 shadow-xl'; nav.innerHTML = '<div class="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 lg:px-8"><a href="/" class="flex items-center gap-3"><img src="/Images/Logo.png" alt="NEC" class="h-14 w-14 rounded-full bg-white p-1 object-contain"><div><strong class="block text-xl text-white">NEC LibMS</strong><span class="text-xs text-blue-200">Library Management System</span></div></a><div class="hidden text-right md:block"><strong class="block text-sm text-amber-300">NATIONAL ENGINEERING COLLEGE</strong><span class="text-xs text-blue-200">An Autonomous Institution · Kovilpatti</span></div><a href="/" class="rounded-lg bg-white/10 px-3 py-2 text-sm font-medium text-white hover:bg-white/20">Home</a></div>'; }, [step, loading]);
+  useEffect(() => {
+    const timer = setInterval(() => setBackgroundIndex((index) => (index + 1) % backgroundImages.length), 5000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    const page = document.querySelector('[style*="/assets/library-bg.jpg"]');
+    if (page) page.style.backgroundImage = `url(${backgroundImages[backgroundIndex]})`;
+  }, [backgroundIndex]);
 
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+  const handleChange = (event) => {
+    const { name, value } = event.target;
+    setFormData((current) => ({ ...current, [name]: value }));
+    setErrors((current) => ({ ...current, [name]: '', submit: '', terms: '' }));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setMessage('');
+  const validateForm = () => {
+    const nextErrors = {};
+    if (formData.name.trim().length < 2) nextErrors.name = 'Full name must be at least 2 characters';
+    if (!/^[^\s@]+@(?:gmail\.com|nec\.edu\.in)$/i.test(formData.email)) nextErrors.email = 'Use a valid Gmail or NEC email address';
+    if (formData.password.length < 8 || !/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(formData.password)) nextErrors.password = 'Use 8+ characters with uppercase, lowercase, and number';
+    if (formData.password !== formData.confirmPassword) nextErrors.confirmPassword = 'Passwords do not match';
+    if (!agreeToTerms) nextErrors.terms = 'You must agree to the terms and conditions';
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
 
-    if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!validateForm()) return;
+    if (formData.role !== 'student') {
+      setErrors({ submit: 'Only Student accounts can self-register. Admin and Library Technician accounts must be created by an administrator.' });
       return;
     }
-
-    if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters');
-      return;
-    }
-
-    setLoading(true);
-
-    const result = await register({
-      name: formData.name,
-      email: formData.email,
-      password: formData.password,
-      student_id: formData.student_id,
-      role: 'student',
-    });
-
-    if (result.success) {
-      if (result.requiresVerification) {
-        setPendingEmail(result.email || formData.email);
-        setOtpStep(true);
-        setMessage('OTP sent to your email. Verify to continue to dashboard.');
-      } else {
-        navigate('/dashboard');
-      }
-    } else {
-      if (
-        (result.code === 'EMAIL_NOT_VERIFIED' || result.code === 'OTP_SEND_FAILED') &&
-        (result.email || formData.email)
-      ) {
-        setPendingEmail(result.email || formData.email);
-        setOtpStep(true);
-        setMessage(
-          result.code === 'OTP_SEND_FAILED'
-            ? 'Account created. OTP email could not be sent now. Use Resend OTP after email setup is fixed.'
-            : 'This email is pending verification. Enter OTP or resend OTP to continue.'
-        );
-      }
-      setError(result.error);
-    }
-    setLoading(false);
+    setLoading(true); setErrors({});
+    try {
+      const result = await register({ ...formData, student_id: formData.student_id || formData.email, role: 'student' });
+      if (result.success && result.requiresVerification) setStep('otp');
+      else if (result.success) navigate('/dashboard', { replace: true });
+      else if (result.code === 'EMAIL_NOT_VERIFIED' || result.code === 'OTP_SEND_FAILED') { setErrors({ submit: result.error }); setStep('otp'); }
+      else setErrors({ submit: result.error || 'Registration failed' });
+    } catch { setErrors({ submit: 'Registration failed. Please try again.' }); }
+    finally { setLoading(false); }
   };
 
-  const handleVerifyOtp = async (e) => {
-    e.preventDefault();
-    setError('');
-    setMessage('');
-
-    if (!/^\d{6}$/.test(otp)) {
-      setError('Enter a valid 6-digit OTP');
-      return;
-    }
-
-    setLoading(true);
-    const result = await verifyEmailOtp(pendingEmail, otp);
-    if (result.success) {
-      navigate('/dashboard');
-    } else {
-      setError(result.error);
-    }
-    setLoading(false);
+  const handleVerify = async (event) => {
+    event.preventDefault();
+    if (!/^\d{6}$/.test(otp)) return setErrors({ otp: 'Enter a valid 6-digit OTP' });
+    setLoading(true); setErrors({});
+    try {
+      const result = await verifyEmailOtp(formData.email, otp);
+      if (result.success) navigate('/dashboard', { replace: true });
+      else setErrors({ otp: result.error || 'OTP verification failed' });
+    } finally { setLoading(false); }
   };
 
-  const handleResendOtp = async () => {
-    setError('');
-    setMessage('');
-    setLoading(true);
-    const result = await resendEmailOtp(pendingEmail);
-    if (result.success) {
-      setMessage('A new OTP has been sent to your email.');
-    } else {
-      setError(result.error);
-    }
-    setLoading(false);
+  const resend = async () => {
+    setLoading(true); setErrors({});
+    try { const result = await resendEmailOtp(formData.email); if (!result.success) setErrors({ otp: result.error }); }
+    finally { setLoading(false); }
   };
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-950 relative overflow-hidden py-8">
-      {/* Background Image with Overlay */}
-      <div 
-        className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-30 mix-blend-luminosity"
-        style={{ backgroundImage: 'url("/assets/library-bg.jpg")' }}
-      ></div>
-      <div className="fixed inset-0 z-0 bg-gradient-to-br from-indigo-950/80 via-gray-900/90 to-black/95"></div>
-      
-      {/* Decorative Orbs */}
-      <div className="fixed top-0 left-0 w-[500px] h-[500px] bg-indigo-600 rounded-full mix-blend-screen filter blur-[128px] opacity-20 animate-pulse"></div>
-      <div className="fixed bottom-0 right-0 w-[500px] h-[500px] bg-purple-600 rounded-full mix-blend-screen filter blur-[128px] opacity-20 animate-pulse" style={{ animationDelay: '2s' }}></div>
-
-      <div className="relative z-10 w-full max-w-6xl mx-auto p-4 lg:p-8 flex items-center justify-center">
-        <div className="flex flex-col lg:flex-row w-full max-w-5xl rounded-[2.5rem] overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-white/5 backdrop-blur-md bg-black/40">
-          
-          {/* Left Panel - Branding */}
-          <div className="hidden lg:flex flex-col justify-between w-1/2 p-12 relative overflow-hidden bg-gradient-to-br from-indigo-600/90 to-purple-800/90 border-r border-white/5">
-            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-            
-            <div className="relative z-10 mt-4">
-              <div className="inline-flex items-center justify-center w-16 h-16 bg-white/10 backdrop-blur-xl rounded-2xl mb-8 shadow-xl border border-white/20 text-white">
-                <Library size={32} />
-              </div>
-              <h1 className="text-5xl font-extrabold text-white mb-6 tracking-tight leading-tight">
-                Join <br />
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-200 to-indigo-100">Smart Library</span>
-              </h1>
-              <p className="text-indigo-100/90 text-lg max-w-sm leading-relaxed font-medium mb-8">
-                Create your account to start borrowing books, accessing digital journals, and managing your reading list seamlessly.
-              </p>
-
-              <div className="space-y-4">
-                {[
-                  "Access thousands of physical books",
-                  "Read digital journals & articles",
-                  "Get real-time availability alerts",
-                  "Manage reservations easily"
-                ].map((feature, idx) => (
-                  <div key={idx} className="flex items-center gap-3 text-indigo-100/90 font-medium">
-                    <CheckCircle size={20} className="text-blue-300" />
-                    <span>{feature}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="relative z-10 mb-4 mt-12">
-              <div className="flex items-center gap-4 text-white/50 text-sm font-medium">
-                <span>© 2026 Smart Library</span>
-                <span className="w-1 h-1 bg-white/30 rounded-full"></span>
-                <span>Powered by Advanced Tech</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Right Panel - Register Form */}
-          <div className="w-full lg:w-1/2 p-8 sm:p-12 lg:p-16 bg-white/5 backdrop-blur-2xl">
-            <div className="max-w-md mx-auto">
-              <div className="lg:hidden text-center mb-10">
-                <div className="inline-flex items-center justify-center w-14 h-14 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl mb-4 text-white shadow-lg border border-white/10">
-                  <Library size={28} />
-                </div>
-                <h2 className="text-3xl font-bold text-white tracking-tight">Smart Library</h2>
-              </div>
-
-              <div className="mb-8 text-center lg:text-left">
-                <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">
-                  {otpStep ? 'Verify Your Email' : 'Create Account'}
-                </h2>
-                <p className="text-gray-400 font-medium text-sm">
-                  {otpStep 
-                    ? 'We\'ve sent a code to your email. Please enter it below.'
-                    : 'Fill in your details to get started.'}
-                </p>
-              </div>
-
-              {error && (
-                <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
-                  <AlertCircle size={20} className="text-red-400 flex-shrink-0 mt-0.5" />
-                  <p className="text-sm text-red-200 font-medium">{error}</p>
-                </div>
-              )}
-
-              {message && (
-                <div className="mb-6 p-4 bg-green-500/10 border border-green-500/30 rounded-2xl flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
-                  <CheckCircle size={20} className="text-green-400 flex-shrink-0 mt-0.5" />
-                  <p className="text-sm text-green-200 font-medium">{message}</p>
-                </div>
-              )}
-
-              {!otpStep ? (
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-300 mb-2 ml-1">Full Name</label>
-                    <div className="relative group">
-                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 group-focus-within:text-indigo-400 transition-colors">
-                        <User size={18} />
-                      </div>
-                      <input
-                        type="text"
-                        name="name"
-                        className="block w-full pl-11 pr-4 py-3 bg-gray-900/40 border border-gray-700/50 rounded-2xl text-white placeholder-gray-500 focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all outline-none font-medium"
-                        placeholder="John Doe"
-                        value={formData.name}
-                        onChange={handleChange}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-300 mb-2 ml-1">Student / Teacher ID</label>
-                    <div className="relative group">
-                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 group-focus-within:text-indigo-400 transition-colors">
-                        <CreditCard size={18} />
-                      </div>
-                      <input
-                        type="text"
-                        name="student_id"
-                        className="block w-full pl-11 pr-4 py-3 bg-gray-900/40 border border-gray-700/50 rounded-2xl text-white placeholder-gray-500 focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all outline-none font-medium"
-                        placeholder="STU001 or EMP123"
-                        value={formData.student_id}
-                        onChange={handleChange}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-300 mb-2 ml-1">Email Address</label>
-                    <div className="relative group">
-                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 group-focus-within:text-indigo-400 transition-colors">
-                        <Mail size={18} />
-                      </div>
-                      <input
-                        type="email"
-                        name="email"
-                        className="block w-full pl-11 pr-4 py-3 bg-gray-900/40 border border-gray-700/50 rounded-2xl text-white placeholder-gray-500 focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all outline-none font-medium"
-                        placeholder="student@example.com"
-                        value={formData.email}
-                        onChange={handleChange}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-300 mb-2 ml-1">Password</label>
-                      <div className="relative group">
-                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 group-focus-within:text-indigo-400 transition-colors">
-                          <Lock size={18} />
-                        </div>
-                        <input
-                          type="password"
-                          name="password"
-                          className="block w-full pl-11 pr-4 py-3 bg-gray-900/40 border border-gray-700/50 rounded-2xl text-white placeholder-gray-500 focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all outline-none font-medium"
-                          placeholder="Password"
-                          value={formData.password}
-                          onChange={handleChange}
-                          required
-                          minLength="6"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-300 mb-2 ml-1">Confirm Password</label>
-                      <div className="relative group">
-                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 group-focus-within:text-indigo-400 transition-colors">
-                          <Lock size={18} />
-                        </div>
-                        <input
-                          type="password"
-                          name="confirmPassword"
-                          className="block w-full pl-11 pr-4 py-3 bg-gray-900/40 border border-gray-700/50 rounded-2xl text-white placeholder-gray-500 focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all outline-none font-medium"
-                          placeholder="Confirm"
-                          value={formData.confirmPassword}
-                          onChange={handleChange}
-                          required
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white py-3.5 px-4 rounded-2xl font-bold text-[15px] transition-all shadow-[0_0_20px_rgba(79,70,229,0.3)] hover:shadow-[0_0_25px_rgba(79,70,229,0.5)] active:scale-[0.98] mt-6"
-                    disabled={loading}
-                  >
-                    {loading ? "Creating Account..." : "Create Account"}
-                    {!loading && <ArrowRight size={18} />}
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={handleVerifyOtp} className="space-y-5 mt-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-300 mb-2 ml-1 text-center">6-Digit Verification Code</label>
-                    <input
-                      type="text"
-                      className="block w-full text-center tracking-[0.5em] text-2xl py-4 bg-gray-900/40 border border-gray-700/50 rounded-2xl text-white focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all outline-none font-bold"
-                      placeholder="------"
-                      value={otp}
-                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                      required
-                      autoFocus
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white py-3.5 px-4 rounded-2xl font-bold text-[15px] transition-all shadow-[0_0_20px_rgba(79,70,229,0.3)] hover:shadow-[0_0_25px_rgba(79,70,229,0.5)] active:scale-[0.98] mt-2"
-                    disabled={loading || otp.length !== 6}
-                  >
-                    {loading ? "Verifying..." : "Verify OTP"}
-                  </button>
-
-                  <div className="text-center mt-4">
-                    <button
-                      type="button"
-                      onClick={handleResendOtp}
-                      disabled={loading}
-                      className="text-indigo-400 hover:text-indigo-300 font-semibold text-sm transition-colors disabled:opacity-50"
-                    >
-                      Didn't receive code? Resend OTP
-                    </button>
-                  </div>
-                  
-                  <div className="text-center mt-2">
-                    <button
-                      type="button"
-                      onClick={() => setOtpStep(false)}
-                      className="text-gray-400 hover:text-gray-300 font-medium text-sm transition-colors"
-                    >
-                      Use a different email
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              <div className="mt-8 text-center">
-                <p className="text-gray-400 text-sm font-medium">
-                  Already have an account?{" "}
-                  <Link to="/login" className="text-indigo-400 hover:text-indigo-300 font-bold transition-colors">
-                    Sign in here
-                  </Link>
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  const field = (name, label, type = 'text', placeholder = '') => <div><label className="mb-2 block text-sm font-semibold text-gray-700">{label}</label><input type={type} name={name} value={formData[name]} onChange={handleChange} placeholder={placeholder} required disabled={loading} className={`w-full rounded-xl border bg-gray-50/50 px-4 py-3 text-base shadow-sm outline-none transition focus:bg-white focus:ring-2 ${errors[name] ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : 'border-gray-200 focus:border-purple-500 focus:ring-purple-200'}`} />{errors[name] && <p className="mt-1 text-xs text-red-600">{errors[name]}</p>}</div>;
+  return <div className="relative flex min-h-screen flex-col bg-cover bg-center bg-no-repeat" style={{ backgroundImage: 'url(/assets/library-bg.jpg)' }}><div className="absolute inset-0 bg-black/40" /><nav className="relative z-10 bg-gradient-to-r from-blue-800 via-blue-900 to-purple-900 shadow-2xl"><div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4"><Link to="/" className="flex items-center gap-4"><img src="/pic/NEC%20LOGO.png" alt="NEC Logo" className="h-16 w-16 rounded-full bg-white p-2 object-contain shadow-lg" /><div className="text-white"><h1 className="text-xl font-bold tracking-wide md:text-2xl">NEC LabMS</h1><p className="text-sm font-medium text-blue-200">Laboratory Management System</p></div></Link><div className="hidden text-center text-white md:block"><h2 className="text-lg font-bold text-yellow-300 lg:text-xl">NATIONAL ENGINEERING COLLEGE</h2><p className="text-xs text-blue-200">An Autonomous Institution · Affiliated to Anna University, Chennai</p><p className="mt-1 text-xs text-blue-300">K.R.Nagar, Kovilpatti - 628503 · DST-FIST Sponsored Institution</p></div><Link to="/" className="rounded-lg bg-white/10 px-3 py-2 text-sm font-medium text-white hover:bg-white/20">Home</Link></div></nav><main className="relative z-10 flex flex-grow items-center justify-center p-6"><div className="w-full max-w-lg rounded-2xl border border-white/20 bg-white/95 p-8 shadow-2xl backdrop-blur-sm"><div className="mb-8 text-center"><div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-blue-600 text-white shadow-lg"><span className="text-4xl">+</span></div><h1 className="mb-2 bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-3xl font-bold text-transparent">{step === 'otp' ? 'Verify Email' : 'Create Account'}</h1><p className="text-gray-600">{step === 'otp' ? `We sent an OTP to ${formData.email}` : 'Join NEC Lab Management System'}</p></div>{Object.keys(errors).length > 0 && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{Object.values(errors).filter(Boolean).map((error) => <div key={error}>{error}</div>)}</div>}{step === 'form' ? <form onSubmit={handleSubmit} className="space-y-4">{field('name', 'Full Name', 'text', 'Enter your full name')}{field('email', 'Gmail Address', 'email', 'your.email@gmail.com')}{field('password', 'Password', 'password', 'Create a strong password')}<p className="-mt-2 text-xs text-gray-500">Min 8 chars with uppercase, lowercase & number</p>{field('confirmPassword', 'Confirm Password', 'password', 'Confirm your password')}<label className="block text-sm font-semibold text-gray-700">Account Type<select name="role" value={formData.role} onChange={handleChange} disabled={loading} className="mt-2 w-full rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3 outline-none focus:border-purple-500"><option value="student">Student</option><option value="faculty">Faculty</option><option value="lab_technician">Lab Technician</option></select></label><label className="flex items-start gap-3 py-2 text-sm text-gray-600"><input type="checkbox" checked={agreeToTerms} onChange={(event) => setAgreeToTerms(event.target.checked)} disabled={loading} className="mt-1 h-4 w-4" /><span>I agree to the <a href="#terms" className="font-medium text-purple-600">Terms of Service</a> and <a href="#privacy" className="font-medium text-purple-600">Privacy Policy</a></span></label><button type="submit" disabled={loading || !agreeToTerms} className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 py-3 font-semibold text-white shadow-lg transition hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60">{loading ? 'Creating account...' : 'Send OTP to Gmail'}</button></form> : <form onSubmit={handleVerify} className="space-y-5"><input value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" inputMode="numeric" autoFocus className="w-full rounded-xl border border-gray-200 bg-gray-50 py-4 text-center text-3xl tracking-[0.5em] outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200" /><button type="submit" disabled={loading || otp.length !== 6} className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 py-3 font-semibold text-white disabled:opacity-60">{loading ? 'Verifying...' : 'Verify OTP'}</button><button type="button" onClick={resend} disabled={loading} className="w-full text-sm font-semibold text-blue-600">Didn&apos;t receive code? Resend OTP</button><button type="button" onClick={() => setStep('form')} className="w-full text-sm text-gray-500">Use a different email</button></form>}<p className="mt-8 text-center text-sm text-gray-600">Already have an account? <Link to="/login" className="font-semibold text-blue-600">Sign in here</Link></p></div></main></div>;
 };
 
 export default Register;

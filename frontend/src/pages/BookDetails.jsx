@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { bookService, navigationService, transactionService, reservationService } from '../services';
+import { bookService, navigationService, transactionService, reservationService, feedbackService } from '../services';
 import { ArrowLeft, BookOpen, MapPin, Compass, Clock, Tag, CheckCircle, XCircle, User, Calendar, AlertCircle, BookmarkPlus, Users, ShoppingCart } from 'lucide-react';
 import { format } from 'date-fns';
 import MultiBookCheckoutModal from '../components/MultiBookCheckoutModal';
@@ -20,6 +20,10 @@ const BookDetails = () => {
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
   const [checkoutForm, setCheckoutForm] = useState(() => ({ user_id: currentUser?.id ? String(currentUser.id) : '', loan_days: 14 }));
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [reviews, setReviews] = useState([]);
+  const [reviewSummary, setReviewSummary] = useState({ average_rating: 0, review_count: 0 });
+  const [reviewForm, setReviewForm] = useState({ rating: 0, review_text: '' });
+  const [reviewLoading, setReviewLoading] = useState(false);
   const isStudent = (currentUser?.role || '').toLowerCase() === 'student';
 
   useEffect(() => {
@@ -43,6 +47,9 @@ const BookDetails = () => {
       setBook(bookInfo);
       setIsbnCopies(bookData.isbnCopies || []);
       setLocationHistory(historyData.history || historyData.data || []);
+      const reviewData = await feedbackService.getBookReviews(id).catch(() => ({ reviews: [], summary: {} }));
+      setReviews(reviewData.reviews || []);
+      setReviewSummary(reviewData.summary || { average_rating: 0, review_count: 0 });
       
       // Load transaction history
       loadTransactionHistory();
@@ -56,6 +63,23 @@ const BookDetails = () => {
       setBook(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleReviewSubmit = async (event) => {
+    event.preventDefault();
+    if (!reviewForm.rating) return;
+    setReviewLoading(true);
+    try {
+      await feedbackService.saveBookReview(id, reviewForm);
+      const reviewData = await feedbackService.getBookReviews(id);
+      setReviews(reviewData.reviews || []);
+      setReviewSummary(reviewData.summary || {});
+      setReviewForm({ rating: 0, review_text: '' });
+    } catch (error) {
+      alert(error.response?.data?.error || 'Unable to save review.');
+    } finally {
+      setReviewLoading(false);
     }
   };
 
@@ -281,6 +305,35 @@ const BookDetails = () => {
               )}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Reviews */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-xl font-bold">Reader Reviews</h2>
+            <p className="text-sm text-gray-600">{Number(reviewSummary.average_rating || 0).toFixed(1)} / 5 from {reviewSummary.review_count || 0} reviews</p>
+          </div>
+          <span className="text-amber-500 text-lg">{'★★★★★'.slice(0, Math.round(Number(reviewSummary.average_rating || 0))).padEnd(5, '☆')}</span>
+        </div>
+        <form onSubmit={handleReviewSubmit} className="border-t pt-4 space-y-3">
+          <div className="flex items-center gap-1">
+            <span className="text-sm font-medium mr-2">Your rating</span>
+            {[1, 2, 3, 4, 5].map((rating) => (
+              <button key={rating} type="button" onClick={() => setReviewForm((form) => ({ ...form, rating }))} className={`text-2xl ${rating <= reviewForm.rating ? 'text-amber-500' : 'text-gray-300'}`} aria-label={`${rating} stars`}>★</button>
+            ))}
+          </div>
+          <textarea className="input w-full" rows="2" maxLength="1000" value={reviewForm.review_text} onChange={(event) => setReviewForm((form) => ({ ...form, review_text: event.target.value }))} placeholder="Share a short review" />
+          <button type="submit" disabled={!reviewForm.rating || reviewLoading} className="btn btn-primary">{reviewLoading ? 'Saving...' : 'Save Review'}</button>
+        </form>
+        <div className="mt-5 space-y-3">
+          {reviews.map((review) => (
+            <div key={review.id} className="border-t pt-3">
+              <div className="flex justify-between gap-3"><p className="font-medium">{review.reviewer_name}</p><span className="text-amber-500">{'★'.repeat(review.rating)}{'☆'.repeat(5 - review.rating)}</span></div>
+              {review.review_text && <p className="text-sm text-gray-600 mt-1">{review.review_text}</p>}
+            </div>
+          ))}
         </div>
       </div>
 
