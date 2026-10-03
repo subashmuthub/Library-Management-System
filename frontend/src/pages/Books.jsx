@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { bookService } from "../services";
 import { useAuth } from "../contexts";
+import ResourceTypeTabs from "../components/ResourceTypeTabs";
 import {
   Search,
   BookOpen,
@@ -122,6 +123,7 @@ const Books = () => {
     category: "",
     available: "",
     restricted_only: false,
+    resource_type: "ALL",
   });
 
   // Department categories
@@ -184,7 +186,7 @@ const Books = () => {
 
   useEffect(() => {
     loadBooks();
-  }, [searchTerm, filters.category, filters.available, filters.restricted_only, sortBy, sortOrder]);
+  }, [searchTerm, filters.category, filters.resource_type, filters.available, filters.restricted_only, sortBy, sortOrder]);
 
   const loadBooks = async () => {
     setLoading(true);
@@ -192,6 +194,7 @@ const Books = () => {
       const params = {
         q: searchTerm || undefined,
         category: filters.category || undefined,
+        resource_type: filters.resource_type && filters.resource_type !== "ALL" ? filters.resource_type : undefined,
         availability: filters.available || undefined,
         restricted_only: filters.restricted_only ? "true" : undefined,
         limit: 100,
@@ -200,6 +203,13 @@ const Books = () => {
       };
       const response = await bookService.getAllBooks(params);
       let booksData = response.data?.books || response.books || [];
+
+      // Client-side filtering fallback for resource_type
+      if (filters.resource_type && filters.resource_type !== "ALL") {
+        booksData = booksData.filter(
+          (book) => (book.resource_type || "BOOK").toUpperCase() === filters.resource_type.toUpperCase()
+        );
+      }
 
       // Client-side filtering fallback for restricted_only
       if (filters.restricted_only) {
@@ -571,6 +581,18 @@ const Books = () => {
           <BookOpen size={40} className="text-blue-200 opacity-80" />
         </div>
       </div>
+
+      {/* Resource Type Category Tabs */}
+      <ResourceTypeTabs
+        activeType={filters.resource_type || 'ALL'}
+        onChange={(type) => setFilters((prev) => ({ ...prev, resource_type: type }))}
+        counts={{
+          ALL: totalCount || books.length,
+          BOOK: books.filter((b) => !b.resource_type || b.resource_type === 'BOOK').length,
+          RESEARCH_PAPER: books.filter((b) => b.resource_type === 'RESEARCH_PAPER').length,
+          JOURNAL: books.filter((b) => b.resource_type === 'JOURNAL').length,
+        }}
+      />
 
       {/* Search Bar */}
       <div className="card">

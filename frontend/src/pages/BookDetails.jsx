@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { bookService, navigationService, transactionService, reservationService } from '../services';
 import RequestAccessModal from '../components/RequestAccessModal';
 import MultiBookCheckoutModal from '../components/MultiBookCheckoutModal';
-import { ArrowLeft, BookOpen, MapPin, Compass, Clock, Tag, CheckCircle, XCircle, User, Calendar, AlertCircle, BookmarkPlus, Users, ShoppingCart, Star, MessageSquare, Send, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, BookOpen, MapPin, Compass, Clock, Tag, CheckCircle, XCircle, User, Calendar, AlertCircle, BookmarkPlus, Users, ShoppingCart, Star, MessageSquare, Send, ShieldAlert, ShieldCheck, Info, UserCheck } from 'lucide-react';
 import { format } from 'date-fns';
 
 const BookDetails = () => {
@@ -29,8 +29,9 @@ const BookDetails = () => {
   const [reviewMessage, setReviewMessage] = useState(null);
 
   const currentUserRole = String(currentUser?.role || currentUser?.role_name || '').toLowerCase();
-  const isStudent = !currentUserRole || currentUserRole === 'student';
+  const isStudent = !currentUserRole || ['student', 'me_student', 'research_scholar'].includes(currentUserRole);
   const isAdminOrLibrarian = ['admin', 'librarian'].includes(currentUserRole);
+  const isCirculationStaff = ['admin', 'librarian', 'clerk'].includes(currentUserRole);
 
   const degreeType = String(currentUser?.degree_type || currentUser?.degreeType || '').trim();
   const DIRECT_RESEARCH_DEGREES = ['me', 'm.tech', 'mtech', 'phd', 'ph.d', 'research scholar', 'ms', 'm.s', 'm.phil'];
@@ -176,15 +177,16 @@ const BookDetails = () => {
 
     setReserving(true);
     try {
-      await reservationService.reserveBook({
+      const res = await reservationService.reserveBook({
         book_id: id,
         user_id: currentUser.id
       });
-      alert('Book reserved successfully! You will be notified when it becomes available.');
+      alert(res?.message || 'Book reserved successfully! Physical pickup is handled at the Clerk Circulation Desk.');
+      loadBookDetails();
       loadReservationQueue();
     } catch (error) {
       console.error('Reservation failed:', error);
-      alert(error.response?.data?.error || 'Failed to reserve book');
+      alert(error.response?.data?.message || error.response?.data?.error || 'Failed to reserve book');
     } finally {
       setReserving(false);
     }
@@ -455,43 +457,14 @@ const BookDetails = () => {
               </div>
             )}
 
-            <div className="flex gap-3 flex-wrap">
-              {book.is_available || book.status === 'available' ? (
-                <>
-                  <button onClick={handleNavigate} className="btn btn-primary">
-                    <Compass size={20} className="inline mr-2" />
-                    Get Directions
-                  </button>
+            <div className="flex gap-3 flex-wrap items-center">
+              <button onClick={handleNavigate} className="btn btn-primary">
+                <Compass size={20} className="inline mr-2" />
+                Get Directions
+              </button>
 
-                  {isRestrictedResearch && !isDirectAccess && accessStatus !== 'APPROVED' ? (
-                    accessStatus === 'PENDING' ? (
-                      <button
-                        disabled
-                        className="btn bg-amber-100 text-amber-800 border border-amber-300 cursor-not-allowed opacity-80"
-                      >
-                        <Clock size={18} className="inline mr-2" />
-                        Access Request Pending Review
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setShowRequestAccessModal(true)}
-                        className="btn bg-purple-600 hover:bg-purple-700 text-white shadow-sm"
-                      >
-                        <ShieldAlert size={18} className="inline mr-2" />
-                        Request Access to Borrow
-                      </button>
-                    )
-                  ) : (
-                    <button
-                      onClick={() => setShowCheckoutModal(true)}
-                      className="btn btn-success"
-                    >
-                      <ShoppingCart size={18} className="inline mr-2" />
-                      Checkout This Book
-                    </button>
-                  )}
-                </>
-              ) : (
+              {/* Student Role: Strictly Reservation Only (Self-checkout forbidden) */}
+              {isStudent ? (
                 isRestrictedResearch && !isDirectAccess && accessStatus !== 'APPROVED' ? (
                   accessStatus === 'PENDING' ? (
                     <button
@@ -511,17 +484,61 @@ const BookDetails = () => {
                     </button>
                   )
                 ) : (
-                  <button 
-                    onClick={handleReserveBook} 
+                  <button
+                    onClick={handleReserveBook}
                     disabled={reserving}
-                    className="btn btn-primary"
+                    className="btn bg-indigo-600 hover:bg-indigo-700 text-white font-medium shadow-sm"
                   >
                     <BookmarkPlus size={20} className="inline mr-2" />
-                    {reserving ? 'Reserving...' : 'Reserve This Book'}
+                    {reserving ? 'Reserving...' : (book.is_available || book.status === 'available' ? 'Reserve for Counter Pickup' : 'Reserve This Book')}
                   </button>
                 )
+              ) : (
+                /* Circulation Staff / Admin / Librarian / Staff Flow */
+                <>
+                  {isCirculationStaff && (
+                    <button
+                      onClick={() => navigate('/issue-desk?search=' + encodeURIComponent(book.accession_no || book.barcode || book.id))}
+                      className="btn bg-teal-600 hover:bg-teal-700 text-white font-medium shadow-sm flex items-center gap-2"
+                    >
+                      <UserCheck size={18} />
+                      Issue at Clerk Desk
+                    </button>
+                  )}
+
+                  {(book.is_available || book.status === 'available') && (
+                    <button
+                      onClick={() => setShowCheckoutModal(true)}
+                      className="btn btn-success"
+                    >
+                      <ShoppingCart size={18} className="inline mr-2" />
+                      Counter Checkout
+                    </button>
+                  )}
+
+                  {(!book.is_available && book.status !== 'available') && (
+                    <button
+                      onClick={handleReserveBook}
+                      disabled={reserving}
+                      className="btn btn-primary"
+                    >
+                      <BookmarkPlus size={20} className="inline mr-2" />
+                      {reserving ? 'Reserving...' : 'Reserve This Book'}
+                    </button>
+                  )}
+                </>
               )}
             </div>
+
+            {/* Student Reservation Guidance Notice */}
+            {isStudent && (
+              <div className="mt-3 flex items-start gap-2.5 text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-xl p-3 shadow-sm">
+                <Info size={16} className="text-indigo-600 flex-shrink-0 mt-0.5" />
+                <p>
+                  <strong>Circulation Policy:</strong> Students can only place reservations. Physical handover and book issuance is processed at the counter by a <strong>Clerk</strong> using your Student ID Card.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>

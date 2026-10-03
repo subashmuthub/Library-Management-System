@@ -109,38 +109,36 @@ class ReservationController {
                 });
             }
 
-            // If book is available, reject and redirect to checkout
-            if (book.available_copies > 0) {
-                connection.release();
-                return res.status(409).json({
-                    error: 'BOOK_AVAILABLE_FOR_CHECKOUT',
-                    message: 'This book is currently available on the shelf. Please checkout directly instead of reserving.',
-                    redirect_to_checkout: true,
-                    book_id: book_id,
-                    book_title: book.title
-                });
+            const isBookAvailable = (book.available_copies || 0) > 0;
+            let currentHolder = [];
+
+            if (!isBookAvailable) {
+                // Book is not available — get current holder info
+                const [holders] = await connection.execute(`
+                    SELECT CONCAT(u.first_name, ' ', u.last_name) as name, bt.due_date
+                    FROM book_transactions bt
+                    JOIN users u ON bt.user_id = u.id
+                    WHERE bt.book_id = ? AND bt.status = 'active'
+                    ORDER BY bt.checkout_date DESC LIMIT 1
+                `, [book_id]);
+                currentHolder = holders;
             }
 
-            // Book is not available — get current holder info
-            const [currentHolder] = await connection.execute(`
-                SELECT CONCAT(u.first_name, ' ', u.last_name) as name, bt.due_date
-                FROM book_transactions bt
-                JOIN users u ON bt.user_id = u.id
-                WHERE bt.book_id = ? AND bt.status = 'active'
-                ORDER BY bt.checkout_date DESC LIMIT 1
-            `, [book_id]);
-
-            const status = 'active';
+            const status = isBookAvailable ? 'ready' : 'active';
             const scheduledDate = null;
             const expiryDate = new Date();
             expiryDate.setDate(expiryDate.getDate() + 30);
 
             // Get queue position
-            const [queuePosition] = await connection.execute(`
-                SELECT COUNT(*) + 1 as position
-                FROM reservations 
-                WHERE book_id = ? AND status = 'active' AND created_at < NOW()
-            `, [book_id]);
+            let position = 1;
+            if (!isBookAvailable) {
+                const [queuePosition] = await connection.execute(`
+                    SELECT COUNT(*) + 1 as position
+                    FROM reservations 
+                    WHERE book_id = ? AND status = 'active' AND created_at < NOW()
+                `, [book_id]);
+                position = queuePosition[0]?.position || 1;
+            }
 
             // Create reservation
             const [result] = await connection.execute(`
@@ -150,7 +148,7 @@ class ReservationController {
                 ) VALUES (?, ?, ?, ?, ?, ?)
             `, [
                 userId, book_id, status, scheduledDate, 
-                expiryDate, queuePosition[0].position
+                expiryDate, position
             ]);
 
             // Get created reservation with details
@@ -172,7 +170,9 @@ class ReservationController {
 
             connection.release();
 
-            const message = `Reserved successfully! You are #${queuePosition[0].position} in queue. You'll be notified by email when the book becomes available.`;
+            const message = isBookAvailable
+                ? 'Reserved successfully! The book is ready for physical pickup at the Circulation Desk.'
+                : `Reserved successfully! You are #${position} in queue. You'll be notified when the book becomes available.`;
 
             res.status(201).json({
                 success: true,

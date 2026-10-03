@@ -31,6 +31,8 @@ import {
 const AnalyticsSections = lazy(
   () => import("../components/dashboard/AnalyticsSections"),
 );
+import LiveStatusBoard from "../components/dashboard/LiveStatusBoard";
+import StudentCertificateCard from "../components/dashboard/StudentCertificateCard";
 
 const buildCsv = (rows, headers) => {
   const escape = (value) => {
@@ -504,6 +506,9 @@ const Dashboard = () => {
           ))}
         </div>
 
+        {/* Top Active Reader Monthly Certificate */}
+        <StudentCertificateCard />
+
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           <div className="card xl:col-span-2">
             <div className="flex items-center justify-between mb-4">
@@ -576,38 +581,53 @@ const Dashboard = () => {
               </button>
             </div>
 
+            {studentData?.reservations?.some(r => r.status === 'ready') && (
+              <div className="mb-4 bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-start gap-2.5 text-xs text-emerald-900 shadow-sm">
+                <CheckCircle size={16} className="text-emerald-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold text-emerald-950">Reserved Book Ready for Collection!</p>
+                  <p className="text-emerald-800 mt-0.5">
+                    Please visit the <strong>Clerk Circulation Desk</strong> with your Student ID (or digital QR) to complete physical issuance.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {studentData?.reservations?.length ? (
               <div className="space-y-3">
                 {studentData.reservations.map((item) => (
                   <div
                     key={item.id}
-                    className="rounded-xl border border-slate-200 bg-slate-50 p-3"
+                    className="rounded-xl border border-slate-200 bg-slate-50 p-3 hover:border-slate-300 transition-colors"
                   >
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-semibold text-slate-900 truncate pr-2">
                         {item.title}
                       </p>
                       <span
-                        className={`text-xs rounded-full px-2 py-1 font-semibold ${
+                        className={`text-xs rounded-full px-2.5 py-1 font-bold ${
                           item.status === "ready"
-                            ? "bg-emerald-100 text-emerald-700"
-                            : "bg-amber-100 text-amber-700"
+                            ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                            : "bg-amber-100 text-amber-800 border border-amber-300"
                         }`}
                       >
                         {item.status === "ready" ? "READY FOR PICKUP" : `QUEUE #${item.queue_position || 1}`}
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 mt-1 truncate">{item.author}</p>
-                    {item.expiry_date && item.status === "ready" && (
-                      <p className="text-xs text-rose-600 mt-1">
-                        Pickup before: {format(new Date(item.expiry_date), "MMM dd, yyyy")}
-                      </p>
-                    )}
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-200/60 text-xs text-slate-600">
+                      <span>Reserved on: {item.reservation_date ? format(new Date(item.reservation_date), "MMM dd, yyyy") : (item.created_at ? format(new Date(item.created_at), "MMM dd, yyyy") : "Recent")}</span>
+                      {item.status === "ready" ? (
+                        <span className="text-emerald-700 font-semibold">Ready at Circulation Desk</span>
+                      ) : (
+                        <span className="text-amber-700 font-medium">Waiting in Queue</span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-slate-500 text-center py-8">No active reservations</p>
+              <p className="text-slate-500 text-center py-8">No active reservations. Browse library books to place a reservation!</p>
             )}
           </div>
         </div>
@@ -836,6 +856,9 @@ const Dashboard = () => {
           {filterError ? ` | ${filterError}` : ""}
         </div>
       </div>
+
+      {/* Real-time Operational Status Board & Procurement Ledger */}
+      <LiveStatusBoard />
 
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold tracking-tight text-slate-900">Key Metrics</h2>

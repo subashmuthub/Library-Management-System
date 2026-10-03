@@ -15,32 +15,48 @@ router.use(authenticate);
 const { requireActiveEntryForStudents } = require('../middleware/entry-policy.middleware');
 
 /**
+ * Operational boundary middleware:
+ * Direct self-checkout is forbidden for students. Students can only reserve.
+ */
+const blockStudentCheckout = (req, res, next) => {
+  const roleName = String(req.user?.role || req.user?.role_name || req.user?.role?.role_name || '').toLowerCase();
+  if (['student', 'me_student', 'research_scholar'].includes(roleName)) {
+    return res.status(403).json({
+      success: false,
+      error: 'Forbidden',
+      message: 'Access Denied: Students can only place reservations. Book issuance must be processed at the counter by a Clerk.'
+    });
+  }
+  next();
+};
+
+/**
  * POST /api/transactions/checkout
- * Checkout a book (regular checkout process)
+ * Checkout a book (counter issue process)
  * Body: { user_id, book_id, due_date? }
  */
-router.post('/checkout', requireActiveEntryForStudents, TransactionController.checkoutBook);
+router.post('/checkout', blockStudentCheckout, authorize(['admin', 'librarian', 'clerk']), TransactionController.checkoutBook);
 
 /**
  * POST /api/transactions/checkout-batch
  * Batch checkout multiple books
  * Body: { userId, bookIds, loanDays }
  */
-router.post('/checkout-batch', requireActiveEntryForStudents, TransactionController.checkoutBatch);
+router.post('/checkout-batch', blockStudentCheckout, authorize(['admin', 'librarian', 'clerk']), TransactionController.checkoutBatch);
 
 /**
  * POST /api/transactions/quick-return
  * Bulk / continuous return by barcode, RFID tag, ISBN, or transaction ID
  * Body: { identifier, condition?, notes? }
  */
-router.post('/quick-return', authorize(['admin', 'librarian']), TransactionController.quickReturn);
+router.post('/quick-return', authorize(['admin', 'librarian', 'clerk']), TransactionController.quickReturn);
 
 /**
  * POST /api/transactions/:id/return
  * Return a book
  * Body: { condition?, notes? }
  */
-router.post('/:id/return', authorize(['admin', 'librarian']), TransactionController.returnBook);
+router.post('/:id/return', authorize(['admin', 'librarian', 'clerk']), TransactionController.returnBook);
 
 /**
  * POST /api/transactions/:id/renew

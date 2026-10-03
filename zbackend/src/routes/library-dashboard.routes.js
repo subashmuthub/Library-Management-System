@@ -21,6 +21,13 @@ router.use(authenticate);
 router.get('/stats', authorize(['admin', 'librarian']), LibraryDashboardController.getDashboardStats);
 
 /**
+ * GET /api/dashboard/live-status
+ * Get real-time operational status board metrics
+ * Returns: total_active_catalog_items, archived_damaged_items, overdue_checkouts, pending_requests
+ */
+router.get('/live-status', LibraryDashboardController.getLiveStatus);
+
+/**
  * GET /api/dashboard/status
  * Get real-time library status
  * Returns: occupancy, circulation, reservations, alerts, recent_activity

@@ -15,7 +15,7 @@ const { getModeConfig } = require('../config/mode');
 router.post(
   '/scan',
   authenticate,
-  authorize(['librarian', 'admin']),
+  authorize(['librarian', 'admin', 'clerk']),
   rfidController.scanTag
 );
 
@@ -23,7 +23,7 @@ router.post(
 router.get(
   '/tags',
   authenticate,
-  authorize(['librarian', 'admin']),
+  authorize(['librarian', 'admin', 'clerk']),
   rfidController.listTags
 );
 

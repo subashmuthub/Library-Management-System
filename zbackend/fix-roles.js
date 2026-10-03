@@ -27,7 +27,8 @@ async function fixRoles() {
       (1, 'admin', 'System administrator with full access', '{"users":["create","read","update","delete"],"books":["create","read","update","delete"],"transactions":["create","read","update","delete"],"fines":["create","read","update","delete"]}'),
       (2, 'librarian', 'Library staff with administrative access', '{"users":["read","update"],"books":["create","read","update"],"transactions":["create","read","update"],"fines":["read","update"]}'),
       (3, 'student', 'Student user with basic access', '{"books":["read"],"transactions":["read"],"reservations":["create","read","update"]}'),
-      (4, 'staff', 'Faculty and support staff with borrower access', '{"books":["read"],"transactions":["read"],"reservations":["create","read","update"]}')
+      (4, 'staff', 'Faculty and support staff with borrower access', '{"books":["read"],"transactions":["read"],"reservations":["create","read","update"]}'),
+      (7, 'clerk', 'Circulation desk clerk with checkout, return, RFID scanner, and visitor log access', '{"transactions":["create","read","update"],"rfid":["read","create"],"entry":["read","create"]}')
     `);
 
     console.log("✅ user_roles inserted successfully");

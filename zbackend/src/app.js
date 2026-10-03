@@ -156,8 +156,8 @@ const {
   requireActiveEntryForStudents,
 } = require("./middleware/entry-policy.middleware");
 
-// Role guard: students can read only (GET/HEAD/OPTIONS).
-app.use("/api/v1", (req, res, next) => {
+// Role guard: students can read only (GET/HEAD/OPTIONS), reserve books, pay fines, submit suggestions/reviews.
+app.use(["/api/v1", "/api"], (req, res, next) => {
   if (["GET", "HEAD", "OPTIONS"].includes(req.method)) {
     return next();
   }
@@ -177,14 +177,29 @@ app.use("/api/v1", (req, res, next) => {
     sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || "",
   ).toLowerCase();
 
-  // Student exceptions: allow self-checkout, reservations, fine payments, suggestions, and reviews.
+  const isStudentRole = ["student", "me_student", "research_scholar"].includes(role);
+
+  // Explicit operational boundary: Students are strictly forbidden from checking out books directly.
+  const isCheckoutRoute =
+    req.path === "/transactions/checkout" ||
+    req.path === "/transactions/checkout-batch" ||
+    req.path === "/books/checkout" ||
+    req.path === "/books/checkout-batch" ||
+    /^\/books\/\d+\/checkout/.test(req.path);
+
+  if (isCheckoutRoute && isStudentRole) {
+    return res.status(403).json({
+      success: false,
+      error: "Forbidden",
+      message: "Access Denied: Students can only place reservations. Book issuance must be processed at the counter by a Clerk.",
+    });
+  }
+
+  // Student exceptions: allow reservations, fine payments, suggestions, and reviews.
   if (
-    (role === "student" || role === "staff") &&
+    (isStudentRole || role === "staff") &&
     req.method === "POST" &&
     (
-      req.path === "/transactions/checkout" ||
-      req.path === "/books/checkout" ||
-      /^\/books\/\d+\/checkout/.test(req.path) ||
       req.path.startsWith("/reservations") ||
       req.path.startsWith("/payments") ||
       req.path.startsWith("/suggestions") ||
@@ -196,11 +211,11 @@ app.use("/api/v1", (req, res, next) => {
   }
 
   // Allow students to update their own profile (PUT /users/profile)
-  if (role === "student" && req.method === "PUT" && req.path === "/users/profile") {
+  if (isStudentRole && req.method === "PUT" && req.path === "/users/profile") {
     return next();
   }
 
-  if (role === "student") {
+  if (isStudentRole) {
     return res.status(403).json({
       error: "Forbidden",
       message: "Students have read-only access",
@@ -218,11 +233,18 @@ app.use("/api/users", require("./routes/user.routes"));
 app.use("/api/v1/user-management", require("./routes/user-management.routes"));
 app.use("/api/user-management", require("./routes/user-management.routes"));
 app.use("/api/v1/dashboard", require("./routes/library-dashboard.routes"));
+app.use("/api/dashboard", require("./routes/library-dashboard.routes"));
+app.use("/api/v1/procurement", require("./routes/procurement.routes"));
+app.use("/api/procurement", require("./routes/procurement.routes"));
+app.use("/api/v1/students", require("./routes/student-certificate.routes"));
+app.use("/api/students", require("./routes/student-certificate.routes"));
 app.use("/api/v1/entry", require("./routes/entry.routes"));
 app.use("/api/v1/books", requireActiveEntryForStudents, require("./routes/books.routes"));
 app.use("/api/books", requireActiveEntryForStudents, require("./routes/books.routes"));
 app.use("/api/v1/transactions", require("./routes/transaction.routes"));
 app.use("/api/transactions", require("./routes/transaction.routes"));
+app.use("/api/v1/circulation", require("./routes/circulation.routes"));
+app.use("/api/circulation", require("./routes/circulation.routes"));
 app.use('/api/v1/navigation', require('./routes/navigation.routes'));
 app.use('/api/v1/settings', require('./routes/settings.routes'));
 app.use('/api/v1/suggestions', require('./routes/suggestion.routes'));
@@ -294,7 +316,7 @@ app.use((err, req, res, next) => {
 // SERVER STARTUP
 // ============================================================================
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 const googleRedirectUri =
   process.env.GOOGLE_REDIRECT_URI ||
   `http://localhost:${PORT}/api/v1/auth/google/callback`;

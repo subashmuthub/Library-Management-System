@@ -240,6 +240,119 @@ class LibraryDashboardController {
         }
     }
 
+    /**
+     * GET /api/dashboard/live-status
+     * Returns real-time metrics:
+     * - Total active catalog items
+     * - Count of archived/damaged items
+     * - Overdue checked-out books (due_date < NOW() where return_date IS NULL)
+     * - Count of pending requests (reservations + suggestions)
+     */
+    static async getLiveStatus(req, res) {
+        try {
+            const connection = await pool.getConnection();
+
+            // 1. Total active catalog items
+            const [[{ total_active_catalog_items }]] = await connection.execute(`
+                SELECT COUNT(*) AS total_active_catalog_items
+                FROM books
+                WHERE (status IS NULL OR status = 'active' OR status != 'archived')
+                  AND (is_available IS NOT NULL)
+            `);
+
+            // 2. Count of archived / damaged / lost items
+            let archived_damaged_items = 0;
+            try {
+                const [[row]] = await connection.execute(`
+                    SELECT (
+                        (SELECT COUNT(*) FROM books WHERE status IN ('archived', 'damaged', 'lost', 'maintenance'))
+                        +
+                        (SELECT COUNT(*) FROM book_transactions WHERE return_condition IN ('damaged', 'severely_damaged', 'lost') OR status = 'lost')
+                    ) AS count
+                `);
+                archived_damaged_items = row.count || 0;
+            } catch (err) {
+                const [[row]] = await connection.execute(
+                    "SELECT COUNT(*) AS count FROM books WHERE status IN ('archived', 'damaged', 'lost')"
+                );
+                archived_damaged_items = row.count || 0;
+            }
+
+            // 3. Overdue checked-out books (due_date < NOW() where return_date IS NULL)
+            const [[{ overdue_checkouts }]] = await connection.execute(`
+                SELECT COUNT(*) AS overdue_checkouts
+                FROM book_transactions
+                WHERE return_date IS NULL
+                  AND due_date < CURDATE()
+                  AND status = 'active'
+            `);
+
+            // 4. Count of pending requests (book_reservations + book_suggestions)
+            let pendingReservations = 0;
+            let pendingSuggestions = 0;
+
+            try {
+                const [[resRow]] = await connection.execute(
+                    "SELECT COUNT(*) AS count FROM book_reservations WHERE status = 'PENDING'"
+                );
+                pendingReservations = resRow.count || 0;
+            } catch (e) {
+                // Table might not exist or empty
+            }
+
+            try {
+                const [[sugRow]] = await connection.execute(
+                    "SELECT COUNT(*) AS count FROM book_suggestions WHERE status = 'PENDING'"
+                );
+                pendingSuggestions = sugRow.count || 0;
+            } catch (e) {
+                // Table might not exist or empty
+            }
+
+            const pending_requests = pendingReservations + pendingSuggestions;
+
+            // Breakdown of resource types
+            let resourceCounts = { total_books: 0, total_research_papers: 0, total_journals: 0 };
+            try {
+                const [[counts]] = await connection.execute(`
+                    SELECT 
+                        COUNT(CASE WHEN resource_type = 'BOOK' OR resource_type IS NULL THEN 1 END) AS total_books,
+                        COUNT(CASE WHEN resource_type = 'RESEARCH_PAPER' THEN 1 END) AS total_research_papers,
+                        COUNT(CASE WHEN resource_type = 'JOURNAL' THEN 1 END) AS total_journals
+                    FROM books
+                `);
+                if (counts) resourceCounts = counts;
+            } catch (e) {
+                // Default counts
+            }
+
+            connection.release();
+
+            res.json({
+                success: true,
+                timestamp: new Date().toISOString(),
+                metrics: {
+                    total_active_catalog_items: parseInt(total_active_catalog_items, 10) || 0,
+                    archived_damaged_items: parseInt(archived_damaged_items, 10) || 0,
+                    overdue_checkouts: parseInt(overdue_checkouts, 10) || 0,
+                    pending_requests: parseInt(pending_requests, 10) || 0,
+                },
+                breakdown: {
+                    pending_reservations: pendingReservations,
+                    pending_suggestions: pendingSuggestions,
+                    resources: {
+                        books: resourceCounts.total_books || 0,
+                        research_papers: resourceCounts.total_research_papers || 0,
+                        journals: resourceCounts.total_journals || 0,
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('Error fetching live operational status:', error);
+            res.status(500).json({ error: 'Internal server error', detail: error.message });
+        }
+    }
+
     // Get real-time library status
     static async getLibraryStatus(req, res) {
         try {

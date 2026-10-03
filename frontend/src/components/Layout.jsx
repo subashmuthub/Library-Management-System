@@ -23,6 +23,7 @@ const navigation = [
   },
   {
     label: 'Issue Management', icon: RefreshCw, items: [
+      { label: 'Book Issue Desk', path: '/issue-desk', icon: BookOpen, roles: ['admin', 'librarian', 'clerk'] },
       { label: 'Transactions', path: '/transactions', icon: RefreshCw },
       { label: 'Reservations', path: '/reservations', icon: Bookmark },
       { label: 'Research Approvals', path: '/reservations/pending', icon: ShieldCheck, roles: ['admin', 'librarian'] },
@@ -65,8 +66,9 @@ const Layout = () => {
   const userRole = (roleName || '').toLowerCase();
   const isAdmin = userRole === 'admin';
   const isLibrarian = userRole === 'librarian';
+  const isClerk = userRole === 'clerk';
   const isStaff = ['teacher', 'faculty', 'staff', 'librarian'].includes(userRole);
-  const isStudent = !isAdmin && !isStaff;
+  const isStudent = !isAdmin && !isStaff && !isClerk;
 
   const isItemAllowed = (item) => {
     if (item.adminOnly && !isAdmin) return false;
@@ -75,6 +77,15 @@ const Layout = () => {
   };
 
   const visibleNavigation = useMemo(() => {
+    if (isClerk) {
+      return [
+        { label: 'Book Issue Desk', path: '/issue-desk', icon: BookOpen },
+        { label: 'Circulation & Returns', path: '/transactions', icon: RefreshCw },
+        { label: 'RFID Scanner', path: '/rfid', icon: Scan },
+        { label: 'Visitor Logs', path: '/entry', icon: LogIn },
+      ];
+    }
+
     return navigation
       .filter(isItemAllowed)
       .map((item) => {
@@ -87,7 +98,7 @@ const Layout = () => {
         return { ...item, label, items: filteredChildren };
       })
       .filter((item) => !item.items || item.items.length > 0);
-  }, [isAdmin, userRole]);
+  }, [isAdmin, userRole, isClerk]);
   const currentPage = useMemo(() => {
     const page = flattenNavigation(visibleNavigation).find((item) => location.pathname === item.path);
     return page?.label || 'Dashboard';

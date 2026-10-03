@@ -58,7 +58,7 @@ const authorize = (allowedRoles) => {
     if (!normalizedRoles.includes(roleName)) {
       return res.status(403).json({
         error: 'Forbidden',
-        message: 'Access restricted to Librarian and Admin roles only.'
+        message: `Access denied. Authorized roles: ${allowedRoles.join(', ')}.`
       });
     }
 

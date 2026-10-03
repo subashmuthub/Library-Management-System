@@ -14,6 +14,8 @@ class BookController {
                 search, 
                 q, // Also support 'q' parameter for search
                 category, 
+                resource_type,
+                type,
                 author, 
                 availability,
                 restricted_only,
@@ -42,6 +44,13 @@ class BookController {
             if (category && category.trim()) {
                 whereConditions.push('b.category = ?');
                 queryParams.push(category.trim());
+            }
+
+            // Filter by resource_type ('BOOK', 'RESEARCH_PAPER', 'JOURNAL')
+            const targetResourceType = resource_type || type;
+            if (targetResourceType && targetResourceType.trim() && targetResourceType.toUpperCase() !== 'ALL') {
+                whereConditions.push('UPPER(COALESCE(b.resource_type, \'BOOK\')) = ?');
+                queryParams.push(targetResourceType.trim().toUpperCase());
             }
 
             // Filter by author

@@ -575,3 +575,27 @@ export const suggestionService = {
   },
 };
 
+// Circulation Desk Services (Counter issue, student lookup, reservation fulfillment)
+export const circulationService = {
+  studentLookup: async (query) => {
+    const response = await api.get(`/circulation/student-lookup/${encodeURIComponent(query)}`);
+    return response.data;
+  },
+
+  issueReserved: async (data) => {
+    const response = await api.post('/circulation/issue-reserved', data);
+    return response.data;
+  },
+
+  directIssue: async (data) => {
+    const response = await api.post('/circulation/direct-issue', data);
+    return response.data;
+  },
+
+  searchBooks: async (params) => {
+    const response = await api.get('/circulation/search-books', { params });
+    return response.data;
+  },
+};
+
+

@@ -20,6 +20,11 @@ const RUNTIME_TABLES = [
   "reviews",
   "book_suggestions",
   "book_reservations",
+  "vendors",
+  "library_budgets",
+  "purchases",
+  "purchase_items",
+  "student_certificates",
 ];
 
 async function runSetupScript() {
@@ -184,6 +189,83 @@ async function ensureRuntimeTables(connection) {
       INDEX idx_reservation_created (created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS vendors (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      contact_person VARCHAR(255) NULL,
+      email VARCHAR(255) NULL,
+      phone VARCHAR(50) NULL,
+      address TEXT NULL,
+      gst_number VARCHAR(50) NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_vendor_name (name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS library_budgets (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      financial_year VARCHAR(20) NOT NULL UNIQUE,
+      allocated_budget DECIMAL(14, 2) NOT NULL DEFAULT 0.00,
+      spent_budget DECIMAL(14, 2) NOT NULL DEFAULT 0.00,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_fin_year (financial_year)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS purchases (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      vendor_id INT NOT NULL,
+      invoice_no VARCHAR(100) NOT NULL,
+      purchase_date DATE NOT NULL,
+      total_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+      allocated_year VARCHAR(20) NOT NULL,
+      payment_status ENUM('PENDING', 'PAID', 'PARTIAL', 'CANCELLED') NOT NULL DEFAULT 'PAID',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE RESTRICT,
+      INDEX idx_purchase_vendor (vendor_id),
+      INDEX idx_purchase_invoice (invoice_no),
+      INDEX idx_purchase_date (purchase_date),
+      INDEX idx_purchase_year (allocated_year)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS purchase_items (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      purchase_id INT NOT NULL,
+      item_title VARCHAR(500) NOT NULL,
+      resource_type VARCHAR(30) NOT NULL DEFAULT 'BOOK',
+      quantity INT NOT NULL DEFAULT 1,
+      unit_price DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+      subtotal DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE,
+      INDEX idx_item_purchase (purchase_id),
+      INDEX idx_item_resource (resource_type)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS student_certificates (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      month_year VARCHAR(50) NOT NULL,
+      books_read_count INT NOT NULL DEFAULT 0,
+      certificate_id VARCHAR(100) NOT NULL UNIQUE,
+      issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE KEY uk_user_month_cert (user_id, month_year),
+      INDEX idx_cert_code (certificate_id),
+      INDEX idx_cert_month (month_year)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
 }
 
 async function ensureUserColumns(connection, dbName) {
@@ -323,6 +405,30 @@ async function ensureBookProcurementColumns(connection, dbName) {
       name: "is_restricted_research",
       sql: "ALTER TABLE books ADD COLUMN is_restricted_research BOOLEAN NOT NULL DEFAULT FALSE AFTER pages",
     },
+    {
+      name: "resource_type",
+      sql: "ALTER TABLE books ADD COLUMN resource_type VARCHAR(30) NOT NULL DEFAULT 'BOOK' AFTER title",
+    },
+    {
+      name: "doi",
+      sql: "ALTER TABLE books ADD COLUMN doi VARCHAR(100) NULL AFTER isbn",
+    },
+    {
+      name: "volume_issue",
+      sql: "ALTER TABLE books ADD COLUMN volume_issue VARCHAR(50) NULL AFTER edition",
+    },
+    {
+      name: "publication_date",
+      sql: "ALTER TABLE books ADD COLUMN publication_date DATE NULL AFTER publication_year",
+    },
+    {
+      name: "accession_no",
+      sql: "ALTER TABLE books ADD COLUMN accession_no VARCHAR(50) NULL AFTER isbn",
+    },
+    {
+      name: "barcode",
+      sql: "ALTER TABLE books ADD COLUMN barcode VARCHAR(50) NULL AFTER accession_no",
+    },
   ];
 
   for (const column of procurementColumns) {
@@ -352,8 +458,25 @@ async function ensureBookProcurementColumns(connection, dbName) {
       vendor_agent_phone = COALESCE(NULLIF(TRIM(vendor_agent_phone), ''), CONCAT('+91-9000', LPAD(MOD(id, 10000), 4, '0'))),
       purchase_price = COALESCE(purchase_price, (250 + (MOD(id, 10) * 35))),
       purchase_date = COALESCE(purchase_date, DATE_SUB(CURDATE(), INTERVAL MOD(id, 365) DAY)),
-      purchase_invoice_no = COALESCE(NULLIF(TRIM(purchase_invoice_no), ''), CONCAT('INV-', LPAD(id, 5, '0')))
+      purchase_invoice_no = COALESCE(NULLIF(TRIM(purchase_invoice_no), ''), CONCAT('INV-', LPAD(id, 5, '0'))),
+      resource_type = COALESCE(NULLIF(TRIM(resource_type), ''), CASE 
+        WHEN category LIKE '%Journal%' OR category LIKE '%Periodical%' THEN 'JOURNAL'
+        WHEN category LIKE '%Research%' OR (doi IS NOT NULL AND doi != '') THEN 'RESEARCH_PAPER'
+        ELSE 'BOOK'
+      END),
+      accession_no = COALESCE(NULLIF(TRIM(accession_no), ''), CONCAT('ACC-', LPAD(id, 5, '0'))),
+      barcode = COALESCE(NULLIF(TRIM(barcode), ''), CONCAT('BC-', LPAD(id, 6, '0')))
   `);
+}
+
+async function ensureReservationStatusEnum(connection) {
+  try {
+    await connection.query(
+      "ALTER TABLE reservations MODIFY COLUMN status ENUM('active','ready','fulfilled','cancelled','expired') DEFAULT 'active'"
+    );
+  } catch (err) {
+    // Ignore if already applied or error occurs
+  }
 }
 
 async function ensureDefaultRoles(connection) {
@@ -365,7 +488,11 @@ async function ensureDefaultRoles(connection) {
       (3, 'student', 'Student user with basic access', '{"books":["read"],"transactions":["read"],"reservations":["create","read","update"]}'),
       (4, 'staff', 'Faculty and support staff with borrower access', '{"books":["read"],"transactions":["read"],"reservations":["create","read","update"]}'),
       (5, 'me_student', 'Master of Engineering (PG) student with direct research thesis access', '{"books":["read"],"transactions":["read"],"reservations":["create","read","update"]}'),
-      (6, 'research_scholar', 'Doctoral researcher with direct research paper and thesis access', '{"books":["read"],"transactions":["read"],"reservations":["create","read","update"]}')
+      (6, 'research_scholar', 'Doctoral researcher with direct research paper and thesis access', '{"books":["read"],"transactions":["read"],"reservations":["create","read","update"]}'),
+      (7, 'clerk', 'Circulation desk clerk with checkout, return, RFID scanner, and visitor log access', '{"transactions":["create","read","update"],"rfid":["read","create"],"entry":["read","create"]}')
+    ON DUPLICATE KEY UPDATE
+      description = VALUES(description),
+      permissions = VALUES(permissions)
   `);
 }
 
@@ -415,6 +542,7 @@ async function ensureDatabaseReady() {
     await ensureUserColumns(connection, dbName);
     await ensureBookTransactionColumns(connection, dbName);
     await ensureBookProcurementColumns(connection, dbName);
+    await ensureReservationStatusEnum(connection);
     await ensureDefaultRoles(connection);
 
     const existingRuntimeTables = await getExistingTables(

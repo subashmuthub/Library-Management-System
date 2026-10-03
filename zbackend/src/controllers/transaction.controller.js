@@ -92,6 +92,18 @@ class TransactionController {
       // For development without auth: librarian can be null or from body
       const librarianId = req.user?.id || req.body.librarianId || null;
 
+      const requesterRole = String(
+        req.user?.role || req.user?.role_name || req.user?.role?.role_name || "",
+      ).toLowerCase();
+
+      if (["student", "me_student", "research_scholar"].includes(requesterRole)) {
+        return res.status(403).json({
+          success: false,
+          error: "Forbidden",
+          message: "Access Denied: Students can only place reservations. Book issuance must be processed at the counter by a Clerk.",
+        });
+      }
+
       if (!bookId) {
         return res.status(400).json({ error: "Book ID is required" });
       }
@@ -321,6 +333,18 @@ class TransactionController {
   static async checkoutBatch(req, res) {
     let connection;
     try {
+      const requesterRole = String(
+        req.user?.role || req.user?.role_name || req.user?.role?.role_name || "",
+      ).toLowerCase();
+
+      if (["student", "me_student", "research_scholar"].includes(requesterRole)) {
+        return res.status(403).json({
+          success: false,
+          error: "Forbidden",
+          message: "Access Denied: Students can only place reservations. Book issuance must be processed at the counter by a Clerk.",
+        });
+      }
+
       const userId = req.body.userId || req.body.user_id;
       const rawBookIds = req.body.bookIds || req.body.book_ids || (req.body.bookId ? [req.body.bookId] : []);
       const requestedLoanDays = req.body.loanDays || req.body.loan_days;

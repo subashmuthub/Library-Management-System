@@ -23,11 +23,11 @@ router.post(
 // Get entry history for current user
 router.get('/history', authenticate, entryController.getMyHistory);
 
-// Get entry history for specific user (librarian/admin)
+// Get entry history for specific user (librarian/admin/clerk)
 router.get(
   '/history/:userId',
   authenticate,
-  authorize(['librarian', 'admin']),
+  authorize(['librarian', 'admin', 'clerk']),
   entryController.getUserHistory
 );
 
@@ -35,7 +35,7 @@ router.get(
 router.get(
   '/occupancy',
   authenticate,
-  authorize(['librarian', 'admin']),
+  authorize(['librarian', 'admin', 'clerk']),
   entryController.getCurrentOccupancy
 );
 

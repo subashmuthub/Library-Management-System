@@ -604,37 +604,37 @@ const Transactions = () => {
 
       {/* Bulk Continuous Return Scanner Modal */}
       {showScannerModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-          <div className="bg-gray-900 border border-gray-800 rounded-3xl max-w-3xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-3xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* Scanner Header */}
-            <div className="p-6 bg-gradient-to-r from-gray-900 via-emerald-950/40 to-gray-900 border-b border-gray-800 flex items-center justify-between">
+            <div className="p-6 bg-gradient-to-r from-emerald-600 to-teal-700 border-b border-emerald-500/20 text-white flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-2xl animate-pulse">
+                <div className="p-3 bg-white/20 border border-white/30 text-white rounded-2xl animate-pulse">
                   <Scan className="w-6 h-6" />
                 </div>
                 <div>
                   <div className="flex items-center space-x-2">
                     <h3 className="text-xl font-bold text-white">Bulk Continuous Return Scanner</h3>
-                    <span className="flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping mr-1" />
+                    <span className="flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-white/20 text-white border border-white/30">
+                      <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping mr-1" />
                       Live Mode
                     </span>
                   </div>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-emerald-100">
                     Scan RFID tag, ISBN, or Transaction ID. The scanner auto-processes on Enter and stays focused.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setShowScannerModal(false)}
-                className="p-2 text-gray-400 hover:text-white rounded-xl hover:bg-gray-800 transition-colors"
+                className="p-2 text-white/80 hover:text-white rounded-xl hover:bg-white/10 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Scanner Input Form */}
-            <div className="p-6 space-y-4 border-b border-gray-800 bg-gray-950/50">
+            <div className="p-6 space-y-4 border-b border-slate-100 bg-slate-50">
               <form onSubmit={handleScanSubmit} className="relative">
                 <div className="relative">
                   <input
@@ -644,13 +644,13 @@ const Transactions = () => {
                     onChange={(e) => setScannerInput(e.target.value)}
                     placeholder="Scan barcode / RFID or type ISBN & hit Enter..."
                     disabled={scannerLoading}
-                    className="w-full pl-5 pr-28 py-4 bg-gray-900/90 border-2 border-emerald-500/50 focus:border-emerald-400 rounded-2xl text-white placeholder-gray-500 focus:outline-none focus:ring-4 focus:ring-emerald-500/20 text-lg font-mono tracking-wider transition-all"
+                    className="w-full pl-5 pr-28 py-4 bg-white border-2 border-emerald-500/50 focus:border-emerald-500 rounded-2xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-4 focus:ring-emerald-500/20 text-lg font-mono tracking-wider transition-all shadow-sm"
                     autoFocus
                   />
                   <button
                     type="submit"
                     disabled={scannerLoading || !scannerInput.trim()}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl text-sm transition-all disabled:opacity-50 flex items-center space-x-1.5 shadow-md shadow-emerald-600/30"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl text-sm transition-all disabled:opacity-50 flex items-center space-x-1.5 shadow-md shadow-emerald-600/30"
                   >
                     <Zap className="w-4 h-4" />
                     <span>{scannerLoading ? 'Returning...' : 'Return'}</span>
@@ -660,35 +660,35 @@ const Transactions = () => {
 
               {/* Status Alerts */}
               {scannerError && (
-                <div className="flex items-center space-x-2 p-3 bg-rose-950/40 border border-rose-500/30 text-rose-300 rounded-xl text-sm animate-in slide-in-from-top-1">
-                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                <div className="flex items-center space-x-2 p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-sm animate-in slide-in-from-top-1">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0 text-rose-600" />
                   <span>{scannerError}</span>
                 </div>
               )}
 
               {scannerSuccessMsg && (
-                <div className="flex items-center space-x-2 p-3 bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 rounded-xl text-sm animate-in slide-in-from-top-1">
-                  <CheckCheck className="w-5 h-5 flex-shrink-0" />
+                <div className="flex items-center space-x-2 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-sm animate-in slide-in-from-top-1">
+                  <CheckCheck className="w-5 h-5 flex-shrink-0 text-emerald-600" />
                   <span>{scannerSuccessMsg}</span>
                 </div>
               )}
             </div>
 
             {/* Scanned Returns History */}
-            <div className="p-6 flex-1 overflow-y-auto space-y-4">
+            <div className="p-6 flex-1 overflow-y-auto space-y-4 bg-white">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
-                  <h4 className="text-sm font-bold text-gray-300 uppercase tracking-wider">
+                  <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider">
                     Scanned in this Session
                   </h4>
-                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
                     {scannedReturns.length}
                   </span>
                 </div>
                 {scannedReturns.length > 0 && (
                   <button
                     onClick={() => setScannedReturns([])}
-                    className="flex items-center space-x-1 text-xs text-gray-400 hover:text-rose-400 transition-colors"
+                    className="flex items-center space-x-1 text-xs text-slate-400 hover:text-rose-600 transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>Clear History</span>
@@ -697,7 +697,7 @@ const Transactions = () => {
               </div>
 
               {scannedReturns.length === 0 ? (
-                <div className="text-center py-10 border border-dashed border-gray-800 rounded-2xl text-gray-500 text-sm">
+                <div className="text-center py-10 border border-dashed border-slate-200 rounded-2xl text-slate-500 text-sm">
                   Ready to scan. Present a book barcode or RFID tag to begin continuous return.
                 </div>
               ) : (
@@ -705,16 +705,16 @@ const Transactions = () => {
                   {scannedReturns.map((item, idx) => (
                     <div
                       key={idx}
-                      className="flex items-center justify-between p-3.5 bg-gray-800/40 border border-gray-700/50 rounded-2xl hover:border-gray-600 transition-all"
+                      className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-200 rounded-2xl hover:border-slate-300 transition-all"
                     >
                       <div className="flex items-center space-x-3">
-                        <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl">
+                        <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl">
                           <CheckCircle className="w-5 h-5" />
                         </div>
                         <div>
-                          <p className="font-semibold text-white text-sm">{item.title}</p>
-                          <div className="flex items-center space-x-2 text-xs text-gray-400">
-                            <span>Borrower: <strong className="text-gray-300">{item.borrower_name}</strong></span>
+                          <p className="font-semibold text-slate-900 text-sm">{item.title}</p>
+                          <div className="flex items-center space-x-2 text-xs text-slate-500">
+                            <span>Borrower: <strong className="text-slate-800">{item.borrower_name}</strong></span>
                             {item.isbn && <span>• ISBN: <span className="font-mono">{item.isbn}</span></span>}
                           </div>
                         </div>
@@ -722,19 +722,19 @@ const Transactions = () => {
 
                       <div className="text-right">
                         {item.is_fine_exempt ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
                             Staff (Exempt)
                           </span>
                         ) : item.fine_amount > 0 ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
                             Fine: ₹{item.fine_amount}
                           </span>
                         ) : (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                             No Fine
                           </span>
                         )}
-                        <p className="text-[10px] text-gray-500 mt-1">
+                        <p className="text-[10px] text-slate-400 mt-1">
                           {format(new Date(item.return_date), 'hh:mm:ss a')}
                         </p>
                       </div>
@@ -745,10 +745,10 @@ const Transactions = () => {
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 bg-gray-900 border-t border-gray-800 flex justify-end">
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
               <button
                 onClick={() => setShowScannerModal(false)}
-                className="btn bg-gray-800 hover:bg-gray-700 text-white text-sm px-6 py-2 rounded-xl"
+                className="btn bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-sm px-6 py-2 rounded-xl font-semibold shadow-sm"
               >
                 Close Scanner
               </button>

@@ -28,6 +28,7 @@ import ShelfLocator from './pages/ShelfLocator';
 import ActiveUserCertificate from './pages/ActiveUserCertificate';
 import BookSuggestions from './pages/BookSuggestions';
 import PendingRequestsDashboard from './pages/PendingRequestsDashboard';
+import ClerkIssueDesk from './pages/ClerkIssueDesk';
 import HomePage from './pages/HomePage';
 
 function App() {
@@ -53,6 +54,7 @@ function App() {
               <Route path="books/:id" element={<BookDetails />} />
               <Route path="book-search" element={<BookSearch />} />
               <Route path="transactions" element={<Transactions />} />
+              <Route path="issue-desk" element={<PrivateRoute roles={["admin", "librarian", "clerk"]}><ClerkIssueDesk /></PrivateRoute>} />
               <Route path="fines" element={<Fines />} />
               <Route path="reservations" element={<Reservations />} />
               <Route path="reservations/pending" element={<PrivateRoute roles={["admin", "librarian"]}><PendingRequestsDashboard /></PrivateRoute>} />

@@ -53,23 +53,23 @@ const SuggestBookModal = ({ isOpen, onClose, onSuggestionCreated }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg overflow-hidden bg-gray-900 border border-gray-800 rounded-3xl shadow-2xl p-6 md:p-8">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="relative w-full max-w-lg overflow-hidden bg-white border border-slate-200 rounded-2xl shadow-2xl p-6 md:p-8">
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-gray-800">
+        <div className="flex items-center justify-between pb-4 border-b border-slate-100">
           <div className="flex items-center space-x-3">
-            <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-2xl">
+            <div className="p-3 bg-blue-50 border border-blue-100 text-blue-600 rounded-xl">
               <BookPlus className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-xl font-bold text-white">Suggest a Book</h3>
-              <p className="text-xs text-gray-400">Request a new addition to the campus library catalog</p>
+              <h3 className="text-xl font-bold text-slate-900">Suggest a Book</h3>
+              <p className="text-xs text-slate-500">Request a new addition to the campus library catalog</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 text-gray-400 hover:text-white rounded-xl hover:bg-gray-800/80 transition-colors"
+            className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -77,15 +77,15 @@ const SuggestBookModal = ({ isOpen, onClose, onSuggestionCreated }) => {
 
         {/* Status Alerts */}
         {error && (
-          <div className="mt-4 flex items-center space-x-2 p-3 bg-red-900/30 border border-red-500/30 text-red-300 rounded-xl text-sm">
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          <div className="mt-4 flex items-center space-x-2 p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-sm">
+            <AlertCircle className="w-5 h-5 flex-shrink-0 text-rose-600" />
             <span>{error}</span>
           </div>
         )}
 
         {success && (
-          <div className="mt-4 flex items-center space-x-2 p-3 bg-emerald-900/30 border border-emerald-500/30 text-emerald-300 rounded-xl text-sm">
-            <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+          <div className="mt-4 flex items-center space-x-2 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-sm">
+            <CheckCircle2 className="w-5 h-5 flex-shrink-0 text-emerald-600" />
             <span>Suggestion submitted! Librarians will review your request.</span>
           </div>
         )}
@@ -93,8 +93,8 @@ const SuggestBookModal = ({ isOpen, onClose, onSuggestionCreated }) => {
         {/* Form */}
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-2">
-              Book Title <span className="text-rose-400">*</span>
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
+              Book Title <span className="text-rose-500">*</span>
             </label>
             <input
               type="text"
@@ -103,13 +103,13 @@ const SuggestBookModal = ({ isOpen, onClose, onSuggestionCreated }) => {
               onChange={handleChange}
               placeholder="e.g. Designing Data-Intensive Applications"
               required
-              className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700/60 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm font-medium"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all text-sm font-medium"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-2">
-              Author(s) <span className="text-rose-400">*</span>
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
+              Author(s) <span className="text-rose-500">*</span>
             </label>
             <input
               type="text"
@@ -118,12 +118,12 @@ const SuggestBookModal = ({ isOpen, onClose, onSuggestionCreated }) => {
               onChange={handleChange}
               placeholder="e.g. Martin Kleppmann"
               required
-              className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700/60 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm font-medium"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all text-sm font-medium"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-2">
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
               ISBN (Optional)
             </label>
             <input
@@ -132,12 +132,12 @@ const SuggestBookModal = ({ isOpen, onClose, onSuggestionCreated }) => {
               value={formData.isbn}
               onChange={handleChange}
               placeholder="e.g. 9781449373320"
-              className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700/60 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm font-medium font-mono"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all text-sm font-medium font-mono"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-2">
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
               Reason / Academic Need (Optional)
             </label>
             <textarea
@@ -146,22 +146,22 @@ const SuggestBookModal = ({ isOpen, onClose, onSuggestionCreated }) => {
               value={formData.reason}
               onChange={handleChange}
               placeholder="e.g. Essential reference book for 3rd year Distributed Systems course..."
-              className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700/60 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm resize-none"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all text-sm resize-none"
             />
           </div>
 
-          <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-800">
+          <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-100">
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2.5 text-sm font-medium text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-xl transition-colors"
+              className="px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 bg-white border border-slate-200 rounded-xl transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="flex items-center space-x-2 px-6 py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-xl font-medium text-sm shadow-lg shadow-indigo-500/25 transition-all disabled:opacity-50"
+              className="flex items-center space-x-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-sm shadow-md shadow-blue-500/20 transition-all disabled:opacity-50"
             >
               <Send className="w-4 h-4" />
               <span>{submitting ? 'Submitting...' : 'Submit Suggestion'}</span>
