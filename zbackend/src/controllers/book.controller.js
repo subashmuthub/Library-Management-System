@@ -71,6 +71,19 @@ class BookController {
                 whereConditions.push('b.is_restricted_research = TRUE');
             }
 
+            // Filter out misplaced, damaged, and lost books for students / general catalog
+            const sessionUser = req.user || req.session?.user;
+            const userRole = String(sessionUser?.role || sessionUser?.role_name || '').toLowerCase();
+            const isStaffOrCirculation = ['admin', 'librarian', 'clerk'].includes(userRole);
+            const { include_hidden, status: statusFilter } = req.query;
+
+            if (statusFilter && statusFilter !== 'all') {
+                whereConditions.push('b.status = ?');
+                queryParams.push(statusFilter);
+            } else if (!isStaffOrCirculation && include_hidden !== 'true') {
+                whereConditions.push("(b.status IS NULL OR b.status NOT IN ('damaged', 'lost', 'misplaced', 'archived'))");
+            }
+
             const whereClause = whereConditions.join(' AND ');
 
             // Main query for books with safe average rating and review count calculation

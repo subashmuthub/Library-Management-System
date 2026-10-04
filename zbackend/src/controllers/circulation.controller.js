@@ -33,7 +33,7 @@ class CirculationController {
           SELECT 
             u.id, u.first_name, u.last_name, u.email, u.phone, 
             u.student_id, u.degree_type, u.department, u.academic_year, 
-            u.status, u.role_id,
+            u.status, u.role_id, u.has_desk_hold, u.desk_hold_reason,
             LOWER(COALESCE(ur.role_name, 
               CASE u.role_id 
                 WHEN 1 THEN 'admin'
@@ -146,9 +146,24 @@ class CirculationController {
 
         const allReservations = [...standardReservations, ...researchReservations];
 
+        // Fetch detailed pending fines list for desk payment/waiver
+        const [pendingFinesList] = await connection.execute(`
+          SELECT f.id, f.amount, f.fine_type, 
+                 COALESCE(f.notes, f.fine_type) as reason,
+                 f.notes, f.status, f.created_at,
+                 b.title as book_title
+          FROM fines f
+          LEFT JOIN book_transactions bt ON f.transaction_id = bt.id
+          LEFT JOIN books b ON bt.book_id = b.id
+          WHERE f.user_id = ? AND f.status IN ('pending', 'disputed')
+          ORDER BY f.created_at DESC
+        `, [studentId]);
+
         connection.release();
 
+        const hasDeskHold = Boolean(student.has_desk_hold);
         const canBorrow = student.status === 'active' &&
+          !hasDeskHold &&
           activeLoans.length < maxLimit &&
           overdueCount === 0;
 
@@ -166,7 +181,9 @@ class CirculationController {
             department: student.department,
             academic_year: student.academic_year,
             role: normalizedRoleName,
-            status: student.status
+            status: student.status,
+            has_desk_hold: hasDeskHold,
+            desk_hold_reason: student.desk_hold_reason || null
           },
           stats: {
             active_loans_count: activeLoans.length,
@@ -178,7 +195,8 @@ class CirculationController {
             default_loan_days: normalizedRoleName === 'staff' ? 60 : 14
           },
           active_loans: activeLoans,
-          reservations: allReservations
+          reservations: allReservations,
+          pending_fines: pendingFinesList
         });
       } catch (err) {
         connection.release();
@@ -264,6 +282,7 @@ class CirculationController {
       // Fetch student details
       const [students] = await connection.execute(`
         SELECT u.id, u.first_name, u.last_name, u.email, u.student_id, u.department, u.degree_type,
+               u.has_desk_hold, u.desk_hold_reason,
                LOWER(COALESCE(ur.role_name, 'student')) AS role_name
         FROM users u
         LEFT JOIN user_roles ur ON u.role_id = ur.id
@@ -280,6 +299,17 @@ class CirculationController {
       }
 
       const student = students[0];
+      if (student.has_desk_hold) {
+        await connection.rollback();
+        connection.release();
+        return res.status(403).json({
+          success: false,
+          error: 'Account Blocked',
+          message: 'Account Blocked: Please see the Circulation Desk.',
+          reason: student.desk_hold_reason || 'Please see the Circulation Desk.'
+        });
+      }
+
       const isStaff = ['teacher', 'faculty', 'staff'].includes(student.role_name);
       const effectiveLoanDays = Number(loan_days) > 0 ? Number(loan_days) : (isStaff ? 60 : 14);
 
@@ -447,6 +477,7 @@ class CirculationController {
       // Verify student / patron
       const [students] = await connection.execute(`
         SELECT u.id, u.first_name, u.last_name, u.email, u.student_id, u.department, u.degree_type, u.status,
+               u.has_desk_hold, u.desk_hold_reason,
                LOWER(COALESCE(ur.role_name, 'student')) AS role_name
         FROM users u
         LEFT JOIN user_roles ur ON u.role_id = ur.id
@@ -463,6 +494,17 @@ class CirculationController {
       }
 
       const student = students[0];
+      if (student.has_desk_hold) {
+        await connection.rollback();
+        connection.release();
+        return res.status(403).json({
+          success: false,
+          error: 'Account Blocked',
+          message: 'Account Blocked: Please see the Circulation Desk.',
+          reason: student.desk_hold_reason || 'Please see the Circulation Desk.'
+        });
+      }
+
       if (student.status !== 'active') {
         await connection.rollback();
         connection.release();
@@ -695,6 +737,1023 @@ class CirculationController {
       return res.json({ success: true, books: rows });
     } catch (error) {
       console.error('Error in searchBooks:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * POST /api/circulation/desk-hold
+   * Place or lift a circulation desk hold on a student account.
+   * Body: { user_id, has_desk_hold, reason }
+   */
+  static async setDeskHold(req, res) {
+    try {
+      const { user_id, has_desk_hold, reason } = req.body;
+      if (!user_id) {
+        return res.status(400).json({ success: false, message: 'User ID is required.' });
+      }
+
+      await pool.query(
+        'UPDATE users SET has_desk_hold = ?, desk_hold_reason = ? WHERE id = ?',
+        [has_desk_hold ? 1 : 0, has_desk_hold ? (reason || 'Account blocked by circulation desk') : null, user_id]
+      );
+
+      return res.json({
+        success: true,
+        message: has_desk_hold
+          ? 'Desk hold applied to student account. Entry and reservations blocked.'
+          : 'Desk hold lifted from student account.',
+        user_id,
+        has_desk_hold: Boolean(has_desk_hold),
+        desk_hold_reason: has_desk_hold ? reason : null
+      });
+    } catch (error) {
+      console.error('Error in setDeskHold:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * POST /api/circulation/manual-return
+   * Manual hardware fallback mode for book returns (Barcode, Accession No, ISBN, Book ID).
+   * Checks condition, applies optional replacement fee, and auto-routes to Hold Shelf if reserved.
+   * Body: { identifier, condition, notes, apply_replacement_fee, fee_amount }
+   */
+  static async manualReturn(req, res) {
+    const connection = await pool.getConnection();
+    try {
+      const {
+        identifier,
+        condition = 'good',
+        notes = '',
+        apply_replacement_fee = false,
+        fee_amount = 0
+      } = req.body;
+
+      const clerkId = req.user?.id || null;
+
+      if (!identifier) {
+        connection.release();
+        return res.status(400).json({
+          success: false,
+          message: 'Book identifier (Barcode, Accession No, ISBN, or Book ID) is required.'
+        });
+      }
+
+      await connection.beginTransaction();
+
+      const trimmed = String(identifier).trim();
+      const isNumeric = /^\d+$/.test(trimmed);
+
+      // Locate book
+      let bookSql = `
+        SELECT b.id, b.title, b.author, b.isbn, b.accession_no, b.barcode,
+               b.available_copies, b.total_copies, b.purchase_price, b.status
+        FROM books b
+        LEFT JOIN rfid_tags rt ON b.id = rt.book_id
+        WHERE b.accession_no = ? OR b.barcode = ? OR b.isbn = ? OR rt.tag_id = ?
+      `;
+      const bookParams = [trimmed, trimmed, trimmed, trimmed];
+      if (isNumeric) {
+        bookSql += ` OR b.id = ?`;
+        bookParams.push(parseInt(trimmed, 10));
+      }
+      bookSql += ` LIMIT 1`;
+
+      const [books] = await connection.execute(bookSql, bookParams);
+      if (books.length === 0) {
+        await connection.rollback();
+        connection.release();
+        return res.status(404).json({
+          success: false,
+          message: `No book found matching "${trimmed}".`
+        });
+      }
+
+      const book = books[0];
+
+      // Find active loan transaction
+      const [loans] = await connection.execute(`
+        SELECT bt.*, u.id as patron_id, u.first_name, u.last_name, u.student_id, u.email,
+               DATEDIFF(CURDATE(), bt.due_date) as days_overdue
+        FROM book_transactions bt
+        JOIN users u ON bt.user_id = u.id
+        WHERE bt.book_id = ? AND bt.status = 'active'
+        ORDER BY bt.checkout_date DESC
+        LIMIT 1
+      `, [book.id]);
+
+      let transaction = null;
+      let fineCreated = null;
+
+      if (loans.length > 0) {
+        transaction = loans[0];
+
+        // Close loan transaction
+        await connection.execute(`
+          UPDATE book_transactions
+          SET status = 'returned', return_date = CURDATE(), returned_by = ?, return_condition = ?
+          WHERE id = ?
+        `, [clerkId, condition, transaction.id]);
+
+        // Overdue fine calculation (₹5/day overdue if overdue)
+        if (transaction.days_overdue > 0) {
+          const fineAmount = transaction.days_overdue * 5;
+          const [fineInsert] = await connection.execute(`
+            INSERT INTO fines (user_id, transaction_id, amount, days_overdue, fine_rate, fine_type, notes, status)
+            VALUES (?, ?, ?, ?, 5.00, 'overdue', ?, 'pending')
+          `, [transaction.patron_id, transaction.id, fineAmount, transaction.days_overdue, `Overdue by ${transaction.days_overdue} day(s)`]);
+          fineCreated = { id: fineInsert.insertId, amount: fineAmount, type: 'overdue' };
+        }
+
+        // Damage / replacement fee if applicable
+        if (apply_replacement_fee && Number(fee_amount) > 0) {
+          const fineType = condition === 'lost' ? 'lost_book' : (condition === 'damaged' ? 'damage' : 'other');
+          const [dmgFine] = await connection.execute(`
+            INSERT INTO fines (user_id, transaction_id, amount, fine_type, notes, status)
+            VALUES (?, ?, ?, ?, ?, 'pending')
+          `, [transaction.patron_id, transaction.id, Number(fee_amount), fineType, notes || `Book returned in ${condition} condition`]);
+          fineCreated = { id: dmgFine.insertId, amount: Number(fee_amount), type: fineType };
+        }
+      }
+
+      let onHoldShelf = false;
+      let holdReservation = null;
+
+      // Handle book inventory status
+      if (condition === 'damaged' || condition === 'lost') {
+        await connection.execute(
+          `UPDATE books SET status = ?, is_available = FALSE WHERE id = ?`,
+          [condition, book.id]
+        );
+      } else {
+        // Condition is good / normal - check reservation hold shelf lifecycle
+        const [queuedRes] = await connection.execute(`
+          SELECT r.*, u.first_name, u.last_name, u.email, u.student_id, u.phone
+          FROM reservations r
+          JOIN users u ON r.user_id = u.id
+          WHERE r.book_id = ? AND r.status = 'active'
+          ORDER BY r.queue_position ASC, r.created_at ASC
+          LIMIT 1
+        `, [book.id]);
+
+        if (queuedRes.length > 0) {
+          const resRow = queuedRes[0];
+          // Put on Hold Shelf with 3-day (72 hr) pickup window
+          await connection.execute(`
+            UPDATE reservations
+            SET status = 'on_hold_shelf',
+                hold_expiry_date = DATE_ADD(NOW(), INTERVAL 3 DAY),
+                queue_position = 0,
+                updated_at = NOW()
+            WHERE id = ?
+          `, [resRow.id]);
+
+          await connection.execute(`
+            UPDATE books SET status = 'active', is_available = TRUE WHERE id = ?
+          `, [book.id]);
+
+          onHoldShelf = true;
+          holdReservation = {
+            id: resRow.id,
+            patron_name: `${resRow.first_name} ${resRow.last_name}`.trim(),
+            student_id: resRow.student_id,
+            hold_expiry_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+            remaining_hours: 72
+          };
+        } else {
+          // No reservation waiting - return to general circulation shelf
+          await connection.execute(`
+            UPDATE books 
+            SET available_copies = LEAST(total_copies, available_copies + 1),
+                is_available = TRUE,
+                status = 'active'
+            WHERE id = ?
+          `, [book.id]);
+        }
+      }
+
+      await connection.commit();
+      connection.release();
+
+      return res.json({
+        success: true,
+        message: onHoldShelf
+          ? `Book returned and placed on HOLD SHELF for ${holdReservation.patron_name}. (Pickup window: 72 hours).`
+          : (condition === 'damaged' || condition === 'lost'
+              ? `Book returned and flagged as ${condition.toUpperCase()}. Hidden from search.`
+              : `Book "${book.title}" successfully returned and restored to shelf.`),
+        book: {
+          id: book.id,
+          title: book.title,
+          accession_no: book.accession_no,
+          barcode: book.barcode,
+          condition
+        },
+        transaction: transaction ? {
+          id: transaction.id,
+          patron_name: `${transaction.first_name} ${transaction.last_name}`.trim(),
+          student_id: transaction.student_id,
+          days_overdue: transaction.days_overdue
+        } : null,
+        on_hold_shelf: onHoldShelf,
+        hold_reservation: holdReservation,
+        fine_created: fineCreated
+      });
+    } catch (error) {
+      await connection.rollback();
+      connection.release();
+      console.error('Error in manualReturn:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * GET /api/circulation/hold-shelf
+   * Get all books awaiting pickup on the hold shelf.
+   */
+  static async getHoldShelf(req, res) {
+    try {
+      const [rows] = await pool.query(`
+        SELECT 
+          r.id AS reservation_id,
+          r.book_id,
+          r.user_id,
+          r.status,
+          r.created_at,
+          r.expiry_date,
+          COALESCE(r.hold_expiry_date, DATE_ADD(r.created_at, INTERVAL 3 DAY)) AS hold_expiry_date,
+          TIMESTAMPDIFF(HOUR, NOW(), COALESCE(r.hold_expiry_date, DATE_ADD(r.created_at, INTERVAL 3 DAY))) AS remaining_hours,
+          b.title,
+          b.author,
+          b.isbn,
+          b.accession_no,
+          b.barcode,
+          CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS patron_name,
+          u.student_id AS patron_student_id,
+          u.email AS patron_email,
+          u.phone AS patron_phone
+        FROM reservations r
+        JOIN books b ON r.book_id = b.id
+        JOIN users u ON r.user_id = u.id
+        WHERE r.status IN ('ready', 'on_hold_shelf')
+        ORDER BY COALESCE(r.hold_expiry_date, r.expiry_date) ASC
+      `);
+
+      return res.json({
+        success: true,
+        count: rows.length,
+        items: rows.map(item => ({
+          ...item,
+          remaining_hours: Math.max(0, item.remaining_hours || 0),
+          is_expired: (item.remaining_hours || 0) <= 0
+        }))
+      });
+    } catch (error) {
+      console.error('Error in getHoldShelf:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * POST /api/circulation/hold-shelf/expire-check
+   * Automatically check and expire holds past their 3-day window, promoting next reservation.
+   */
+  static async expireHoldShelfCheck(req, res) {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      // Find expired holds
+      const [expiredHolds] = await connection.execute(`
+        SELECT r.id, r.book_id, r.user_id
+        FROM reservations r
+        WHERE r.status IN ('ready', 'on_hold_shelf')
+          AND COALESCE(r.hold_expiry_date, r.expiry_date, DATE_ADD(r.created_at, INTERVAL 3 DAY)) < NOW()
+      `);
+
+      let expiredCount = 0;
+      let promotedCount = 0;
+
+      for (const hold of expiredHolds) {
+        // Mark hold expired
+        await connection.execute(`
+          UPDATE reservations SET status = 'expired', updated_at = NOW() WHERE id = ?
+        `, [hold.id]);
+        expiredCount++;
+
+        // Check if there is another queued student for this book
+        const [nextQueue] = await connection.execute(`
+          SELECT id, user_id FROM reservations
+          WHERE book_id = ? AND status = 'active'
+          ORDER BY queue_position ASC, created_at ASC
+          LIMIT 1
+        `, [hold.book_id]);
+
+        if (nextQueue.length > 0) {
+          // Promote next student to Hold Shelf
+          await connection.execute(`
+            UPDATE reservations
+            SET status = 'on_hold_shelf',
+                hold_expiry_date = DATE_ADD(NOW(), INTERVAL 3 DAY),
+                queue_position = 0,
+                updated_at = NOW()
+            WHERE id = ?
+          `, [nextQueue[0].id]);
+          promotedCount++;
+        } else {
+          // Restore book to general copies
+          await connection.execute(`
+            UPDATE books
+            SET available_copies = LEAST(total_copies, available_copies + 1),
+                is_available = TRUE,
+                status = 'active'
+            WHERE id = ?
+          `, [hold.book_id]);
+        }
+      }
+
+      await connection.commit();
+      connection.release();
+
+      return res.json({
+        success: true,
+        message: `Hold shelf audit complete. ${expiredCount} expired hold(s) processed, ${promotedCount} next student(s) promoted in queue.`,
+        expired_count: expiredCount,
+        promoted_count: promotedCount
+      });
+    } catch (error) {
+      await connection.rollback();
+      connection.release();
+      console.error('Error in expireHoldShelfCheck:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * POST /api/fines/cash-collection
+   * Offline cash collection at Circulation Desk with printable receipt generation.
+   * Body: { fine_id, student_id, amount_received, receipt_notes }
+   */
+  static async collectCash(req, res) {
+    const connection = await pool.getConnection();
+    try {
+      const { fine_id, student_id, amount_received, receipt_notes } = req.body;
+      const clerkId = req.user?.id || 1;
+      const clerkName = req.user ? `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim() : 'Circulation Clerk';
+
+      if (!fine_id) {
+        connection.release();
+        return res.status(400).json({ success: false, message: 'Fine ID is required.' });
+      }
+
+      await connection.beginTransaction();
+
+      // Locate fine
+      const [fines] = await connection.execute(`
+        SELECT f.*, u.first_name, u.last_name, u.student_id as student_roll, u.email
+        FROM fines f
+        JOIN users u ON f.user_id = u.id
+        WHERE f.id = ?
+      `, [fine_id]);
+
+      if (fines.length === 0) {
+        await connection.rollback();
+        connection.release();
+        return res.status(404).json({ success: false, message: 'Fine record not found.' });
+      }
+
+      const fine = fines[0];
+      const effectiveStudentId = student_id || fine.user_id;
+      const effectiveAmount = Number(amount_received) > 0 ? Number(amount_received) : Number(fine.amount);
+
+      const receiptNo = `CSH-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      // Insert log into cash_desk_logs
+      await connection.execute(`
+        INSERT INTO cash_desk_logs (receipt_no, fine_id, student_id, amount_received, receipt_notes, collected_by)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `, [receiptNo, fine_id, effectiveStudentId, effectiveAmount, receipt_notes || 'Cash Desk Collection', clerkId]);
+
+      // Update fine status
+      await connection.execute(`
+        UPDATE fines
+        SET status = 'paid',
+            amount_paid = ?,
+            payment_date = CURDATE(),
+            payment_method = 'cash',
+            processed_by = ?,
+            notes = CONCAT(COALESCE(notes, ''), ' [Receipt: ', ?, ']')
+        WHERE id = ?
+      `, [effectiveAmount, clerkId, receiptNo, fine_id]);
+
+      await connection.commit();
+      connection.release();
+
+      return res.json({
+        success: true,
+        message: `Cash payment of ₹${effectiveAmount} collected and recorded.`,
+        receipt: {
+          receipt_no: receiptNo,
+          fine_id: fine.id,
+          amount_received: effectiveAmount,
+          payment_method: 'CASH',
+          student: {
+            id: effectiveStudentId,
+            name: `${fine.first_name} ${fine.last_name}`.trim(),
+            student_id: fine.student_roll,
+            email: fine.email
+          },
+          collector: {
+            id: clerkId,
+            name: clerkName,
+            role: req.user?.role || 'clerk'
+          },
+          collected_at: new Date().toISOString(),
+          receipt_notes: receipt_notes || ''
+        }
+      });
+    } catch (error) {
+      await connection.rollback();
+      connection.release();
+      console.error('Error in collectCash:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * POST /api/circulation/fines/dispute
+   * Fine waiver / dispute workflow.
+   * If fine <= 50 INR: direct waiver with mandatory reason category.
+   * If fine > 50 INR: automatic escalation to Chief Librarian.
+   * Body: { fine_id, reason_category, reason_text }
+   */
+  static async disputeFine(req, res) {
+    const connection = await pool.getConnection();
+    try {
+      const { fine_id, reason_category, reason_text } = req.body;
+      const clerkId = req.user?.id || 1;
+
+      const validCategories = ['System Error', 'Medical Exemption', 'Desk Discretion'];
+      if (!reason_category || !validCategories.includes(reason_category)) {
+        connection.release();
+        return res.status(400).json({
+          success: false,
+          message: `Mandatory reason category must be one of: ${validCategories.join(', ')}`
+        });
+      }
+
+      await connection.beginTransaction();
+
+      const [fines] = await connection.execute(
+        `SELECT * FROM fines WHERE id = ?`,
+        [fine_id]
+      );
+
+      if (fines.length === 0) {
+        await connection.rollback();
+        connection.release();
+        return res.status(404).json({ success: false, message: 'Fine record not found.' });
+      }
+
+      const fine = fines[0];
+      const amount = Number(fine.amount);
+
+      let action = '';
+      let message = '';
+
+      if (amount <= 50) {
+        // Direct Clerk Waiver
+        await connection.execute(`
+          UPDATE fines SET status = 'waived', updated_at = NOW() WHERE id = ?
+        `, [fine_id]);
+
+        const [disputeResult] = await connection.execute(`
+          INSERT INTO fine_disputes (fine_id, user_id, amount, reason_category, reason_text, status, resolved_by)
+          VALUES (?, ?, ?, ?, ?, 'WAIVED', ?)
+        `, [fine_id, fine.user_id, amount, reason_category, reason_text || '', clerkId]);
+
+        action = 'WAIVED';
+        message = `Fine of ₹${amount} waived directly under desk discretion (${reason_category}).`;
+
+        await connection.commit();
+        connection.release();
+
+        return res.json({
+          success: true,
+          action,
+          message,
+          dispute_id: disputeResult.insertId,
+          amount
+        });
+      } else {
+        // Escalation to Chief Librarian
+        await connection.execute(`
+          UPDATE fines SET status = 'disputed', updated_at = NOW() WHERE id = ?
+        `, [fine_id]);
+
+        const [disputeResult] = await connection.execute(`
+          INSERT INTO fine_disputes (fine_id, user_id, amount, reason_category, reason_text, status, resolved_by)
+          VALUES (?, ?, ?, ?, ?, 'ESCALATED_TO_LIBRARIAN', NULL)
+        `, [fine_id, fine.user_id, amount, reason_category, reason_text || '']);
+
+        action = 'ESCALATED';
+        message = `Fine of ₹${amount} exceeds ₹50 clerk waiver limit. Escalated to Chief Librarian for review.`;
+
+        await connection.commit();
+        connection.release();
+
+        return res.json({
+          success: true,
+          action,
+          message,
+          dispute_id: disputeResult.insertId,
+          amount
+        });
+      }
+    } catch (error) {
+      await connection.rollback();
+      connection.release();
+      console.error('Error in disputeFine:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * GET /api/circulation/fines/disputes
+   * Get all fine disputes and waivers.
+   */
+  static async getFineDisputes(req, res) {
+    try {
+      const [rows] = await pool.query(`
+        SELECT 
+          fd.*,
+          CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS patron_name,
+          u.student_id AS patron_student_id,
+          u.email AS patron_email,
+          CONCAT(COALESCE(r.first_name, ''), ' ', COALESCE(r.last_name, '')) AS resolver_name,
+          b.title AS book_title
+        FROM fine_disputes fd
+        JOIN users u ON fd.user_id = u.id
+        LEFT JOIN users r ON fd.resolved_by = r.id
+        LEFT JOIN fines f ON fd.fine_id = f.id
+        LEFT JOIN book_transactions bt ON f.transaction_id = bt.id
+        LEFT JOIN books b ON bt.book_id = b.id
+        ORDER BY fd.created_at DESC
+      `);
+
+      return res.json({ success: true, disputes: rows });
+    } catch (error) {
+      console.error('Error in getFineDisputes:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * POST /api/circulation/inventory/report-condition
+   * Damaged / Lost book pipeline with optional replacement fine.
+   * Body: { identifier, condition: 'damaged' | 'lost', notes, apply_replacement_fee, fee_amount, user_id }
+   */
+  static async reportCondition(req, res) {
+    const connection = await pool.getConnection();
+    try {
+      const {
+        identifier,
+        condition = 'damaged',
+        notes = '',
+        apply_replacement_fee = false,
+        fee_amount = 0,
+        user_id = null
+      } = req.body;
+
+      if (!identifier) {
+        connection.release();
+        return res.status(400).json({ success: false, message: 'Book identifier is required.' });
+      }
+
+      await connection.beginTransaction();
+
+      const trimmed = String(identifier).trim();
+      const isNumeric = /^\d+$/.test(trimmed);
+
+      let bookSql = `
+        SELECT id, title, author, barcode, accession_no, purchase_price, available_copies, total_copies
+        FROM books
+        WHERE accession_no = ? OR barcode = ? OR isbn = ?
+      `;
+      const params = [trimmed, trimmed, trimmed];
+      if (isNumeric) {
+        bookSql += ` OR id = ?`;
+        params.push(parseInt(trimmed, 10));
+      }
+      bookSql += ` LIMIT 1`;
+
+      const [books] = await connection.execute(bookSql, params);
+      if (books.length === 0) {
+        await connection.rollback();
+        connection.release();
+        return res.status(404).json({ success: false, message: 'Book not found.' });
+      }
+
+      const book = books[0];
+      const validCondition = condition === 'lost' ? 'lost' : 'damaged';
+
+      // Update book status and hide from search
+      await connection.execute(`
+        UPDATE books 
+        SET status = ?, is_available = FALSE, available_copies = GREATEST(0, available_copies - 1)
+        WHERE id = ?
+      `, [validCondition, book.id]);
+
+      // If replacement fee requested
+      let feeId = null;
+      if (apply_replacement_fee && Number(fee_amount) > 0 && user_id) {
+        const fineType = validCondition === 'lost' ? 'lost_book' : 'damage';
+        const [fineRes] = await connection.execute(`
+          INSERT INTO fines (user_id, amount, fine_type, notes, status)
+          VALUES (?, ?, ?, ?, 'pending')
+        `, [user_id, Number(fee_amount), fineType, notes ? `${notes} (Book: ${book.title})` : `Book flagged as ${validCondition}: ${book.title}`]);
+        feeId = fineRes.insertId;
+      }
+
+      await connection.commit();
+      connection.release();
+
+      return res.json({
+        success: true,
+        message: `Book "${book.title}" flagged as ${validCondition.toUpperCase()} and removed from active circulation.`,
+        book_id: book.id,
+        condition: validCondition,
+        replacement_fine_id: feeId
+      });
+    } catch (error) {
+      await connection.rollback();
+      connection.release();
+      console.error('Error in reportCondition:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * POST /api/circulation/inventory/flag-misplaced
+   * Flag misplaced book with shelf locator notes and hide immediately from student search.
+   * Body: { identifier, misplaced_notes }
+   */
+  static async flagMisplaced(req, res) {
+    try {
+      const { identifier, misplaced_notes = '' } = req.body;
+      if (!identifier) {
+        return res.status(400).json({ success: false, message: 'Book identifier is required.' });
+      }
+
+      const trimmed = String(identifier).trim();
+      const isNumeric = /^\d+$/.test(trimmed);
+
+      let bookSql = `SELECT id, title FROM books WHERE accession_no = ? OR barcode = ? OR isbn = ?`;
+      const params = [trimmed, trimmed, trimmed];
+      if (isNumeric) {
+        bookSql += ` OR id = ?`;
+        params.push(parseInt(trimmed, 10));
+      }
+      bookSql += ` LIMIT 1`;
+
+      const [books] = await pool.query(bookSql, params);
+      if (books.length === 0) {
+        return res.status(404).json({ success: false, message: 'Book not found.' });
+      }
+
+      const book = books[0];
+
+      await pool.query(`
+        UPDATE books
+        SET status = 'misplaced', misplaced_notes = ?, is_available = FALSE
+        WHERE id = ?
+      `, [misplaced_notes || 'Reported misplaced during shelf check', book.id]);
+
+      return res.json({
+        success: true,
+        message: `Book "${book.title}" flagged as MISPLACED with notes and hidden from student search.`,
+        book_id: book.id,
+        misplaced_notes
+      });
+    } catch (error) {
+      console.error('Error in flagMisplaced:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * POST /api/circulation/inventory/resolve-misplaced
+   * Restore misplaced book to active shelf inventory after audit.
+   * Body: { identifier }
+   */
+  static async resolveMisplaced(req, res) {
+    try {
+      const { identifier } = req.body;
+      if (!identifier) {
+        return res.status(400).json({ success: false, message: 'Book identifier is required.' });
+      }
+
+      const trimmed = String(identifier).trim();
+      const isNumeric = /^\d+$/.test(trimmed);
+
+      let bookSql = `SELECT id, title FROM books WHERE accession_no = ? OR barcode = ? OR isbn = ?`;
+      const params = [trimmed, trimmed, trimmed];
+      if (isNumeric) {
+        bookSql += ` OR id = ?`;
+        params.push(parseInt(trimmed, 10));
+      }
+      bookSql += ` LIMIT 1`;
+
+      const [books] = await pool.query(bookSql, params);
+      if (books.length === 0) {
+        return res.status(404).json({ success: false, message: 'Book not found.' });
+      }
+
+      const book = books[0];
+
+      await pool.query(`
+        UPDATE books
+        SET status = 'active', misplaced_notes = NULL, is_available = TRUE
+        WHERE id = ?
+      `, [book.id]);
+
+      return res.json({
+        success: true,
+        message: `Book "${book.title}" successfully restored to active catalog and shelf inventory.`,
+        book_id: book.id
+      });
+    } catch (error) {
+      console.error('Error in resolveMisplaced:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * GET /api/circulation/inventory/flagged
+   * Get all damaged, lost, and misplaced books for audit.
+   */
+  static async getFlaggedInventory(req, res) {
+    try {
+      const [rows] = await pool.query(`
+        SELECT id, title, author, isbn, accession_no, barcode, status, misplaced_notes,
+               available_copies, total_copies, updated_at
+        FROM books
+        WHERE status IN ('damaged', 'lost', 'misplaced')
+        ORDER BY updated_at DESC
+      `);
+
+      return res.json({ success: true, items: rows });
+    } catch (error) {
+      console.error('Error in getFlaggedInventory:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * POST /api/circulation/guest-passes
+   * Issue a temporary day pass for visitor, alumni, or external researcher.
+   * Body: { guest_name, guest_type, phone, email, institution, purpose, assigned_rfid_card_id, valid_hours }
+   */
+  static async issueGuestPass(req, res) {
+    try {
+      const {
+        guest_name,
+        guest_type = 'VISITOR',
+        phone,
+        email = '',
+        institution = '',
+        purpose = '',
+        assigned_rfid_card_id = '',
+        valid_hours = 12
+      } = req.body;
+
+      const clerkId = req.user?.id || 1;
+
+      if (!guest_name || !phone) {
+        return res.status(400).json({
+          success: false,
+          message: 'Guest name and phone number are required.'
+        });
+      }
+
+      const passNumber = `GP-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+      const hours = Number(valid_hours) > 0 ? Number(valid_hours) : 12;
+
+      const [result] = await pool.query(`
+        INSERT INTO guest_passes (
+          pass_number, guest_name, guest_type, phone, email, institution,
+          purpose, assigned_rfid_card_id, valid_until, issued_by, status
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR), ?, 'ACTIVE'
+        )
+      `, [
+        passNumber, guest_name, guest_type, phone, email, institution,
+        purpose, assigned_rfid_card_id || null, hours, clerkId
+      ]);
+
+      const [rows] = await pool.query(
+        `SELECT * FROM guest_passes WHERE id = ?`,
+        [result.insertId]
+      );
+
+      return res.json({
+        success: true,
+        message: `Guest pass ${passNumber} issued successfully for ${guest_name}.`,
+        pass: rows[0]
+      });
+    } catch (error) {
+      console.error('Error in issueGuestPass:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * GET /api/circulation/guest-passes
+   * List all temporary guest passes.
+   */
+  static async getGuestPasses(req, res) {
+    try {
+      const [rows] = await pool.query(`
+        SELECT gp.*, CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS issuer_name
+        FROM guest_passes gp
+        LEFT JOIN users u ON gp.issued_by = u.id
+        ORDER BY gp.created_at DESC
+        LIMIT 50
+      `);
+
+      return res.json({ success: true, passes: rows });
+    } catch (error) {
+      console.error('Error in getGuestPasses:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * POST /api/circulation/guest-passes/:id/return
+   * Check in and return guest pass badge.
+   */
+  static async returnGuestPass(req, res) {
+    try {
+      const passId = req.params.id;
+      await pool.query(`
+        UPDATE guest_passes
+        SET status = 'RETURNED', returned_at = NOW()
+        WHERE id = ?
+      `, [passId]);
+
+      return res.json({
+        success: true,
+        message: 'Guest pass returned and badge checked in.'
+      });
+    } catch (error) {
+      console.error('Error in returnGuestPass:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * GET /api/circulation/shift-summary
+   * Aggregated shift statistics for the logged-in clerk.
+   */
+  static async getShiftSummary(req, res) {
+    try {
+      const clerkId = req.user?.id || 1;
+      const clerkName = req.user ? `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim() : 'Circulation Clerk';
+
+      // Books issued today by this clerk
+      const [issueRows] = await pool.query(`
+        SELECT COUNT(*) AS count
+        FROM book_transactions
+        WHERE issued_by = ? AND DATE(checkout_date) = CURDATE()
+      `, [clerkId]);
+
+      // Books returned today by this clerk
+      const [returnRows] = await pool.query(`
+        SELECT COUNT(*) AS count
+        FROM book_transactions
+        WHERE returned_by = ? AND DATE(return_date) = CURDATE()
+      `, [clerkId]);
+
+      // Cash collected today by this clerk
+      const [cashRows] = await pool.query(`
+        SELECT COALESCE(SUM(amount_received), 0) AS total_cash, COUNT(*) AS count
+        FROM cash_desk_logs
+        WHERE collected_by = ? AND DATE(created_at) = CURDATE()
+      `, [clerkId]);
+
+      // Damaged/Lost books logged today
+      const [dmgRows] = await pool.query(`
+        SELECT COUNT(*) AS count
+        FROM books
+        WHERE status IN ('damaged', 'lost') AND DATE(updated_at) = CURDATE()
+      `);
+
+      // Guest passes issued today
+      const [passRows] = await pool.query(`
+        SELECT COUNT(*) AS count
+        FROM guest_passes
+        WHERE issued_by = ? AND DATE(created_at) = CURDATE()
+      `, [clerkId]);
+
+      // Disputes handled today
+      const [disputeRows] = await pool.query(`
+        SELECT COUNT(*) AS count
+        FROM fine_disputes
+        WHERE resolved_by = ? AND DATE(created_at) = CURDATE()
+      `, [clerkId]);
+
+      return res.json({
+        success: true,
+        clerk: {
+          id: clerkId,
+          name: clerkName,
+          role: req.user?.role || 'clerk'
+        },
+        shift_start: '09:00 AM',
+        current_time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+        metrics: {
+          books_issued_count: Number(issueRows[0]?.count || 0),
+          books_returned_count: Number(returnRows[0]?.count || 0),
+          cash_collected: Number(cashRows[0]?.total_cash || 0),
+          cash_transactions_count: Number(cashRows[0]?.count || 0),
+          damaged_books_count: Number(dmgRows[0]?.count || 0),
+          guest_passes_count: Number(passRows[0]?.count || 0),
+          disputes_count: Number(disputeRows[0]?.count || 0)
+        }
+      });
+    } catch (error) {
+      console.error('Error in getShiftSummary:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * POST /api/circulation/shift-handover
+   * Log digital shift handover report with notes.
+   */
+  static async submitShiftHandover(req, res) {
+    try {
+      const clerkId = req.user?.id || 1;
+      const {
+        shift_start,
+        shift_end,
+        books_issued_count = 0,
+        books_returned_count = 0,
+        cash_collected = 0,
+        damaged_books_count = 0,
+        handover_notes = ''
+      } = req.body;
+
+      const [result] = await pool.query(`
+        INSERT INTO shift_handovers (
+          clerk_id, shift_start, shift_end, books_issued_count,
+          books_returned_count, cash_collected, damaged_books_count, handover_notes
+        ) VALUES (
+          ?, COALESCE(?, NOW()), COALESCE(?, NOW()), ?,
+          ?, ?, ?, ?
+        )
+      `, [
+        clerkId,
+        shift_start || new Date(),
+        shift_end || new Date(),
+        books_issued_count,
+        books_returned_count,
+        cash_collected,
+        damaged_books_count,
+        handover_notes || 'Shift completed successfully without operational anomalies.'
+      ]);
+
+      return res.json({
+        success: true,
+        message: 'Shift handover report recorded successfully.',
+        handover_id: result.insertId,
+        submitted_at: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error in submitShiftHandover:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * GET /api/circulation/shift-handovers
+   * List past shift handovers.
+   */
+  static async getShiftHandovers(req, res) {
+    try {
+      const [rows] = await pool.query(`
+        SELECT sh.*, CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS clerk_name
+        FROM shift_handovers sh
+        JOIN users u ON sh.clerk_id = u.id
+        ORDER BY sh.created_at DESC
+        LIMIT 20
+      `);
+
+      return res.json({ success: true, handovers: rows });
+    } catch (error) {
+      console.error('Error in getShiftHandovers:', error);
       return res.status(500).json({ success: false, error: error.message });
     }
   }

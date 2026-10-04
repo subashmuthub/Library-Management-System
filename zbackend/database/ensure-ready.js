@@ -25,6 +25,10 @@ const RUNTIME_TABLES = [
   "purchases",
   "purchase_items",
   "student_certificates",
+  "fine_disputes",
+  "cash_desk_logs",
+  "guest_passes",
+  "shift_handovers",
 ];
 
 async function runSetupScript() {
@@ -266,6 +270,84 @@ async function ensureRuntimeTables(connection) {
       INDEX idx_cert_month (month_year)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS fine_disputes (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      fine_id INT NOT NULL,
+      user_id INT NOT NULL,
+      amount DECIMAL(10, 2) NOT NULL,
+      reason_category VARCHAR(50) NOT NULL,
+      reason_text TEXT NULL,
+      status ENUM('WAIVED', 'ESCALATED_TO_LIBRARIAN', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'ESCALATED_TO_LIBRARIAN',
+      resolved_by INT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (fine_id) REFERENCES fines(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (resolved_by) REFERENCES users(id) ON DELETE SET NULL,
+      INDEX idx_dispute_status (status),
+      INDEX idx_dispute_user (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS cash_desk_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      receipt_no VARCHAR(50) NOT NULL UNIQUE,
+      fine_id INT NOT NULL,
+      student_id INT NOT NULL,
+      amount_received DECIMAL(10, 2) NOT NULL,
+      receipt_notes TEXT NULL,
+      collected_by INT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (fine_id) REFERENCES fines(id) ON DELETE CASCADE,
+      FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (collected_by) REFERENCES users(id) ON DELETE CASCADE,
+      INDEX idx_cash_collected_by (collected_by),
+      INDEX idx_cash_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS guest_passes (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      pass_number VARCHAR(50) NOT NULL UNIQUE,
+      guest_name VARCHAR(150) NOT NULL,
+      guest_type ENUM('ALUMNI', 'RESEARCHER', 'VISITOR') NOT NULL DEFAULT 'VISITOR',
+      phone VARCHAR(30) NOT NULL,
+      email VARCHAR(150) NULL,
+      institution VARCHAR(150) NULL,
+      purpose TEXT NULL,
+      assigned_rfid_card_id VARCHAR(100) NULL,
+      valid_until DATETIME NOT NULL,
+      issued_by INT NOT NULL,
+      status ENUM('ACTIVE', 'RETURNED', 'EXPIRED') NOT NULL DEFAULT 'ACTIVE',
+      returned_at DATETIME NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (issued_by) REFERENCES users(id) ON DELETE CASCADE,
+      INDEX idx_guest_status (status),
+      INDEX idx_guest_valid (valid_until)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS shift_handovers (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      clerk_id INT NOT NULL,
+      shift_start DATETIME NOT NULL,
+      shift_end DATETIME NOT NULL,
+      books_issued_count INT NOT NULL DEFAULT 0,
+      books_returned_count INT NOT NULL DEFAULT 0,
+      cash_collected DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+      damaged_books_count INT NOT NULL DEFAULT 0,
+      handover_notes TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (clerk_id) REFERENCES users(id) ON DELETE CASCADE,
+      INDEX idx_clerk_shift (clerk_id, shift_start)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
 }
 
 async function ensureUserColumns(connection, dbName) {
@@ -291,6 +373,14 @@ async function ensureUserColumns(connection, dbName) {
     {
       name: "academic_year",
       sql: "ALTER TABLE users ADD COLUMN academic_year VARCHAR(20) NULL AFTER department",
+    },
+    {
+      name: "has_desk_hold",
+      sql: "ALTER TABLE users ADD COLUMN has_desk_hold BOOLEAN NOT NULL DEFAULT FALSE AFTER status",
+    },
+    {
+      name: "desk_hold_reason",
+      sql: "ALTER TABLE users ADD COLUMN desk_hold_reason TEXT NULL AFTER has_desk_hold",
     },
   ];
 
@@ -469,13 +559,44 @@ async function ensureBookProcurementColumns(connection, dbName) {
   `);
 }
 
-async function ensureReservationStatusEnum(connection) {
+async function ensureReservationStatusEnum(connection, dbName) {
   try {
+    const hasHoldExpiry = await hasColumn(connection, dbName, "reservations", "hold_expiry_date");
+    if (!hasHoldExpiry) {
+      await connection.query("ALTER TABLE reservations ADD COLUMN hold_expiry_date DATETIME NULL AFTER expiry_date").catch(() => {});
+    }
     await connection.query(
-      "ALTER TABLE reservations MODIFY COLUMN status ENUM('active','ready','fulfilled','cancelled','expired') DEFAULT 'active'"
+      "ALTER TABLE reservations MODIFY COLUMN status ENUM('active','ready','on_hold_shelf','fulfilled','cancelled','expired') DEFAULT 'active'"
     );
   } catch (err) {
     // Ignore if already applied or error occurs
+  }
+}
+
+async function ensureBookInventoryStatus(connection, dbName) {
+  try {
+    const hasMisplacedNotes = await hasColumn(connection, dbName, "books", "misplaced_notes");
+    if (!hasMisplacedNotes) {
+      await connection.query("ALTER TABLE books ADD COLUMN misplaced_notes TEXT NULL AFTER description").catch(() => {});
+    }
+    await connection.query(
+      "ALTER TABLE books MODIFY COLUMN status ENUM('active','available','checked_out','damaged','lost','misplaced','archived') DEFAULT 'active'"
+    ).catch(() => {});
+  } catch (err) {
+    // Ignore if already applied
+  }
+}
+
+async function ensureFineStatusEnum(connection, dbName) {
+  try {
+    await connection.query(
+      "ALTER TABLE fines MODIFY COLUMN status ENUM('pending','paid','waived','partial','disputed') DEFAULT 'pending'"
+    ).catch(() => {});
+    await connection.query(
+      "ALTER TABLE fines MODIFY COLUMN transaction_id INT(11) NULL DEFAULT NULL"
+    ).catch(() => {});
+  } catch (err) {
+    // Ignore
   }
 }
 
@@ -542,7 +663,9 @@ async function ensureDatabaseReady() {
     await ensureUserColumns(connection, dbName);
     await ensureBookTransactionColumns(connection, dbName);
     await ensureBookProcurementColumns(connection, dbName);
-    await ensureReservationStatusEnum(connection);
+    await ensureReservationStatusEnum(connection, dbName);
+    await ensureBookInventoryStatus(connection, dbName);
+    await ensureFineStatusEnum(connection, dbName);
     await ensureDefaultRoles(connection);
 
     const existingRuntimeTables = await getExistingTables(
@@ -567,6 +690,6 @@ async function ensureDatabaseReady() {
 }
 
 ensureDatabaseReady().catch((error) => {
-  console.error("✗ Failed to validate database readiness:", error.message);
+  console.error("✗ Failed to validate database readiness:", error.stack || error);
   process.exit(1);
 });

@@ -489,6 +489,20 @@ const Dashboard = () => {
           </div>
         </div>
 
+        {user?.has_desk_hold && (
+          <div className="p-4 bg-rose-50 border-2 border-rose-300 rounded-2xl flex items-start gap-3 shadow-sm">
+            <div className="p-2 bg-rose-100 rounded-xl text-rose-700 shrink-0">
+              <AlertTriangle className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-rose-900">Account Blocked: Please see the Circulation Desk.</h3>
+              <p className="text-xs text-rose-700 mt-0.5">
+                {user?.desk_hold_reason || "A circulation hold is active on your student card. Gate check-in and book reservations are temporarily restricted. Please visit the Circulation Counter."}
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold tracking-tight text-slate-900">My Library Overview</h2>
           <span className="text-xs text-slate-500">Live student status</span>

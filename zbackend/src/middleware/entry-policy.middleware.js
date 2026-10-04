@@ -27,6 +27,21 @@ const requireActiveEntryForStudents = async (req, res, next) => {
       });
     }
 
+    // Check desk hold restriction
+    const [userRows] = await query(
+      `SELECT has_desk_hold, desk_hold_reason FROM users WHERE id = ?`,
+      [userId],
+    );
+
+    if (userRows?.length && userRows[0].has_desk_hold) {
+      return res.status(403).json({
+        error: 'ACCOUNT_DESK_HOLD',
+        code: 'ACCOUNT_DESK_HOLD',
+        message: 'Account Blocked: Please see the Circulation Desk.',
+        reason: userRows[0].desk_hold_reason || 'Administrative desk hold active.',
+      });
+    }
+
     const logs = await query(
       `SELECT entry_type, timestamp
        FROM entry_logs

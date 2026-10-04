@@ -575,7 +575,7 @@ export const suggestionService = {
   },
 };
 
-// Circulation Desk Services (Counter issue, student lookup, reservation fulfillment)
+// Circulation Desk Services (Counter issue, student lookup, reservation fulfillment, hold shelf, cash desk, guest passes, shift handover)
 export const circulationService = {
   studentLookup: async (query) => {
     const response = await api.get(`/circulation/student-lookup/${encodeURIComponent(query)}`);
@@ -594,6 +594,91 @@ export const circulationService = {
 
   searchBooks: async (params) => {
     const response = await api.get('/circulation/search-books', { params });
+    return response.data;
+  },
+
+  setDeskHold: async (data) => {
+    const response = await api.post('/circulation/desk-hold', data);
+    return response.data;
+  },
+
+  manualReturn: async (data) => {
+    const response = await api.post('/circulation/manual-return', data);
+    return response.data;
+  },
+
+  getHoldShelf: async () => {
+    const response = await api.get('/circulation/hold-shelf');
+    return response.data;
+  },
+
+  expireHoldShelfCheck: async () => {
+    const response = await api.post('/circulation/hold-shelf/expire-check');
+    return response.data;
+  },
+
+  collectCash: async (data) => {
+    const response = await api.post('/circulation/fines/cash-collection', data);
+    return response.data;
+  },
+
+  disputeFine: async (data) => {
+    const response = await api.post('/circulation/fines/dispute', data);
+    return response.data;
+  },
+
+  getFineDisputes: async () => {
+    const response = await api.get('/circulation/fines/disputes');
+    return response.data;
+  },
+
+  reportCondition: async (data) => {
+    const response = await api.post('/circulation/inventory/report-condition', data);
+    return response.data;
+  },
+
+  flagMisplaced: async (data) => {
+    const response = await api.post('/circulation/inventory/flag-misplaced', data);
+    return response.data;
+  },
+
+  resolveMisplaced: async (data) => {
+    const response = await api.post('/circulation/inventory/resolve-misplaced', data);
+    return response.data;
+  },
+
+  getFlaggedInventory: async () => {
+    const response = await api.get('/circulation/inventory/flagged');
+    return response.data;
+  },
+
+  issueGuestPass: async (data) => {
+    const response = await api.post('/circulation/guest-passes', data);
+    return response.data;
+  },
+
+  getGuestPasses: async () => {
+    const response = await api.get('/circulation/guest-passes');
+    return response.data;
+  },
+
+  returnGuestPass: async (id) => {
+    const response = await api.post(`/circulation/guest-passes/${id}/return`);
+    return response.data;
+  },
+
+  getShiftSummary: async () => {
+    const response = await api.get('/circulation/shift-summary');
+    return response.data;
+  },
+
+  submitShiftHandover: async (data) => {
+    const response = await api.post('/circulation/shift-handover', data);
+    return response.data;
+  },
+
+  getShiftHandovers: async () => {
+    const response = await api.get('/circulation/shift-handovers');
     return response.data;
   },
 };

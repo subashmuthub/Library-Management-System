@@ -256,6 +256,7 @@ app.use('/api/v1/overdue',         require('./routes/overdue.routes'));
 app.use('/api/v1/shelf-locator',   require('./routes/shelf-locator.routes'));
 app.use('/api/v1/heatmap',         require('./routes/heatmap.routes'));
 app.use("/api/v1/fines", require("./routes/fine.routes"));
+app.use("/api/fines", require("./routes/fine.routes"));
 app.use("/api/v1/payments", require("./routes/payment.routes"));
 app.use("/api/v1/reservations", requireActiveEntryForStudents, require("./routes/reservation.routes"));
 app.use("/api/reservations", requireActiveEntryForStudents, require("./routes/reservation.routes"));

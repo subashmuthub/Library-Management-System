@@ -7,6 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const FineController = require('../controllers/fine.controller');
+const CirculationController = require('../controllers/circulation.controller');
 const { authenticate, authorize } = require('../middleware/auth.middleware');
 
 // Enforce authentication across all fine routes
@@ -31,6 +32,20 @@ router.get('/statistics', authorize(['admin', 'librarian']), FineController.getF
  * Get specific fine details by ID
  */
 router.get('/:id', FineController.getFineById);
+
+/**
+ * POST /api/fines/cash-collection
+ * Offline cash collection at Circulation Desk with printable receipt generation
+ * Body: { fine_id, student_id, amount_received, receipt_notes }
+ */
+router.post('/cash-collection', authorize(['admin', 'librarian', 'clerk']), CirculationController.collectCash);
+
+/**
+ * POST /api/fines/dispute
+ * Fine dispute / waiver workflow
+ * Body: { fine_id, reason_category, reason_text }
+ */
+router.post('/dispute', authorize(['admin', 'librarian', 'clerk']), CirculationController.disputeFine);
 
 /**
  * POST /api/fines/:id/pay

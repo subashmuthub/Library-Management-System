@@ -65,6 +65,20 @@ const logEntry = async (req, res, next) => {
       });
     }
 
+    // Step 0: Desk Hold Gatekeeper - Check if user account has an active desk hold
+    const userHoldRows = await query(
+      'SELECT has_desk_hold, desk_hold_reason FROM users WHERE id = ?',
+      [userId]
+    );
+    if (userHoldRows && userHoldRows.length > 0 && userHoldRows[0].has_desk_hold) {
+      return res.status(403).json({
+        success: false,
+        error: 'Account Blocked',
+        message: 'Account Blocked: Please see the Circulation Desk.',
+        reason: userHoldRows[0].desk_hold_reason || 'Please report to the circulation desk.'
+      });
+    }
+
     // Step 1: Check library hours (warning only, not blocking)
     const withinHours = await entryService.isWithinLibraryHours();
     const libraryHoursWarning = !withinHours;

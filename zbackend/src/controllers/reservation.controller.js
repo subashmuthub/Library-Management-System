@@ -12,6 +12,7 @@ class ReservationController {
     // Reserve a book
     static async reserveBook(req, res) {
         try {
+            const { book_id, user_id } = req.body;
             const currentUserRole = String(
                 req.user?.role || req.user?.role_name || req.user?.role?.role_name || ''
             ).toLowerCase();
@@ -27,6 +28,21 @@ class ReservationController {
             }
 
             const connection = await pool.getConnection();
+
+            // Desk Hold Gatekeeper
+            const [userHoldRows] = await connection.execute(
+                'SELECT has_desk_hold, desk_hold_reason FROM users WHERE id = ?',
+                [userId]
+            );
+            if (userHoldRows && userHoldRows.length > 0 && userHoldRows[0].has_desk_hold) {
+                connection.release();
+                return res.status(403).json({
+                    success: false,
+                    error: 'Account Blocked',
+                    message: 'Account Blocked: Please see the Circulation Desk.',
+                    reason: userHoldRows[0].desk_hold_reason || 'Please see the Circulation Desk.'
+                });
+            }
 
             // Check if book exists and is available
             const [books] = await connection.execute(`
@@ -746,6 +762,21 @@ class ReservationController {
             }
 
             connection = await pool.getConnection();
+
+            // Desk Hold Gatekeeper
+            const [userHoldRows] = await connection.execute(
+                'SELECT has_desk_hold, desk_hold_reason FROM users WHERE id = ?',
+                [userId]
+            );
+            if (userHoldRows && userHoldRows.length > 0 && userHoldRows[0].has_desk_hold) {
+                connection.release();
+                return res.status(403).json({
+                    success: false,
+                    error: 'Account Blocked',
+                    message: 'Account Blocked: Please see the Circulation Desk.',
+                    reason: userHoldRows[0].desk_hold_reason || 'Please see the Circulation Desk.'
+                });
+            }
 
             // Check if book exists and is restricted
             const [bookRows] = await connection.execute(
