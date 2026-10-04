@@ -9,6 +9,81 @@ const { hasDirectResearchAccess } = require('../utils/access-control.helper');
 
 class CirculationController {
   /**
+   * Dynamically resolves department lending policy for a patron.
+   * Matches department_policies by student's department and degree type (UG vs PG).
+   */
+  static async resolveDepartmentPolicy(connectionOrPool, student) {
+    const isStaff = ['teacher', 'faculty', 'staff', 'librarian'].includes(
+      String(student.role_name || student.role || '').toLowerCase()
+    );
+    if (isStaff) {
+      return {
+        department_code: 'STAFF',
+        department_name: 'Faculty & Library Staff',
+        max_borrow_limit: 10,
+        loan_duration_days: 60,
+        allow_direct_thesis_checkout: true,
+        daily_fine_rate: 2.0,
+        is_pg: true,
+      };
+    }
+
+    const deptRaw = String(student.department || '').toUpperCase().trim();
+    const degreeRaw = String(student.degree_type || '').toUpperCase().trim();
+    const isPG = ['ME', 'M.E.', 'MTECH', 'M.TECH', 'PHD', 'PH.D', 'RESEARCH', 'RESEARCH_SCHOLAR', 'PG', 'MS'].some(
+      d => degreeRaw.includes(d)
+    ) || ['me_student', 'research_scholar'].includes(String(student.role_name || student.role || '').toLowerCase());
+
+    let policy = null;
+    if (deptRaw) {
+      const [matches] = await connectionOrPool.execute(
+        `SELECT * FROM department_policies 
+         WHERE department_code = ? OR department_code = ? 
+         LIMIT 1`,
+        [deptRaw, deptRaw.split(/[\s-]+/)[0]]
+      );
+      if (matches.length > 0) {
+        policy = matches[0];
+      }
+    }
+
+    if (!policy) {
+      const [defaults] = await connectionOrPool.execute(
+        `SELECT * FROM department_policies WHERE department_code = 'DEFAULT' LIMIT 1`
+      );
+      if (defaults.length > 0) {
+        policy = defaults[0];
+      } else {
+        policy = {
+          department_code: 'DEFAULT',
+          department_name: 'Standard Institution Default',
+          max_borrow_limit_ug: 6,
+          loan_duration_days_ug: 14,
+          max_borrow_limit_pg: 10,
+          loan_duration_days_pg: 60,
+          allow_direct_thesis_checkout: 0,
+          daily_fine_rate: 2.0,
+        };
+      }
+    }
+
+    const maxLimit = isPG ? Number(policy.max_borrow_limit_pg) : Number(policy.max_borrow_limit_ug);
+    const loanDays = isPG ? Number(policy.loan_duration_days_pg) : Number(policy.loan_duration_days_ug);
+    const allowThesis = Boolean(policy.allow_direct_thesis_checkout) || isPG;
+    const fineRate = Number(policy.daily_fine_rate) || 2.0;
+
+    return {
+      department_code: policy.department_code,
+      department_name: policy.department_name,
+      max_borrow_limit: maxLimit,
+      loan_duration_days: loanDays,
+      allow_direct_thesis_checkout: allowThesis,
+      daily_fine_rate: fineRate,
+      is_pg: isPG,
+    };
+  }
+
+  /**
    * GET /api/circulation/student-lookup/:query
    * Look up student / patron by student_id, roll number, email, or database ID.
    * Returns profile, current active loans, overdue items, pending fines, and reservations.
@@ -72,10 +147,8 @@ class CirculationController {
         const studentId = student.id;
         const roleName = student.role_name;
         const normalizedRoleName = ['teacher', 'faculty', 'staff'].includes(roleName) ? 'staff' : roleName;
-        const isDirectResearch = hasDirectResearchAccess(student);
-
-        // Max checkout limit based on role and academic program
-        const maxLimit = normalizedRoleName === 'staff' ? 10 : (isDirectResearch ? 8 : 6);
+        const policy = await CirculationController.resolveDepartmentPolicy(connection, student);
+        const maxLimit = policy.max_borrow_limit;
 
         // Active checkouts
         const [activeLoans] = await connection.execute(`
@@ -192,7 +265,8 @@ class CirculationController {
             overdue_count: overdueCount,
             unpaid_fines: unpaidFines,
             can_borrow: canBorrow,
-            default_loan_days: normalizedRoleName === 'staff' ? 60 : 14
+            default_loan_days: policy.loan_duration_days,
+            department_policy: policy
           },
           active_loans: activeLoans,
           reservations: allReservations,
@@ -310,8 +384,9 @@ class CirculationController {
         });
       }
 
+      const policy = await CirculationController.resolveDepartmentPolicy(connection, student);
       const isStaff = ['teacher', 'faculty', 'staff'].includes(student.role_name);
-      const effectiveLoanDays = Number(loan_days) > 0 ? Number(loan_days) : (isStaff ? 60 : 14);
+      const effectiveLoanDays = Number(loan_days) > 0 ? Number(loan_days) : policy.loan_duration_days;
 
       // Fetch book details
       const [books] = await connection.execute(`
@@ -514,9 +589,10 @@ class CirculationController {
         });
       }
 
+      const policy = await CirculationController.resolveDepartmentPolicy(connection, student);
       const isStaff = ['teacher', 'faculty', 'staff'].includes(student.role_name);
-      const isDirectResearch = hasDirectResearchAccess(student);
-      const maxLimit = isStaff ? 10 : (isDirectResearch ? 8 : 6);
+      const isDirectResearch = hasDirectResearchAccess(student) || policy.allow_direct_thesis_checkout;
+      const maxLimit = policy.max_borrow_limit;
 
       // Check current active checkouts
       const [activeTx] = await connection.execute(
@@ -621,7 +697,7 @@ class CirculationController {
         });
       }
 
-      const effectiveLoanDays = Number(loan_days) > 0 ? Number(loan_days) : (isStaff ? 60 : 14);
+      const effectiveLoanDays = Number(loan_days) > 0 ? Number(loan_days) : policy.loan_duration_days;
 
       // Create transaction
       const [txResult] = await connection.execute(`
@@ -856,13 +932,21 @@ class CirculationController {
           WHERE id = ?
         `, [clerkId, condition, transaction.id]);
 
-        // Overdue fine calculation (₹5/day overdue if overdue)
+        // Overdue fine calculation using department policy daily_fine_rate
         if (transaction.days_overdue > 0) {
-          const fineAmount = transaction.days_overdue * 5;
+          const [patronData] = await connection.execute(
+            `SELECT u.*, ur.role_name FROM users u LEFT JOIN user_roles ur ON u.role_id = ur.id WHERE u.id = ?`,
+            [transaction.patron_id]
+          );
+          const patronPolicy = patronData.length > 0 
+            ? await CirculationController.resolveDepartmentPolicy(connection, patronData[0]) 
+            : { daily_fine_rate: 2.0 };
+          const fineRate = patronPolicy.daily_fine_rate || 2.0;
+          const fineAmount = Number((transaction.days_overdue * fineRate).toFixed(2));
           const [fineInsert] = await connection.execute(`
             INSERT INTO fines (user_id, transaction_id, amount, days_overdue, fine_rate, fine_type, notes, status)
-            VALUES (?, ?, ?, ?, 5.00, 'overdue', ?, 'pending')
-          `, [transaction.patron_id, transaction.id, fineAmount, transaction.days_overdue, `Overdue by ${transaction.days_overdue} day(s)`]);
+            VALUES (?, ?, ?, ?, ?, 'overdue', ?, 'pending')
+          `, [transaction.patron_id, transaction.id, fineAmount, transaction.days_overdue, fineRate, `Overdue by ${transaction.days_overdue} day(s) (@ ₹${fineRate}/day)`]);
           fineCreated = { id: fineInsert.insertId, amount: fineAmount, type: 'overdue' };
         }
 

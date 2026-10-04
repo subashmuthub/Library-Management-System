@@ -5,7 +5,7 @@ import {
   Award, BarChart3, Bell, BookOpen, BookPlus, Bookmark, CalendarDays, ChevronDown,
   Clock3, DollarSign, FileText, LayoutDashboard, LogIn, LogOut, MapPin,
   Menu, PackagePlus, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Scan,
-  Settings, Sparkles, User, Users, X, ShieldCheck
+  Settings, Sparkles, User, Users, X, ShieldCheck, Sliders
 } from 'lucide-react';
 
 const navigation = [
@@ -17,7 +17,6 @@ const navigation = [
       { label: 'AI Recommendations', path: '/recommendations', icon: Sparkles, tag: 'New' },
       { label: 'QR Shelf Locator', path: '/shelf-locator', icon: MapPin, tag: 'New' },
       { label: 'Suggest a Book', path: '/suggestions', icon: BookPlus },
-      { label: 'Book Orders', path: '/book-orders', icon: PackagePlus, roles: ['admin'] },
       { label: 'Question Papers', path: '/question-papers', icon: FileText },
     ],
   },
@@ -43,6 +42,13 @@ const navigation = [
     ],
   },
   { label: 'Settings', path: '/settings', icon: Settings, roles: ['admin', 'librarian'] },
+  {
+    label: 'Admin Workspace', icon: ShieldCheck, roles: ['admin'], items: [
+      { label: 'Reports & Analytics', path: '/admin/reports', icon: FileText, roles: ['admin'] },
+      { label: 'Department Policies', path: '/admin/department-policies', icon: Sliders, roles: ['admin'] },
+      { label: 'Book Orders', path: '/book-orders', icon: PackagePlus, roles: ['admin'] },
+    ],
+  },
 ];
 
 const flattenNavigation = (items) => items.flatMap((item) => item.items || item);
@@ -58,6 +64,7 @@ const Layout = () => {
     'Issue Management': true,
     'Analytics & Reports': true,
     'Log & Navigation': true,
+    'Admin Workspace': true,
   });
   const [profileOpen, setProfileOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -67,8 +74,8 @@ const Layout = () => {
   const isAdmin = userRole === 'admin';
   const isLibrarian = userRole === 'librarian';
   const isClerk = userRole === 'clerk';
-  const isStaff = ['teacher', 'faculty', 'staff', 'librarian'].includes(userRole);
-  const isStudent = !isAdmin && !isStaff && !isClerk;
+  const isStaff = ['teacher', 'faculty', 'staff', 'librarian', 'clerk'].includes(userRole);
+  const isStudent = !isAdmin && !isStaff;
 
   const isItemAllowed = (item) => {
     if (item.adminOnly && !isAdmin) return false;
@@ -192,6 +199,10 @@ const Layout = () => {
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold border bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800 uppercase">
                         Admin
                       </span>
+                    ) : isClerk ? (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold border bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800 uppercase">
+                        Staff
+                      </span>
                     ) : (isLibrarian || isStaff) ? (
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold border bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800 uppercase">
                         Staff
@@ -206,7 +217,7 @@ const Layout = () => {
                       </span>
                     ) : null}
                   </span>
-                  <small>{isAdmin ? 'Admin' : (isLibrarian ? 'Librarian (Staff)' : (isStaff ? 'Staff' : 'Student'))}</small>
+                  <small>{isAdmin ? 'Admin' : (isLibrarian ? 'Librarian (Staff)' : (isClerk ? 'Clerk (Staff)' : (isStaff ? 'Staff' : 'Student')))}</small>
                 </span>
                 <ChevronDown size={15} />
               </button>
@@ -225,7 +236,7 @@ const Layout = () => {
                   ) : (
                     <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 text-xs">
                       <div className="font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-                        <span className="capitalize">{isAdmin ? 'System Administrator' : (isLibrarian ? 'Librarian (Staff)' : 'Staff Member')}</span>
+                        <span className="capitalize">{isAdmin ? 'System Administrator' : (isLibrarian ? 'Librarian (Staff)' : (isClerk ? 'Circulation Clerk (Staff)' : 'Staff Member'))}</span>
                       </div>
                       <div className="text-[11px] text-gray-500 mt-0.5">{user?.department || (isAdmin ? 'Administration' : 'Library')}</div>
                     </div>

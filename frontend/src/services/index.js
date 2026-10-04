@@ -683,4 +683,48 @@ export const circulationService = {
   },
 };
 
+export const adminService = {
+  getActiveStudentsAnalytics: async (params) => {
+    const response = await api.get('/admin/reports/active-students', { params });
+    return response.data;
+  },
+
+  downloadActiveStudentsPDF: async (data) => {
+    const response = await api.post('/admin/reports/generate-pdf', data, {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
+
+  getReportTemplates: async () => {
+    const response = await api.get('/admin/reports/templates');
+    return response.data;
+  },
+
+  saveReportTemplate: async (data) => {
+    const response = await api.post('/admin/reports/templates', data);
+    return response.data;
+  },
+
+  updateReportTemplate: async (id, data) => {
+    const response = await api.put(`/admin/reports/templates/${id}`, data);
+    return response.data;
+  },
+
+  getDepartmentPolicies: async () => {
+    const response = await api.get('/admin/department-policies');
+    return response.data;
+  },
+
+  updateDepartmentPolicy: async (departmentCode, data) => {
+    const response = await api.put(`/admin/department-policies/${departmentCode}`, data);
+    return response.data;
+  },
+
+  createDepartmentPolicy: async (data) => {
+    const response = await api.post('/admin/department-policies', data);
+    return response.data;
+  },
+};
+
 

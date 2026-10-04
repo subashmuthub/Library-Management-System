@@ -5,14 +5,15 @@
 
 const mysql = require('mysql2/promise');
 const { pool } = require('../config/database');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 
 const normalizeRoleName = (roleName, roleId) => {
     const normalized = String(roleName || '').toLowerCase();
-    if (normalized === 'admin' || roleId === 1) return 'admin';
-    if (normalized === 'librarian' || roleId === 2) return 'librarian';
-    if (normalized === 'me_student' || roleId === 5) return 'me_student';
-    if (normalized === 'research_scholar' || roleId === 6) return 'research_scholar';
+    if (normalized === 'admin' || Number(roleId) === 1) return 'admin';
+    if (normalized === 'librarian' || Number(roleId) === 2) return 'librarian';
+    if (normalized === 'clerk' || Number(roleId) === 7) return 'clerk';
+    if (normalized === 'me_student' || Number(roleId) === 5) return 'me_student';
+    if (normalized === 'research_scholar' || Number(roleId) === 6) return 'research_scholar';
     if (['faculty', 'teacher', 'staff'].includes(normalized) || Number(roleId) === 4) {
         return 'staff';
     }
@@ -204,102 +205,199 @@ class UserManagementController {
             const {
                 first_name,
                 last_name,
+                name,
                 email,
                 password,
                 student_id,
+                roll_no,
                 phone,
                 address,
-                role_id = 3, // Default to student role
+                department,
+                degree_type,
+                academic_year,
+                role,
+                role_id,
                 status = 'active'
             } = req.body;
 
-            if (!first_name || !last_name || !email || !password) {
+            // Handle name splitting if first_name/last_name not provided directly
+            let fName = (first_name || '').trim();
+            let lName = (last_name || '').trim();
+            if (!fName && name) {
+                const parts = name.trim().split(/\s+/);
+                fName = parts[0] || 'User';
+                lName = parts.slice(1).join(' ') || parts[0] || 'User';
+            }
+
+            if (!fName || !email || !password) {
                 return res.status(400).json({
-                    error: 'First name, last name, email, and password are required'
+                    success: false,
+                    error: 'First name, last name, email, and password are required',
+                    message: 'First name, last name, email, and password are required'
                 });
             }
 
-            const connection = await pool.getConnection();
+            // Allowed Roles Validation & Mapping
+            const allowedRoles = ['admin', 'librarian', 'clerk', 'student', 'ug_student', 'me_student', 'research_scholar', 'staff', 'faculty'];
+            const roleToId = {
+                admin: 1,
+                librarian: 2,
+                clerk: 7,
+                student: 3,
+                ug_student: 3,
+                staff: 4,
+                faculty: 4,
+                me_student: 5,
+                research_scholar: 6
+            };
+            const idToRole = {
+                1: 'admin',
+                2: 'librarian',
+                3: 'student',
+                4: 'staff',
+                5: 'me_student',
+                6: 'research_scholar',
+                7: 'clerk'
+            };
 
-            // Check if email already exists
-            const [existingUsers] = await connection.execute(
-                'SELECT id FROM users WHERE email = ?',
-                [email]
-            );
+            let resolvedRoleId = 3;
+            let resolvedRoleName = 'student';
 
-            if (existingUsers.length > 0) {
-                connection.release();
-                return res.status(400).json({ error: 'Email already exists' });
-            }
-
-            // Check if student ID already exists (if provided)
-            if (student_id) {
-                const [existingStudentId] = await connection.execute(
-                    'SELECT id FROM users WHERE student_id = ?',
-                    [student_id]
-                );
-
-                if (existingStudentId.length > 0) {
-                    connection.release();
-                    return res.status(400).json({ error: 'Student ID already exists' });
+            if (role_id && idToRole[Number(role_id)]) {
+                resolvedRoleId = Number(role_id);
+                resolvedRoleName = idToRole[resolvedRoleId];
+            } else if (role) {
+                const cleanRole = String(role).toLowerCase().trim();
+                if (allowedRoles.includes(cleanRole)) {
+                    resolvedRoleId = roleToId[cleanRole] || 3;
+                    resolvedRoleName = cleanRole === 'ug_student' ? 'student' : (cleanRole === 'faculty' ? 'staff' : cleanRole);
                 }
             }
 
-            // Hash password
-            const hashedPassword = await bcrypt.hash(password, 12);
+            // Sensible defaults for optional/nullable fields to never pass undefined to MySQL2
+            const effectiveStudentId = (student_id || roll_no || '').trim() || null;
+            const effectivePhone = (phone || '').trim() || null;
+            const effectiveAddress = (address || '').trim() || null;
+            const effectiveDept = department || (['admin', 'administrator'].includes(resolvedRoleName) ? 'Administration' : ['librarian', 'clerk'].includes(resolvedRoleName) ? 'Library' : 'CSE');
+            const effectiveDegree = degree_type || (['student', 'ug_student'].includes(resolvedRoleName) ? 'BE' : resolvedRoleName === 'me_student' ? 'ME' : resolvedRoleName === 'research_scholar' ? 'PhD' : null);
+            const effectiveYear = academic_year || (['student', 'ug_student', 'me_student', 'research_scholar'].includes(resolvedRoleName) ? '1st Year' : null);
 
-            // Create user
-            const [result] = await connection.execute(`
-                INSERT INTO users (
-                    first_name, last_name, email, password,
-                    student_id, phone, address, role_id, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `, [
-                first_name, last_name, email, hashedPassword,
-                student_id, phone, address, role_id, status
-            ]);
+            const connection = await pool.getConnection();
 
-            // Get created user with role info
-            const [newUser] = await connection.execute(`
-                SELECT 
-                    u.id, u.first_name, u.last_name, u.email, u.student_id,
-                    u.phone, u.address, u.status, u.created_at,
-                    r.role_name
-                FROM users u
-                LEFT JOIN user_roles r ON u.role_id = r.id
-                WHERE u.id = ?
-            `, [result.insertId]);
+            try {
+                // Check if email already exists
+                const [existingUsers] = await connection.execute(
+                    'SELECT id FROM users WHERE email = ?',
+                    [email.trim().toLowerCase()]
+                );
 
-            const createdUser = {
-                ...newUser[0],
-                role_name: normalizeRoleName(newUser[0]?.role_name, role_id)
-            };
+                if (existingUsers.length > 0) {
+                    connection.release();
+                    return res.status(400).json({ 
+                        success: false, 
+                        error: 'Email already exists',
+                        message: 'Email already exists' 
+                    });
+                }
 
-            connection.release();
+                // Check if student ID already exists (if provided)
+                if (effectiveStudentId) {
+                    const [existingStudentId] = await connection.execute(
+                        'SELECT id FROM users WHERE student_id = ?',
+                        [effectiveStudentId]
+                    );
 
-            res.status(201).json({
-                success: true,
-                message: 'User created successfully',
-                user: createdUser
-            });
+                    if (existingStudentId.length > 0) {
+                        connection.release();
+                        return res.status(400).json({ 
+                            success: false, 
+                            error: 'Student/Staff ID already exists',
+                            message: 'Student/Staff ID already exists' 
+                        });
+                    }
+                }
+
+                // Hash password safely
+                const hashedPassword = await bcrypt.hash(String(password), 10);
+
+                // Create user with explicit nulls (never undefined)
+                const [result] = await connection.execute(`
+                    INSERT INTO users (
+                        first_name, last_name, email, password,
+                        role_id, role, student_id, phone, address,
+                        department, degree_type, academic_year, status, email_verified
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                `, [
+                    fName,
+                    lName || fName,
+                    email.trim().toLowerCase(),
+                    hashedPassword,
+                    resolvedRoleId,
+                    resolvedRoleName,
+                    effectiveStudentId,
+                    effectivePhone,
+                    effectiveAddress,
+                    effectiveDept,
+                    effectiveDegree,
+                    effectiveYear,
+                    status
+                ]);
+
+                // Get created user with role info
+                const [newUser] = await connection.execute(`
+                    SELECT 
+                        u.id, u.first_name, u.last_name, u.email, u.student_id,
+                        u.phone, u.address, u.status, u.role, u.role_id, u.created_at,
+                        r.role_name
+                    FROM users u
+                    LEFT JOIN user_roles r ON u.role_id = r.id
+                    WHERE u.id = ?
+                `, [result.insertId]);
+
+                connection.release();
+
+                const createdUser = {
+                    ...newUser[0],
+                    name: `${newUser[0]?.first_name || ''} ${newUser[0]?.last_name || ''}`.trim(),
+                    role_name: normalizeRoleName(newUser[0]?.role_name || newUser[0]?.role, resolvedRoleId)
+                };
+
+                return res.status(201).json({
+                    success: true,
+                    message: 'User created successfully',
+                    user: createdUser
+                });
+            } catch (innerError) {
+                connection.release();
+                throw innerError;
+            }
 
         } catch (error) {
-            console.error('Error creating user:', error);
-            res.status(500).json({ error: 'Internal server error' });
+            console.error("Create User Error:", error);
+            return res.status(500).json({ 
+                success: false, 
+                error: error.message || 'Internal server error',
+                message: error.message || 'Internal server error' 
+            });
         }
     }
 
     // Update user information
     static async updateUser(req, res) {
         try {
-            const { userId } = req.params;
             const {
                 first_name,
                 last_name,
+                name,
                 email,
                 student_id,
+                roll_no,
                 phone,
                 address,
+                department,
+                degree_type,
+                academic_year,
+                role,
                 role_id,
                 status
             } = req.body;
@@ -314,34 +412,35 @@ class UserManagementController {
 
             if (users.length === 0) {
                 connection.release();
-                return res.status(404).json({ error: 'User not found' });
+                return res.status(404).json({ success: false, error: 'User not found', message: 'User not found' });
             }
 
             const currentUser = users[0];
 
             // Check for email conflicts (if email is being changed)
-            if (email && email !== currentUser.email) {
+            if (email && email.trim().toLowerCase() !== currentUser.email) {
                 const [emailConflict] = await connection.execute(
                     'SELECT id FROM users WHERE email = ? AND id != ?',
-                    [email, userId]
+                    [email.trim().toLowerCase(), userId]
                 );
 
                 if (emailConflict.length > 0) {
                     connection.release();
-                    return res.status(400).json({ error: 'Email already exists' });
+                    return res.status(400).json({ success: false, error: 'Email already exists', message: 'Email already exists' });
                 }
             }
 
             // Check for student ID conflicts (if student_id is being changed)
-            if (student_id && student_id !== currentUser.student_id) {
+            const targetStudentId = student_id !== undefined ? (student_id || roll_no || null) : undefined;
+            if (targetStudentId && targetStudentId !== currentUser.student_id) {
                 const [studentIdConflict] = await connection.execute(
                     'SELECT id FROM users WHERE student_id = ? AND id != ?',
-                    [student_id, userId]
+                    [targetStudentId, userId]
                 );
 
                 if (studentIdConflict.length > 0) {
                     connection.release();
-                    return res.status(400).json({ error: 'Student ID already exists' });
+                    return res.status(400).json({ success: false, error: 'Student ID already exists', message: 'Student ID already exists' });
                 }
             }
 
@@ -357,26 +456,75 @@ class UserManagementController {
                 updates.push('last_name = ?');
                 values.push(last_name);
             }
+            if (name && first_name === undefined && last_name === undefined) {
+                const parts = name.trim().split(/\s+/);
+                updates.push('first_name = ?');
+                values.push(parts[0] || 'User');
+                updates.push('last_name = ?');
+                values.push(parts.slice(1).join(' ') || parts[0] || 'User');
+            }
             if (email !== undefined) {
                 updates.push('email = ?');
-                values.push(email);
+                values.push(email.trim().toLowerCase());
             }
-            if (student_id !== undefined) {
+            if (targetStudentId !== undefined) {
                 updates.push('student_id = ?');
-                values.push(student_id);
+                values.push(targetStudentId);
             }
             if (phone !== undefined) {
                 updates.push('phone = ?');
-                values.push(phone);
+                values.push(phone || null);
             }
             if (address !== undefined) {
                 updates.push('address = ?');
-                values.push(address);
+                values.push(address || null);
             }
-            if (role_id !== undefined) {
-                updates.push('role_id = ?');
-                values.push(role_id);
+            if (department !== undefined) {
+                updates.push('department = ?');
+                values.push(department || null);
             }
+            if (degree_type !== undefined) {
+                updates.push('degree_type = ?');
+                values.push(degree_type || null);
+            }
+            if (academic_year !== undefined) {
+                updates.push('academic_year = ?');
+                values.push(academic_year || null);
+            }
+
+            // Role handling
+            const roleToId = {
+                admin: 1, librarian: 2, clerk: 7, student: 3, ug_student: 3,
+                staff: 4, faculty: 4, me_student: 5, research_scholar: 6
+            };
+            const idToRole = {
+                1: 'admin', 2: 'librarian', 3: 'student', 4: 'staff',
+                5: 'me_student', 6: 'research_scholar', 7: 'clerk'
+            };
+
+            if (role_id !== undefined || role !== undefined) {
+                let resolvedRoleId = role_id ? Number(role_id) : undefined;
+                let resolvedRoleName = undefined;
+                if (role_id && idToRole[Number(role_id)]) {
+                    resolvedRoleId = Number(role_id);
+                    resolvedRoleName = idToRole[resolvedRoleId];
+                } else if (role) {
+                    const cleanRole = String(role).toLowerCase().trim();
+                    if (roleToId[cleanRole]) {
+                        resolvedRoleId = roleToId[cleanRole];
+                        resolvedRoleName = cleanRole === 'ug_student' ? 'student' : (cleanRole === 'faculty' ? 'staff' : cleanRole);
+                    }
+                }
+                if (resolvedRoleId !== undefined) {
+                    updates.push('role_id = ?');
+                    values.push(resolvedRoleId);
+                }
+                if (resolvedRoleName !== undefined) {
+                    updates.push('role = ?');
+                    values.push(resolvedRoleName);
+                }
+            }
+
             if (status !== undefined) {
                 updates.push('status = ?');
                 values.push(status);
@@ -384,7 +532,7 @@ class UserManagementController {
 
             if (updates.length === 0) {
                 connection.release();
-                return res.status(400).json({ error: 'No valid fields to update' });
+                return res.status(400).json({ success: false, error: 'No valid fields to update', message: 'No valid fields to update' });
             }
 
             updates.push('updated_at = CURRENT_TIMESTAMP');

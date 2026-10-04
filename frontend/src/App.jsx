@@ -29,6 +29,8 @@ import ActiveUserCertificate from './pages/ActiveUserCertificate';
 import BookSuggestions from './pages/BookSuggestions';
 import PendingRequestsDashboard from './pages/PendingRequestsDashboard';
 import ClerkIssueDesk from './pages/ClerkIssueDesk';
+import AdminReportsView from './pages/AdminReportsView';
+import AdminDepartmentSettings from './pages/AdminDepartmentSettings';
 import HomePage from './pages/HomePage';
 
 function App() {
@@ -73,6 +75,8 @@ function App() {
               <Route path="settings" element={<PrivateRoute roles={["admin", "librarian"]}><Settings /></PrivateRoute>} />
               <Route path="profile" element={<Profile />} />
               <Route path="active-user-certificate" element={<PrivateRoute roles={["admin", "librarian"]}><ActiveUserCertificate /></PrivateRoute>} />
+              <Route path="admin/reports" element={<PrivateRoute roles={["admin"]}><AdminReportsView /></PrivateRoute>} />
+              <Route path="admin/department-policies" element={<PrivateRoute roles={["admin"]}><AdminDepartmentSettings /></PrivateRoute>} />
             </Route>
 
             {/* Fallback */}

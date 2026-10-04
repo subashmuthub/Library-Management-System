@@ -119,6 +119,7 @@ const getRoleName = (roleId) => {
     4: "staff",
     5: "me_student",
     6: "research_scholar",
+    7: "clerk",
   };
   return roleMap[roleId] || "student";
 };
@@ -292,7 +293,10 @@ const login = async (req, res, next) => {
             CASE u.role_id
               WHEN 1 THEN 'admin'
               WHEN 2 THEN 'librarian'
-              WHEN 3 THEN 'student'
+              WHEN 4 THEN 'staff'
+              WHEN 5 THEN 'me_student'
+              WHEN 6 THEN 'research_scholar'
+              WHEN 7 THEN 'clerk'
               ELSE 'student'
             END
           ) AS role_name,
@@ -465,7 +469,10 @@ const googleLogin = async (req, res, next) => {
             CASE u.role_id
               WHEN 1 THEN 'admin'
               WHEN 2 THEN 'librarian'
-              WHEN 3 THEN 'student'
+              WHEN 4 THEN 'staff'
+              WHEN 5 THEN 'me_student'
+              WHEN 6 THEN 'research_scholar'
+              WHEN 7 THEN 'clerk'
               ELSE 'student'
             END
           ) AS role_name,

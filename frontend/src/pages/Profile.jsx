@@ -25,9 +25,18 @@ const Profile = () => {
   const rawRole = String(user?.role?.role_name || user?.role || '').toLowerCase();
   const isAdmin = ['admin', 'administrator'].includes(rawRole);
   const isLibrarian = ['librarian'].includes(rawRole);
-  const isStaff = ['teacher', 'faculty', 'staff', 'librarian'].includes(rawRole);
+  const isClerk = ['clerk'].includes(rawRole);
+  const isStaff = ['teacher', 'faculty', 'staff', 'librarian', 'clerk'].includes(rawRole);
   const isStudent = !isAdmin && !isStaff;
-  const displayRoleLabel = isAdmin ? 'System Administrator' : isLibrarian ? 'Library Staff' : isStaff ? 'Faculty & Staff' : (displayRole || 'Student');
+  const displayRoleLabel = isAdmin
+    ? 'System Administrator'
+    : isLibrarian
+    ? 'Librarian (Staff)'
+    : isClerk
+    ? 'Library Staff (Circulation Clerk)'
+    : isStaff
+    ? 'Faculty & Staff'
+    : (displayRole || 'Student');
   const [borrowedBooks, setBorrowedBooks] = useState([]);
 
   // Sync formData when user loads
@@ -39,11 +48,11 @@ const Profile = () => {
         email: user.email || '',
         student_id: user.student_id || user.studentId || '',
         degree_type: isStudent ? (user.degree_type || user.degreeType || 'BE') : '',
-        department: user.department || (isAdmin ? 'Administration' : isLibrarian ? 'Library' : 'CSE'),
+        department: user.department || (isAdmin ? 'Administration' : (isLibrarian || isClerk) ? 'Library' : 'CSE'),
         academic_year: isStudent ? (user.academic_year || user.academicYear || '3rd Year') : '',
       });
     }
-  }, [user, isStudent, isAdmin, isLibrarian]);
+  }, [user, isStudent, isAdmin, isLibrarian, isClerk]);
 
   // Load user stats on mount
   useEffect(() => {
@@ -131,7 +140,7 @@ const Profile = () => {
       email: user?.email || '',
       student_id: user?.student_id || user?.studentId || '',
       degree_type: isStudent ? (user?.degree_type || user?.degreeType || 'BE') : '',
-      department: user?.department || (isAdmin ? 'Administration' : isLibrarian ? 'Library' : 'CSE'),
+      department: user?.department || (isAdmin ? 'Administration' : (isLibrarian || isClerk) ? 'Library' : 'CSE'),
       academic_year: isStudent ? (user?.academic_year || user?.academicYear || '3rd Year') : '',
     });
     setIsEditing(false);
@@ -158,8 +167,12 @@ const Profile = () => {
       {/* Digital Library Card with QR Code */}
       <div className="space-y-2">
         <div className="flex items-center justify-between px-1">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400">Digital Library Pass</h2>
-          <span className="text-[11px] text-indigo-400 font-medium">Valid for self-checkout & gate access</span>
+          <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400">
+            {isStudent ? 'Digital Library Pass' : 'Official Staff Library Pass'}
+          </h2>
+          <span className="text-[11px] text-indigo-400 font-medium">
+            {isStudent ? 'Valid for self-checkout & gate access' : 'Official Library Staff Access & Kiosk Login'}
+          </span>
         </div>
         <DigitalLibraryCard user={user} />
       </div>
@@ -452,8 +465,8 @@ const Profile = () => {
                   <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
                     <CreditCard className="text-gray-600 flex-shrink-0 mt-1" size={20} />
                     <div>
-                      <p className="text-sm text-gray-600">{isAdmin ? 'Admin / Staff ID' : 'Staff / Employee ID'}</p>
-                      <p className="font-medium font-mono">{user?.student_id || user?.studentId || (isAdmin ? `ADMIN-${String(user?.id || '0000').padStart(4, '0')}` : `STAFF-${String(user?.id || '0000').padStart(4, '0')}`)}</p>
+                      <p className="text-sm text-gray-600">{isAdmin ? 'Admin / Staff ID' : isClerk ? 'Clerk / Staff ID' : 'Staff / Employee ID'}</p>
+                      <p className="font-medium font-mono">{user?.student_id || user?.studentId || (isAdmin ? `ADMIN-${String(user?.id || '0000').padStart(4, '0')}` : isClerk ? `CLK-${String(user?.id || '0000').padStart(4, '0')}` : `STAFF-${String(user?.id || '0000').padStart(4, '0')}`)}</p>
                     </div>
                   </div>
 
@@ -463,12 +476,12 @@ const Profile = () => {
                       <p className="text-sm text-gray-600">Designation / Access Level</p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="font-semibold text-gray-900">
-                          {isAdmin ? 'System Administrator' : isLibrarian ? 'Library Staff' : 'Faculty / Staff'}
+                          {isAdmin ? 'System Administrator' : isLibrarian ? 'Librarian (Staff)' : isClerk ? 'Circulation Clerk (Staff)' : 'Faculty / Staff'}
                         </span>
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${
                           isAdmin ? 'bg-purple-100 text-purple-800 border-purple-200' : 'bg-amber-100 text-amber-800 border-amber-200'
                         }`}>
-                          {isAdmin ? 'Full Root Access' : 'Librarian Desk Privileges'}
+                          {isAdmin ? 'Full Root Access' : isClerk ? 'Circulation Desk Staff' : 'Librarian Desk Privileges'}
                         </span>
                       </div>
                     </div>
@@ -480,7 +493,7 @@ const Profile = () => {
                     <Building className="text-gray-600 flex-shrink-0 mt-1" size={20} />
                     <div>
                       <p className="text-sm text-gray-600">Department / Division</p>
-                      <p className="font-medium">{user?.department || (isAdmin ? 'Administration' : 'Library')}</p>
+                      <p className="font-medium">{user?.department || (isAdmin ? 'Administration' : (isLibrarian || isClerk) ? 'Library' : 'Library')}</p>
                     </div>
                   </div>
 
@@ -488,7 +501,7 @@ const Profile = () => {
                     <Shield className="text-gray-600 flex-shrink-0 mt-1" size={20} />
                     <div>
                       <p className="text-sm text-gray-600">Borrowing Privileges</p>
-                      <p className="font-medium">{isAdmin ? 'Unlimited Books (Administrator Pass)' : '10 Books (Staff Loan Period: 60 Days)'}</p>
+                      <p className="font-medium">{isAdmin ? 'Unlimited Books (Administrator Pass)' : isClerk ? 'Circulation Desk Operations & Staff Pass' : '10 Books (Staff Loan Period: 60 Days)'}</p>
                     </div>
                   </div>
                 </div>
@@ -500,7 +513,7 @@ const Profile = () => {
               <div>
                 <p className="text-sm text-gray-600">Role</p>
                 <span className={`badge ${isAdmin ? 'badge-primary' : isStaff ? 'badge-warning' : 'badge-info'} capitalize`}>
-                  {isAdmin ? 'Admin' : isLibrarian ? 'Staff' : isStaff ? 'Staff' : 'Student'}
+                  {isAdmin ? 'Admin' : isLibrarian ? 'Librarian (Staff)' : isClerk ? 'Clerk (Staff)' : isStaff ? 'Staff' : 'Student'}
                 </span>
               </div>
             </div>

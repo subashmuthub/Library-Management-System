@@ -29,6 +29,8 @@ const RUNTIME_TABLES = [
   "cash_desk_logs",
   "guest_passes",
   "shift_handovers",
+  "report_templates",
+  "department_policies",
 ];
 
 async function runSetupScript() {
@@ -348,6 +350,62 @@ async function ensureRuntimeTables(connection) {
       INDEX idx_clerk_shift (clerk_id, shift_start)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS report_templates (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      template_name VARCHAR(100) NOT NULL,
+      header_title VARCHAR(255) NOT NULL,
+      institution_name VARCHAR(255) NOT NULL,
+      show_department_breakdown BOOLEAN DEFAULT TRUE,
+      show_fine_summary BOOLEAN DEFAULT TRUE,
+      custom_footer_notes TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.query(`
+    INSERT IGNORE INTO report_templates (id, template_name, header_title, institution_name, show_department_breakdown, show_fine_summary, custom_footer_notes)
+    VALUES (
+      1,
+      'Standard Institutional Report',
+      'Central Library - Active Student Circulation & Analytics Report',
+      'National Engineering College',
+      TRUE,
+      TRUE,
+      'This official report is generated dynamically by the Central Library Information Management System for institutional review, academic council auditing, and NAAC/NBA criteria documentation.'
+    )
+  `);
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS department_policies (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      department_code VARCHAR(30) UNIQUE NOT NULL,
+      department_name VARCHAR(100) NULL,
+      max_borrow_limit_ug INT DEFAULT 6,
+      loan_duration_days_ug INT DEFAULT 14,
+      max_borrow_limit_pg INT DEFAULT 10,
+      loan_duration_days_pg INT DEFAULT 60,
+      allow_direct_thesis_checkout BOOLEAN DEFAULT FALSE,
+      daily_fine_rate DECIMAL(5,2) DEFAULT 2.00,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.query(`
+    INSERT INTO department_policies (department_code, department_name, max_borrow_limit_ug, loan_duration_days_ug, max_borrow_limit_pg, loan_duration_days_pg, allow_direct_thesis_checkout, daily_fine_rate)
+    VALUES
+      ('DEFAULT', 'Standard Institution Default', 6, 14, 10, 60, FALSE, 2.00),
+      ('CSE', 'Computer Science & Engineering', 8, 14, 12, 45, FALSE, 2.00),
+      ('MECH', 'Mechanical Engineering', 6, 21, 10, 60, FALSE, 2.00),
+      ('ECE', 'Electronics & Communication Engineering', 6, 14, 10, 60, FALSE, 2.00),
+      ('CIVIL', 'Civil Engineering', 6, 21, 10, 60, FALSE, 2.00),
+      ('AIDS', 'Artificial Intelligence & Data Science', 8, 14, 12, 60, TRUE, 2.00),
+      ('IT', 'Information Technology', 8, 14, 12, 45, FALSE, 2.00)
+    ON DUPLICATE KEY UPDATE
+      department_name = VALUES(department_name)
+  `);
 }
 
 async function ensureUserColumns(connection, dbName) {
@@ -360,15 +418,19 @@ async function ensureUserColumns(connection, dbName) {
     }
   }
 
-  // Ensure academic credential columns exist
+  // Ensure academic credential and role columns exist
   const academicColumns = [
+    {
+      name: "role",
+      sql: "ALTER TABLE users ADD COLUMN role VARCHAR(50) NOT NULL DEFAULT 'student' AFTER role_id",
+    },
     {
       name: "degree_type",
       sql: "ALTER TABLE users ADD COLUMN degree_type VARCHAR(30) NULL AFTER student_id",
     },
     {
       name: "department",
-      sql: "ALTER TABLE users ADD COLUMN department VARCHAR(50) NULL AFTER degree_type",
+      sql: "ALTER TABLE users ADD COLUMN department VARCHAR(100) NULL AFTER degree_type",
     },
     {
       name: "academic_year",
@@ -391,6 +453,18 @@ async function ensureUserColumns(connection, dbName) {
     }
   }
 
+  // Ensure role column is VARCHAR(50) and synchronized with user_roles
+  await connection.query("ALTER TABLE users MODIFY COLUMN role VARCHAR(50) NOT NULL DEFAULT 'student'").catch(() => {});
+  await connection.query("UPDATE users u JOIN user_roles ur ON u.role_id = ur.id SET u.role = ur.role_name WHERE u.role IS NULL OR u.role = ''").catch(() => {});
+
+  // Ensure optional columns are nullable
+  await connection.query("ALTER TABLE users MODIFY COLUMN department VARCHAR(100) NULL DEFAULT NULL").catch(() => {});
+  await connection.query("ALTER TABLE users MODIFY COLUMN degree_type VARCHAR(30) NULL DEFAULT 'BE'").catch(() => {});
+  await connection.query("ALTER TABLE users MODIFY COLUMN academic_year VARCHAR(20) NULL DEFAULT '3rd Year'").catch(() => {});
+  await connection.query("ALTER TABLE users MODIFY COLUMN phone VARCHAR(20) NULL DEFAULT NULL").catch(() => {});
+  await connection.query("ALTER TABLE users MODIFY COLUMN address TEXT NULL DEFAULT NULL").catch(() => {});
+  await connection.query("ALTER TABLE users MODIFY COLUMN student_id VARCHAR(50) NULL DEFAULT NULL").catch(() => {});
+
   // Backfill student accounts only
   await connection.query(`
     UPDATE users 
@@ -402,11 +476,11 @@ async function ensureUserColumns(connection, dbName) {
       AND (degree_type IS NULL OR department IS NULL OR academic_year IS NULL)
   `).catch(() => {});
 
-  // Ensure Admin and Librarian/Staff accounts do not hold student degree attributes
+  // Ensure Admin, Librarian, Staff, and Clerk accounts do not hold student degree attributes
   await connection.query(`
     UPDATE users 
     SET degree_type = NULL, academic_year = NULL 
-    WHERE role_id IN (1, 2, 4)
+    WHERE role_id IN (1, 2, 4, 7)
   `).catch(() => {});
 
   await connection.query(`
@@ -418,7 +492,7 @@ async function ensureUserColumns(connection, dbName) {
   await connection.query(`
     UPDATE users 
     SET department = 'Library' 
-    WHERE role_id = 2 AND (department IS NULL OR department = 'CSE')
+    WHERE role_id IN (2, 7) AND (department IS NULL OR department = 'CSE')
   `).catch(() => {});
 }
 

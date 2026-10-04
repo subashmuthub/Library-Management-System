@@ -8,12 +8,13 @@ const UserManagement = () => {
   };
 
   const roleOptions = [
-    { value: 1, label: 'Admin' },
-    { value: 2, label: 'Librarian' },
-    { value: 3, label: 'UG Student' },
-    { value: 4, label: 'Staff / Faculty' },
-    { value: 5, label: 'ME Student' },
-    { value: 6, label: 'Research Scholar' },
+    { value: 'admin', role_id: 1, label: 'Admin' },
+    { value: 'librarian', role_id: 2, label: 'Librarian' },
+    { value: 'clerk', role_id: 7, label: 'Clerk' },
+    { value: 'student', role_id: 3, label: 'UG Student' },
+    { value: 'me_student', role_id: 5, label: 'ME Student' },
+    { value: 'research_scholar', role_id: 6, label: 'Research Scholar' },
+    { value: 'staff', role_id: 4, label: 'Staff / Faculty' },
   ];
 
   const [users, setUsers] = useState([]);
@@ -26,11 +27,13 @@ const UserManagement = () => {
     name: '',
     email: '',
     password: '',
+    role: 'student',
     role_id: 3, // UG Student by default
   });
   const [editForm, setEditForm] = useState({
     name: '',
     email: '',
+    role: 'student',
     role_id: 3,
   });
 
@@ -62,11 +65,12 @@ const UserManagement = () => {
         name: '',
         email: '',
         password: '',
+        role: 'student',
         role_id: 3,
       });
       loadUsers();
     } catch (error) {
-      alert(`User creation failed: ${error.response?.data?.error || error.message}`);
+      alert(`User creation failed: ${error.response?.data?.message || error.response?.data?.error || error.message}`);
     }
   };
 
@@ -79,7 +83,7 @@ const UserManagement = () => {
         alert(`User ${action}d successfully!`);
         loadUsers();
       } catch (error) {
-        alert(`Status toggle failed: ${error.response?.data?.error || error.message}`);
+        alert(`Status toggle failed: ${error.response?.data?.message || error.response?.data?.error || error.message}`);
       }
     }
   };
@@ -91,7 +95,7 @@ const UserManagement = () => {
         await userManagementService.resetPassword(userId, { new_password: newPassword });
         alert('Password reset successfully!');
       } catch (error) {
-        alert(`Password reset failed: ${error.response?.data?.error || error.message}`);
+        alert(`Password reset failed: ${error.response?.data?.message || error.response?.data?.error || error.message}`);
       }
     } else if (newPassword) {
       alert('Password must be at least 6 characters long');
@@ -99,11 +103,17 @@ const UserManagement = () => {
   };
 
   const handleEditUser = (user) => {
+    const userRoleValue = String(user.role || user.role_name || '').toLowerCase();
+    const currentRole = roleOptions.find(
+      r => r.value === userRoleValue || r.role_id === Number(user.role_id)
+    ) || roleOptions[3];
+
     setEditingUser(user);
     setEditForm({
       name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name || '',
       email: user.email,
-      role_id: normalizeRoleId(user.role_id),
+      role: currentRole.value,
+      role_id: currentRole.role_id,
     });
     setShowEditModal(true);
   };
@@ -118,11 +128,12 @@ const UserManagement = () => {
       setEditForm({
         name: '',
         email: '',
+        role: 'student',
         role_id: 3,
       });
       loadUsers();
     } catch (error) {
-      alert(`User update failed: ${error.response?.data?.error || error.message}`);
+      alert(`User update failed: ${error.response?.data?.message || error.response?.data?.error || error.message}`);
     }
   };
 
@@ -136,16 +147,20 @@ const UserManagement = () => {
     const styles = {
       admin: 'bg-purple-100 text-purple-700',
       librarian: 'bg-blue-100 text-blue-700',
+      clerk: 'bg-amber-100 text-amber-800',
       student: 'bg-gray-100 text-gray-700',
-      staff: 'bg-amber-100 text-amber-800',
+      ug_student: 'bg-gray-100 text-gray-700',
+      staff: 'bg-emerald-100 text-emerald-800',
       me_student: 'bg-indigo-100 text-indigo-700',
-      research_scholar: 'bg-emerald-100 text-emerald-800',
+      research_scholar: 'bg-teal-100 text-teal-800',
     };
     const value = (roleName || '').toLowerCase();
     const label = {
       admin: 'ADMIN',
       librarian: 'LIBRARIAN',
+      clerk: 'CLERK',
       student: 'UG STUDENT',
+      ug_student: 'UG STUDENT',
       staff: 'STAFF',
       me_student: 'ME STUDENT',
       research_scholar: 'RESEARCH SCHOLAR'
@@ -222,7 +237,7 @@ const UserManagement = () => {
                       <td className="px-4 py-3 text-sm">#{user.id}</td>
                       <td className="px-4 py-3 text-sm font-medium">{user.name}</td>
                       <td className="px-4 py-3 text-sm">{user.email}</td>
-                      <td className="px-4 py-3">{getRoleBadge(user.role_name)}</td>
+                      <td className="px-4 py-3">{getRoleBadge(user.role || user.role_name)}</td>
                       <td className="px-4 py-3">{getStatusBadge(user.status)}</td>
                       <td className="px-4 py-3 text-sm">{user.created_at ? new Date(user.created_at).toLocaleDateString() : 'N/A'}</td>
                       <td className="px-4 py-3 text-sm">
@@ -313,12 +328,23 @@ const UserManagement = () => {
                 <select
                   required
                   className="input w-full"
-                  value={createForm.role_id}
-                  onChange={(e) => setCreateForm({ ...createForm, role_id: parseInt(e.target.value) })}
+                  value={createForm.role}
+                  onChange={(e) => {
+                    const selected = roleOptions.find(r => r.value === e.target.value);
+                    setCreateForm({
+                      ...createForm,
+                      role: e.target.value,
+                      role_id: selected ? selected.role_id : 3
+                    });
+                  }}
                 >
-                  {roleOptions.map(role => (
-                    <option key={role.value} value={role.value}>{role.label}</option>
-                  ))}
+                  <option value="admin">Admin</option>
+                  <option value="librarian">Librarian</option>
+                  <option value="clerk">Clerk</option>
+                  <option value="student">UG Student</option>
+                  <option value="me_student">ME Student</option>
+                  <option value="research_scholar">Research Scholar</option>
+                  <option value="staff">Staff / Faculty</option>
                 </select>
               </div>
               <div className="flex gap-2 justify-end">
@@ -371,12 +397,23 @@ const UserManagement = () => {
                 <select
                   required
                   className="input w-full"
-                  value={editForm.role_id}
-                  onChange={(e) => setEditForm({ ...editForm, role_id: parseInt(e.target.value) })}
+                  value={editForm.role}
+                  onChange={(e) => {
+                    const selected = roleOptions.find(r => r.value === e.target.value);
+                    setEditForm({
+                      ...editForm,
+                      role: e.target.value,
+                      role_id: selected ? selected.role_id : 3
+                    });
+                  }}
                 >
-                  {roleOptions.map(role => (
-                    <option key={role.value} value={role.value}>{role.label}</option>
-                  ))}
+                  <option value="admin">Admin</option>
+                  <option value="librarian">Librarian</option>
+                  <option value="clerk">Clerk</option>
+                  <option value="student">UG Student</option>
+                  <option value="me_student">ME Student</option>
+                  <option value="research_scholar">Research Scholar</option>
+                  <option value="staff">Staff / Faculty</option>
                 </select>
               </div>
               <div className="flex gap-2 justify-end">

@@ -157,10 +157,17 @@ const DigitalLibraryCard = ({ user }) => {
   const rawRole = String(user?.role?.role_name || user?.role || 'student').toLowerCase();
   const isAdmin = ['admin', 'administrator'].includes(rawRole);
   const isLibrarian = ['librarian'].includes(rawRole);
-  const isStaff = ['teacher', 'faculty', 'staff', 'librarian'].includes(rawRole);
+  const isClerk = ['clerk'].includes(rawRole);
+  const isStaff = ['teacher', 'faculty', 'staff', 'librarian', 'clerk'].includes(rawRole);
   const isStudent = !isAdmin && !isStaff;
 
-  const cardId = user?.student_id || user?.studentId || (isAdmin ? `ADMIN-${String(user?.id || '0000').padStart(4, '0')}` : isLibrarian ? `LIB-${String(user?.id || '0000').padStart(4, '0')}` : `STU-${String(user?.id || '0000').padStart(4, '0')}`);
+  const cardId = user?.student_id || user?.studentId || (
+    isAdmin ? `ADMIN-${String(user?.id || '0000').padStart(4, '0')}` :
+    isLibrarian ? `LIB-${String(user?.id || '0000').padStart(4, '0')}` :
+    isClerk ? `CLK-${String(user?.id || '0000').padStart(4, '0')}` :
+    isStaff ? `STF-${String(user?.id || '0000').padStart(4, '0')}` :
+    `STU-${String(user?.id || '0000').padStart(4, '0')}`
+  );
   const userName = user?.name || [user?.first_name || user?.firstName, user?.last_name || user?.lastName].filter(Boolean).join(' ') || 'Campus Member';
   const email = user?.email || 'member@nec.edu.in';
   const qrRole = isAdmin ? 'ADMIN' : (isStaff ? 'STAFF' : 'STUDENT');
@@ -196,7 +203,7 @@ const DigitalLibraryCard = ({ user }) => {
                 NEC Smart Library
               </h4>
               <p className="text-[10px] tracking-widest text-indigo-300 uppercase font-semibold">
-                Digital Borrowing Pass
+                {isStudent ? 'Digital Borrowing Pass' : 'Official Staff Library Pass'}
               </p>
             </div>
           </div>
@@ -206,7 +213,11 @@ const DigitalLibraryCard = ({ user }) => {
             </span>
           ) : isLibrarian ? (
             <span className="px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-widest border bg-amber-500/20 text-amber-300 border-amber-500/40">
-              Staff
+              Librarian (Staff)
+            </span>
+          ) : isClerk ? (
+            <span className="px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-widest border bg-amber-500/20 text-amber-300 border-amber-500/40">
+              Staff Member
             </span>
           ) : isStaff ? (
             <span className="px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-widest border bg-amber-500/20 text-amber-300 border-amber-500/40">
@@ -230,6 +241,10 @@ const DigitalLibraryCard = ({ user }) => {
                 {isAdmin ? (
                   <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 font-semibold font-mono uppercase">
                     Admin
+                  </span>
+                ) : isClerk ? (
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold font-mono uppercase">
+                    Clerk (Staff)
                   </span>
                 ) : (isLibrarian || isStaff) ? (
                   <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold font-mono uppercase">

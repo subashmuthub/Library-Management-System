@@ -26,6 +26,8 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 const { authenticate, authorize } = require('../middleware/auth.middleware');
 
+const UserManagementController = require('../controllers/user-management.controller');
+
 // Get current user profile
 router.get('/profile', authenticate, userController.getProfile);
 
@@ -37,6 +39,9 @@ router.post('/profile/avatar', authenticate, upload.single('avatar'), userContro
 
 // List all users (admin & librarian only)
 router.get('/', authenticate, authorize(['admin', 'librarian']), userController.listUsers);
+
+// Create user (admin & librarian only)
+router.post('/', authenticate, authorize(['admin', 'librarian']), UserManagementController.createUser);
 
 // Get user by ID (must come after / to avoid matching everything)
 router.get('/:id', authenticate, userController.getUserById);
