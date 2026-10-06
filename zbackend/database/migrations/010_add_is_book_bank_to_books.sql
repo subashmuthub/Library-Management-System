@@ -2,4 +2,4 @@
 -- Add is_book_bank column to books table for Book Bank scheme
 
 ALTER TABLE books
-ADD COLUMN is_book_bank BOOLEAN NOT NULL DEFAULT FALSE;
+ADD COLUMN IF NOT EXISTS is_book_bank BOOLEAN NOT NULL DEFAULT FALSE;

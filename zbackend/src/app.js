@@ -203,8 +203,8 @@ app.use(["/api/v1", "/api"], (req, res, next) => {
       req.path.startsWith("/reservations") ||
       req.path.startsWith("/payments") ||
       req.path.startsWith("/suggestions") ||
-      /^\/books\/\d+\/reviews/.test(req.path) ||
-      /^\/fines\/\d+\/pay/.test(req.path)
+      req.path.startsWith("/fines") ||
+      /^\/books\/\d+\/reviews/.test(req.path)
     )
   ) {
     return next();

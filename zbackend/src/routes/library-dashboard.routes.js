@@ -18,7 +18,7 @@ router.use(authenticate);
  * Query params: period (days, default: 30)
  * Returns: today_metrics, overall_statistics, circulation_metrics, fine_statistics, popular_books, activity_trends, system_health
  */
-router.get('/stats', authorize(['admin', 'librarian']), LibraryDashboardController.getDashboardStats);
+router.get('/stats', authorize(['admin', 'librarian', 'clerk']), LibraryDashboardController.getDashboardStats);
 
 /**
  * GET /api/dashboard/live-status
@@ -40,7 +40,7 @@ router.get('/status', LibraryDashboardController.getLibraryStatus);
  * Query params: period (days, default: 30)
  * Returns: category_analysis, high_demand_books, shelf_utilization
  */
-router.get('/book-analytics', authorize(['admin', 'librarian']), LibraryDashboardController.getBookAnalytics);
+router.get('/book-analytics', authorize(['admin', 'librarian', 'clerk']), LibraryDashboardController.getBookAnalytics);
 
 /**
  * GET /api/dashboard/user-insights
@@ -48,21 +48,21 @@ router.get('/book-analytics', authorize(['admin', 'librarian']), LibraryDashboar
  * Query params: period (days, default: 30)
  * Returns: role_insights, hourly_usage_pattern, user_retention
  */
-router.get('/user-insights', authorize(['admin', 'librarian']), LibraryDashboardController.getUserBehaviorInsights);
+router.get('/user-insights', authorize(['admin', 'librarian', 'clerk']), LibraryDashboardController.getUserBehaviorInsights);
 
 /**
  * GET /api/dashboard/top-students
  * Get top students by visits and borrow points
  * Query params: period (days, default: 30), limit (default: 20)
  */
-router.get('/top-students', authorize(['admin', 'librarian']), LibraryDashboardController.getTopStudentActivity);
+router.get('/top-students', authorize(['admin', 'librarian', 'clerk']), LibraryDashboardController.getTopStudentActivity);
 
 /**
  * GET /api/dashboard/book-order-details
  * Get book order planning details with agent information
  * Query params: limit (default: 300)
  */
-router.get('/book-order-details', authorize(['admin', 'librarian']), LibraryDashboardController.getBookOrderAgentDetails);
+router.get('/book-order-details', authorize(['admin', 'librarian', 'clerk']), LibraryDashboardController.getBookOrderAgentDetails);
 
 /**
  * POST /api/dashboard/top-students/notify

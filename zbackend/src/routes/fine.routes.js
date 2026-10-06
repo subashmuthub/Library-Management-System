@@ -25,13 +25,34 @@ router.get('/', FineController.getPendingFines);
  * Get fine statistics for dashboard (admin/librarian only)
  * Query params: period (days)
  */
-router.get('/statistics', authorize(['admin', 'librarian']), FineController.getFineStatistics);
+router.get('/statistics', authorize(['admin', 'librarian', 'clerk']), FineController.getFineStatistics);
 
 /**
  * GET /api/fines/:id
  * Get specific fine details by ID
  */
 router.get('/:id', FineController.getFineById);
+
+/**
+ * POST /api/fines/collect
+ * Multi-method fine collection across Cash, UPI, and RuPay
+ * Body: { fineId, amount, paymentMethod, receiptNotes, transactionRef }
+ */
+router.post('/collect', FineController.collectFine);
+
+/**
+ * POST /api/fines/create-payment-intent
+ * Initializes online payment intent for UPI or RuPay
+ * Body: { fineId, amount, paymentMethod }
+ */
+router.post('/create-payment-intent', FineController.createPaymentIntent);
+
+/**
+ * POST /api/fines/verify-payment
+ * Confirms payment completion callback
+ * Body: { session_id, fineId, transactionRef, paymentMethod }
+ */
+router.post('/verify-payment', FineController.verifyPayment);
 
 /**
  * POST /api/fines/cash-collection

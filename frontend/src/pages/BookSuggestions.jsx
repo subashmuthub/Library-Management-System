@@ -20,7 +20,8 @@ import SuggestBookModal from '../components/SuggestBookModal';
 
 const BookSuggestions = () => {
   const { user } = useAuth();
-  const role = String(user?.role || user?.role_name || '').toLowerCase();
+  const role = String(user?.role || user?.role_name || user?.role?.role_name || '').toLowerCase();
+  const isAdmin = role === 'admin';
   const isLibrarianOrAdmin = ['admin', 'librarian'].includes(role);
 
   const [suggestions, setSuggestions] = useState([]);
@@ -34,11 +35,7 @@ const BookSuggestions = () => {
   const fetchSuggestions = async () => {
     try {
       setLoading(true);
-      const params = {};
-      if (filterStatus !== 'ALL') {
-        params.status = filterStatus;
-      }
-      const response = await suggestionService.getSuggestions(params);
+      const response = await suggestionService.getSuggestions({ limit: 100 });
       setSuggestions(response.data?.suggestions || []);
     } catch (err) {
       console.error('Failed to load book suggestions:', err);
@@ -49,7 +46,7 @@ const BookSuggestions = () => {
 
   useEffect(() => {
     fetchSuggestions();
-  }, [filterStatus]);
+  }, []);
 
   const handleStatusUpdate = async (id, newStatus) => {
     try {
@@ -77,6 +74,10 @@ const BookSuggestions = () => {
   };
 
   const filteredSuggestions = suggestions.filter((s) => {
+    const statusNormalized = String(s.status || '').toUpperCase().trim();
+    if (filterStatus !== 'ALL' && statusNormalized !== filterStatus) {
+      return false;
+    }
     const query = searchQuery.toLowerCase().trim();
     if (!query) return true;
     return (
@@ -90,13 +91,14 @@ const BookSuggestions = () => {
 
   const stats = {
     total: suggestions.length,
-    pending: suggestions.filter((s) => s.status === 'PENDING').length,
-    approved: suggestions.filter((s) => s.status === 'APPROVED').length,
-    rejected: suggestions.filter((s) => s.status === 'REJECTED').length,
+    pending: suggestions.filter((s) => String(s.status || '').toUpperCase().trim() === 'PENDING').length,
+    approved: suggestions.filter((s) => String(s.status || '').toUpperCase().trim() === 'APPROVED').length,
+    rejected: suggestions.filter((s) => String(s.status || '').toUpperCase().trim() === 'REJECTED').length,
   };
 
   const getStatusBadge = (status) => {
-    switch (status) {
+    const normalized = String(status || '').toUpperCase().trim();
+    switch (normalized) {
       case 'APPROVED':
         return (
           <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
@@ -290,33 +292,37 @@ const BookSuggestions = () => {
                     {getStatusBadge(item.status)}
                   </td>
                   <td className="py-4 px-6 text-right whitespace-nowrap">
-                    {item.status === 'PENDING' ? (
-                      <div className="inline-flex items-center space-x-2">
+                    {isAdmin ? (
+                      String(item.status || '').toUpperCase().trim() === 'PENDING' ? (
+                        <div className="inline-flex items-center space-x-2">
+                          <button
+                            onClick={() => handleStatusUpdate(item.id, 'APPROVED')}
+                            disabled={actionLoadingId === item.id}
+                            className="flex items-center space-x-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Approve</span>
+                          </button>
+                          <button
+                            onClick={() => handleStatusUpdate(item.id, 'REJECTED')}
+                            disabled={actionLoadingId === item.id}
+                            className="flex items-center space-x-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Reject</span>
+                          </button>
+                        </div>
+                      ) : (
                         <button
-                          onClick={() => handleStatusUpdate(item.id, 'APPROVED')}
+                          onClick={() => handleStatusUpdate(item.id, 'PENDING')}
                           disabled={actionLoadingId === item.id}
-                          className="flex items-center space-x-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
+                          className="text-xs text-slate-500 hover:text-slate-800 underline font-medium"
                         >
-                          <Check className="w-3.5 h-3.5" />
-                          <span>Approve</span>
+                          Reset to Pending
                         </button>
-                        <button
-                          onClick={() => handleStatusUpdate(item.id, 'REJECTED')}
-                          disabled={actionLoadingId === item.id}
-                          className="flex items-center space-x-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                          <span>Reject</span>
-                        </button>
-                      </div>
+                      )
                     ) : (
-                      <button
-                        onClick={() => handleStatusUpdate(item.id, 'PENDING')}
-                        disabled={actionLoadingId === item.id}
-                        className="text-xs text-slate-500 hover:text-slate-800 underline font-medium"
-                      >
-                        Reset to Pending
-                      </button>
+                      <span className="text-slate-400 text-xs">View Only (Admin Decision Required)</span>
                     )}
                   </td>
                 </tr>

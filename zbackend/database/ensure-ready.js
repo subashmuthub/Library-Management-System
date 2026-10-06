@@ -455,7 +455,7 @@ async function ensureUserColumns(connection, dbName) {
 
   // Ensure role column is VARCHAR(50) and synchronized with user_roles
   await connection.query("ALTER TABLE users MODIFY COLUMN role VARCHAR(50) NOT NULL DEFAULT 'student'").catch(() => {});
-  await connection.query("UPDATE users u JOIN user_roles ur ON u.role_id = ur.id SET u.role = ur.role_name WHERE u.role IS NULL OR u.role = ''").catch(() => {});
+  await connection.query("UPDATE users u JOIN user_roles ur ON u.role_id = ur.id SET u.role = ur.role_name").catch(() => {});
 
   // Ensure optional columns are nullable
   await connection.query("ALTER TABLE users MODIFY COLUMN department VARCHAR(100) NULL DEFAULT NULL").catch(() => {});
@@ -509,6 +509,10 @@ async function ensureBookTransactionColumns(connection, dbName) {
       sql: "ALTER TABLE book_transactions ADD COLUMN checked_out_by INT NULL AFTER book_id",
     },
     {
+      name: "issued_by",
+      sql: "ALTER TABLE book_transactions ADD COLUMN issued_by INT NULL AFTER checked_out_by",
+    },
+    {
       name: "returned_by",
       sql: "ALTER TABLE book_transactions ADD COLUMN returned_by INT NULL AFTER issued_by",
     },
@@ -530,9 +534,12 @@ async function ensureBookTransactionColumns(connection, dbName) {
       column.name,
     );
     if (!exists) {
-      await connection.query(column.sql);
+      await connection.query(column.sql).catch(() => {});
     }
   }
+
+  // Ensure status column in book_transactions can handle active/issued/returned/overdue
+  await connection.query("ALTER TABLE book_transactions MODIFY COLUMN status VARCHAR(30) NOT NULL DEFAULT 'active'").catch(() => {});
 }
 
 async function ensureBookProcurementColumns(connection, dbName) {
@@ -593,14 +600,30 @@ async function ensureBookProcurementColumns(connection, dbName) {
       name: "barcode",
       sql: "ALTER TABLE books ADD COLUMN barcode VARCHAR(50) NULL AFTER accession_no",
     },
+    {
+      name: "status",
+      sql: "ALTER TABLE books ADD COLUMN status VARCHAR(30) NOT NULL DEFAULT 'AVAILABLE' AFTER is_available",
+    },
+    {
+      name: "shelf_id",
+      sql: "ALTER TABLE books ADD COLUMN shelf_id INT NULL AFTER is_available",
+    },
+    {
+      name: "available_copies",
+      sql: "ALTER TABLE books ADD COLUMN available_copies INT NOT NULL DEFAULT 1 AFTER total_copies",
+    },
   ];
 
   for (const column of procurementColumns) {
     const exists = await hasColumn(connection, dbName, "books", column.name);
     if (!exists) {
-      await connection.query(column.sql);
+      await connection.query(column.sql).catch(() => {});
     }
   }
+
+  // Ensure books status is VARCHAR(30) and initialized
+  await connection.query("ALTER TABLE books MODIFY COLUMN status VARCHAR(30) NOT NULL DEFAULT 'AVAILABLE'").catch(() => {});
+  await connection.query("UPDATE books SET status = CASE WHEN is_available = FALSE THEN 'CHECKED_OUT' ELSE 'AVAILABLE' END WHERE status IS NULL OR status = ''").catch(() => {});
 
   // Migrate legacy is_book_bank if it exists, then purge legacy columns
   const hasLegacyBookBank = await hasColumn(connection, dbName, "books", "is_book_bank");
@@ -669,6 +692,59 @@ async function ensureFineStatusEnum(connection, dbName) {
     await connection.query(
       "ALTER TABLE fines MODIFY COLUMN transaction_id INT(11) NULL DEFAULT NULL"
     ).catch(() => {});
+    await connection.query(
+      "ALTER TABLE fines MODIFY COLUMN payment_method VARCHAR(30) NULL DEFAULT 'CASH'"
+    ).catch(() => {});
+
+    const hasTxRef = await hasColumn(connection, dbName, "fines", "transaction_reference");
+    if (!hasTxRef) {
+      await connection.query(
+        "ALTER TABLE fines ADD COLUMN transaction_reference VARCHAR(100) NULL AFTER payment_method"
+      ).catch(() => {});
+    }
+
+    const hasGwStatus = await hasColumn(connection, dbName, "fines", "payment_gateway_status");
+    if (!hasGwStatus) {
+      await connection.query(
+        "ALTER TABLE fines ADD COLUMN payment_gateway_status VARCHAR(20) DEFAULT 'COMPLETED' AFTER transaction_reference"
+      ).catch(() => {});
+    }
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS fine_payments (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        fine_id INT NOT NULL,
+        user_id INT NOT NULL,
+        amount DECIMAL(10, 2) NOT NULL,
+        payment_method VARCHAR(20) NOT NULL DEFAULT 'CASH',
+        transaction_reference VARCHAR(100) NULL,
+        payment_gateway_status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED',
+        receipt_notes TEXT NULL,
+        collected_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_fp_fine (fine_id),
+        INDEX idx_fp_user (user_id),
+        INDEX idx_fp_method (payment_method)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `).catch(() => {});
+  } catch (err) {
+    // Ignore
+  }
+}
+
+async function ensureBookSuggestionsSchema(connection, dbName) {
+  try {
+    const hasIsbn = await hasColumn(connection, dbName, "book_suggestions", "isbn");
+    if (!hasIsbn) {
+      await connection.query("ALTER TABLE book_suggestions ADD COLUMN isbn VARCHAR(50) NULL AFTER author").catch(() => {});
+    }
+    const hasReviewedBy = await hasColumn(connection, dbName, "book_suggestions", "reviewed_by");
+    if (!hasReviewedBy) {
+      await connection.query("ALTER TABLE book_suggestions ADD COLUMN reviewed_by INT NULL AFTER status").catch(() => {});
+    }
+    await connection.query(
+      "ALTER TABLE book_suggestions MODIFY COLUMN status ENUM('pending','approved','rejected','PENDING','APPROVED','REJECTED') DEFAULT 'PENDING'"
+    ).catch(() => {});
   } catch (err) {
     // Ignore
   }
@@ -689,6 +765,23 @@ async function ensureDefaultRoles(connection) {
       description = VALUES(description),
       permissions = VALUES(permissions)
   `);
+}
+
+async function ensureDefaultUsers(connection) {
+  const hash = '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu';
+  await connection.query(`
+    INSERT INTO users (email, password, first_name, last_name, role_id, role, department, phone, status)
+    VALUES
+      ('admin@library.edu', '${hash}', 'Alice', 'Admin', 1, 'admin', 'Administration', '555-0001', 'active'),
+      ('librarian1@library.edu', '${hash}', 'Bob', 'Librarian', 2, 'librarian', 'Library', '555-0002', 'active'),
+      ('clerk@library.edu', '${hash}', 'Charlie', 'Clerk', 7, 'clerk', 'Library', '555-0004', 'active'),
+      ('student1@university.edu', '${hash}', 'David', 'Student', 3, 'student', 'CSE', '555-1001', 'active')
+    ON DUPLICATE KEY UPDATE
+      role_id = VALUES(role_id),
+      role = VALUES(role),
+      department = VALUES(department),
+      status = VALUES(status)
+  `).catch(() => {});
 }
 
 async function ensureDatabaseReady() {
@@ -740,7 +833,9 @@ async function ensureDatabaseReady() {
     await ensureReservationStatusEnum(connection, dbName);
     await ensureBookInventoryStatus(connection, dbName);
     await ensureFineStatusEnum(connection, dbName);
+    await ensureBookSuggestionsSchema(connection, dbName);
     await ensureDefaultRoles(connection);
+    await ensureDefaultUsers(connection);
 
     const existingRuntimeTables = await getExistingTables(
       connection,

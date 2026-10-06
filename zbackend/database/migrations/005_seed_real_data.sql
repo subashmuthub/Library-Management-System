@@ -4,6 +4,7 @@
 -- Safe: uses INSERT IGNORE / ON DUPLICATE KEY UPDATE everywhere.
 -- ============================================================================
 USE smart_library;
+SET FOREIGN_KEY_CHECKS = 0;
 
 -- ── 1. SYNC SHELVES: update library_shelves_extended to match real shelves ─────
 -- Clear stale demo seeds and replace with real shelf codes
@@ -41,6 +42,9 @@ SET qr_value = JSON_OBJECT(
 );
 
 -- ── 2. LINK BOOKS TO SHELVES in library_shelves_extended via books.shelf_id ───
+-- Ensure books table has shelf_id column
+ALTER TABLE books ADD COLUMN IF NOT EXISTS shelf_id INT NULL;
+
 -- Map real book IDs to real shelf IDs from the shelves table
 -- CS books → CS101/CS102 (shelf id 16,17)
 UPDATE books SET shelf_id = 16 WHERE category = 'CSE' AND id IN (17,18,19,20,22,30,38,39,44,45);
@@ -76,20 +80,23 @@ WHERE b.shelf_id IS NOT NULL;
 -- These will immediately be visible in /overdue-alerts as "critical" items
 -- Ensure previous test active transactions are properly dated as overdue
 
+-- Ensure book_transactions has renewal_count column
+ALTER TABLE book_transactions ADD COLUMN IF NOT EXISTS renewal_count INT NOT NULL DEFAULT 0;
+
 -- Transaction for user 4 (David Student) — 30 days overdue, CSE book
 INSERT INTO book_transactions
   (user_id, book_id, checkout_date, due_date, return_date, status, renewal_count)
 VALUES
   (4,  17, DATE_SUB(CURDATE(), INTERVAL 40 DAY), DATE_SUB(CURDATE(), INTERVAL 30 DAY), NULL, 'overdue', 2),
-  (5,  36, DATE_SUB(CURDATE(), INTERVAL 25 DAY), DATE_SUB(CURDATE(), INTERVAL 14 DAY), NULL, 'overdue', 1),
-  (6,  37, DATE_SUB(CURDATE(), INTERVAL 20 DAY), DATE_SUB(CURDATE(), INTERVAL 7  DAY), NULL, 'overdue', 0),
-  (8,  42, DATE_SUB(CURDATE(), INTERVAL 18 DAY), DATE_SUB(CURDATE(), INTERVAL 5  DAY), NULL, 'overdue', 1),
-  (10, 44, DATE_SUB(CURDATE(), INTERVAL 15 DAY), DATE_SUB(CURDATE(), INTERVAL 3  DAY), NULL, 'overdue', 2),
+  (5,  18, DATE_SUB(CURDATE(), INTERVAL 25 DAY), DATE_SUB(CURDATE(), INTERVAL 14 DAY), NULL, 'overdue', 1),
+  (6,  19, DATE_SUB(CURDATE(), INTERVAL 20 DAY), DATE_SUB(CURDATE(), INTERVAL 7  DAY), NULL, 'overdue', 0),
+  (7,  20, DATE_SUB(CURDATE(), INTERVAL 18 DAY), DATE_SUB(CURDATE(), INTERVAL 5  DAY), NULL, 'overdue', 1),
+  (8,  22, DATE_SUB(CURDATE(), INTERVAL 15 DAY), DATE_SUB(CURDATE(), INTERVAL 3  DAY), NULL, 'overdue', 2),
   (4,  21, DATE_SUB(CURDATE(), INTERVAL 12 DAY), DATE_SUB(CURDATE(), INTERVAL 1  DAY), NULL, 'overdue', 0),
-  (5,  31, DATE_SUB(CURDATE(), INTERVAL 10 DAY), CURDATE(),                            NULL, 'active',  0),
-  (6,  45, DATE_SUB(CURDATE(), INTERVAL  8 DAY), DATE_ADD(CURDATE(), INTERVAL  2 DAY), NULL, 'active',  1),
-  (8,  46, DATE_SUB(CURDATE(), INTERVAL  5 DAY), DATE_ADD(CURDATE(), INTERVAL  5 DAY), NULL, 'active',  0),
-  (10, 24, DATE_SUB(CURDATE(), INTERVAL  3 DAY), DATE_ADD(CURDATE(), INTERVAL  7 DAY), NULL, 'active',  0);
+  (5,  23, DATE_SUB(CURDATE(), INTERVAL 10 DAY), CURDATE(),                            NULL, 'active',  0),
+  (6,  25, DATE_SUB(CURDATE(), INTERVAL  8 DAY), DATE_ADD(CURDATE(), INTERVAL  2 DAY), NULL, 'active',  1),
+  (7,  16, DATE_SUB(CURDATE(), INTERVAL  5 DAY), DATE_ADD(CURDATE(), INTERVAL  5 DAY), NULL, 'active',  0),
+  (8,  24, DATE_SUB(CURDATE(), INTERVAL  3 DAY), DATE_ADD(CURDATE(), INTERVAL  7 DAY), NULL, 'active',  0);
 
 -- ── 5. FINES for the overdue transactions ─────────────────────────────────────
 -- Use the transaction IDs we just inserted (get them dynamically)
@@ -248,9 +255,9 @@ VALUES
   (4, 17, 65, 'Same category as your reads'),
   (4, 19, 55, 'Same author you enjoy'),
   (4, 22, 45, 'Popular in the library'),
-  (5, 36, 60, 'Same category as your reads'),
-  (5, 37, 40, 'Trending this week'),
-  (6, 44, 35, 'Same category as your reads'),
+  (5, 18, 60, 'Same category as your reads'),
+  (5, 20, 40, 'Trending this week'),
+  (6, 23, 35, 'Same category as your reads'),
   (8, 21, 55, 'Popular in the library');
 
 -- ── 10. VERIFY — show counts ──────────────────────────────────────────────────
@@ -271,3 +278,5 @@ UNION ALL
 SELECT 'books_with_shelf',      COUNT(*) FROM books WHERE shelf_id IS NOT NULL
 UNION ALL
 SELECT 'location_history_rows', COUNT(*) FROM book_location_history;
+
+SET FOREIGN_KEY_CHECKS = 1;

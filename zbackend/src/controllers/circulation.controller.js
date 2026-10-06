@@ -224,7 +224,8 @@ class CirculationController {
           SELECT f.id, f.amount, f.fine_type, 
                  COALESCE(f.notes, f.fine_type) as reason,
                  f.notes, f.status, f.created_at,
-                 b.title as book_title
+                 b.title as book_title,
+                 GREATEST(1, DATEDIFF(CURDATE(), COALESCE(bt.due_date, f.created_at))) as days_overdue
           FROM fines f
           LEFT JOIN book_transactions bt ON f.transaction_id = bt.id
           LEFT JOIN books b ON bt.book_id = b.id
@@ -234,11 +235,55 @@ class CirculationController {
 
         connection.release();
 
+        const activeBorrowedBooks = activeLoans.map(loan => {
+          const daysDiff = Number(loan.days_overdue) || 0;
+          const isOverdue = daysDiff > 0;
+          const daysRemaining = !isOverdue ? Math.abs(daysDiff) : 0;
+          const overdueDays = isOverdue ? daysDiff : 0;
+          
+          let daysStatus = '';
+          if (isOverdue) {
+            daysStatus = `${overdueDays} days overdue`;
+          } else if (daysRemaining === 0) {
+            daysStatus = 'Due today';
+          } else {
+            daysStatus = `Due in ${daysRemaining} day${daysRemaining > 1 ? 's' : ''}`;
+          }
+
+          return {
+            transaction_id: loan.id,
+            book_id: loan.book_id,
+            title: loan.title,
+            author: loan.author,
+            accession_no: loan.accession_no || loan.barcode || loan.isbn || `ACC-${loan.book_id}`,
+            barcode: loan.barcode,
+            isbn: loan.isbn,
+            issued_date: loan.checkout_date,
+            due_date: loan.due_date,
+            days_diff: daysDiff,
+            is_overdue: isOverdue,
+            days_remaining: daysRemaining,
+            overdue_days: overdueDays,
+            days_status: daysStatus
+          };
+        });
+
+        const formattedFines = pendingFinesList.map(f => {
+          const daysOverdue = Number(f.days_overdue) || 1;
+          return {
+            ...f,
+            days_overdue: daysOverdue,
+            days_overdue_text: `Overdue for ${daysOverdue} days`
+          };
+        });
+
         const hasDeskHold = Boolean(student.has_desk_hold);
         const canBorrow = student.status === 'active' &&
           !hasDeskHold &&
           activeLoans.length < maxLimit &&
           overdueCount === 0;
+
+        const availableQuota = Math.max(0, maxLimit - activeLoans.length);
 
         return res.json({
           success: true,
@@ -258,19 +303,26 @@ class CirculationController {
             has_desk_hold: hasDeskHold,
             desk_hold_reason: student.desk_hold_reason || null
           },
+          borrowing_limit: maxLimit,
+          active_loans_count: activeLoans.length,
+          available_quota: availableQuota,
+          active_borrowed_books: activeBorrowedBooks,
+          unpaid_fines: formattedFines,
           stats: {
             active_loans_count: activeLoans.length,
+            borrowing_limit: maxLimit,
             max_limit: maxLimit,
-            remaining_quota: Math.max(0, maxLimit - activeLoans.length),
+            available_quota: availableQuota,
+            remaining_quota: availableQuota,
             overdue_count: overdueCount,
             unpaid_fines: unpaidFines,
             can_borrow: canBorrow,
             default_loan_days: policy.loan_duration_days,
             department_policy: policy
           },
-          active_loans: activeLoans,
+          active_loans: activeBorrowedBooks,
           reservations: allReservations,
-          pending_fines: pendingFinesList
+          pending_fines: formattedFines
         });
       } catch (err) {
         connection.release();
@@ -427,21 +479,22 @@ class CirculationController {
       const [txResult] = await connection.execute(`
         INSERT INTO book_transactions (
           user_id, book_id, checkout_date, due_date, 
-          issued_by, status, transaction_type
+          issued_by, checked_out_by, status, transaction_type
         ) VALUES (
           ?, ?, CURDATE(), 
           DATE_ADD(CURDATE(), INTERVAL ? DAY), 
-          ?, 'active', 'checkout'
+          ?, ?, 'active', 'checkout'
         )
-      `, [userId, bookId, effectiveLoanDays, clerkId]);
+      `, [userId, bookId, effectiveLoanDays, clerkId, clerkId]);
 
       const transactionId = txResult.insertId;
 
-      // Update book copies
+      // Update book copies and status
       await connection.execute(`
         UPDATE books 
         SET available_copies = GREATEST(0, available_copies - 1),
-            is_available = CASE WHEN available_copies <= 1 THEN FALSE ELSE TRUE END
+            is_available = CASE WHEN available_copies <= 1 THEN FALSE ELSE TRUE END,
+            status = 'CHECKED_OUT'
         WHERE id = ?
       `, [bookId]);
 
@@ -527,7 +580,7 @@ class CirculationController {
     const connection = await pool.getConnection();
 
     try {
-      const { user_id, identifier, loan_days } = req.body;
+      const { user_id, book_id, identifier, loan_days } = req.body;
       const clerkId = req.user?.id || null;
       const clerkName = req.user ? `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim() : 'Circulation Clerk';
 
@@ -539,7 +592,7 @@ class CirculationController {
         });
       }
 
-      if (!identifier) {
+      if (!book_id && !identifier) {
         connection.release();
         return res.status(400).json({
           success: false,
@@ -622,37 +675,53 @@ class CirculationController {
         });
       }
 
-      // Find book by accession_no, barcode, isbn, id, or rfid tag
-      const trimmedId = String(identifier).trim();
-      const isNumeric = /^\d+$/.test(trimmedId);
-
-      let bookQuery = `
-        SELECT b.id, b.title, b.author, b.isbn, b.accession_no, b.barcode, 
-               b.available_copies, b.total_copies, b.is_restricted_research
-        FROM books b
-        LEFT JOIN rfid_tags rt ON b.id = rt.book_id
-        WHERE b.accession_no = ? 
-           OR b.barcode = ? 
-           OR b.isbn = ?
-           OR rt.tag_id = ?
-      `;
-      const queryParams = [trimmedId, trimmedId, trimmedId, trimmedId];
-
-      if (isNumeric) {
-        bookQuery += ` OR b.id = ?`;
-        queryParams.push(Number.parseInt(trimmedId, 10));
+      // Find book by book_id, accession_no, barcode, isbn, id, title, or rfid tag
+      let books = [];
+      if (book_id) {
+        const [byId] = await connection.execute(`
+          SELECT b.id, b.title, b.author, b.isbn, b.accession_no, b.barcode, 
+                 b.available_copies, b.total_copies, b.is_restricted_research
+          FROM books b
+          WHERE b.id = ?
+          LIMIT 1
+        `, [Number(book_id)]);
+        books = byId;
       }
 
-      bookQuery += ` LIMIT 1`;
+      if (books.length === 0) {
+        const trimmedId = String(identifier || '').trim();
+        const isNumeric = /^\d+$/.test(trimmedId);
 
-      const [books] = await connection.execute(bookQuery, queryParams);
+        let bookQuery = `
+          SELECT b.id, b.title, b.author, b.isbn, b.accession_no, b.barcode, 
+                 b.available_copies, b.total_copies, b.is_restricted_research
+          FROM books b
+          LEFT JOIN rfid_tags rt ON b.id = rt.book_id
+          WHERE b.accession_no = ? 
+             OR b.barcode = ? 
+             OR b.isbn = ?
+             OR rt.tag_id = ?
+             OR LOWER(b.title) = LOWER(?)
+        `;
+        const queryParams = [trimmedId, trimmedId, trimmedId, trimmedId, trimmedId];
+
+        if (isNumeric) {
+          bookQuery += ` OR b.id = ?`;
+          queryParams.push(Number.parseInt(trimmedId, 10));
+        }
+
+        bookQuery += ` LIMIT 1`;
+
+        const [bySearch] = await connection.execute(bookQuery, queryParams);
+        books = bySearch;
+      }
 
       if (books.length === 0) {
         await connection.rollback();
         connection.release();
         return res.status(404).json({
           success: false,
-          message: `No book found matching identifier "${trimmedId}".`
+          message: `No book found matching identifier "${identifier}".`
         });
       }
 
@@ -703,21 +772,22 @@ class CirculationController {
       const [txResult] = await connection.execute(`
         INSERT INTO book_transactions (
           user_id, book_id, checkout_date, due_date,
-          issued_by, status, transaction_type
+          issued_by, checked_out_by, status, transaction_type
         ) VALUES (
           ?, ?, CURDATE(),
           DATE_ADD(CURDATE(), INTERVAL ? DAY),
-          ?, 'active', 'checkout'
+          ?, ?, 'active', 'checkout'
         )
-      `, [student.id, book.id, effectiveLoanDays, clerkId]);
+      `, [student.id, book.id, effectiveLoanDays, clerkId, clerkId]);
 
       const transactionId = txResult.insertId;
 
-      // Update book copies
+      // Update book copies and status
       await connection.execute(`
         UPDATE books 
         SET available_copies = GREATEST(0, available_copies - 1),
-            is_available = CASE WHEN available_copies <= 1 THEN FALSE ELSE TRUE END
+            is_available = CASE WHEN available_copies <= 1 THEN FALSE ELSE TRUE END,
+            status = 'CHECKED_OUT'
         WHERE id = ?
       `, [book.id]);
 
@@ -994,7 +1064,7 @@ class CirculationController {
           `, [resRow.id]);
 
           await connection.execute(`
-            UPDATE books SET status = 'active', is_available = TRUE WHERE id = ?
+            UPDATE books SET status = 'AVAILABLE', is_available = TRUE WHERE id = ?
           `, [book.id]);
 
           onHoldShelf = true;
@@ -1011,7 +1081,7 @@ class CirculationController {
             UPDATE books 
             SET available_copies = LEAST(total_copies, available_copies + 1),
                 is_available = TRUE,
-                status = 'active'
+                status = 'AVAILABLE'
             WHERE id = ?
           `, [book.id]);
         }

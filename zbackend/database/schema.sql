@@ -134,7 +134,9 @@ CREATE TABLE books (
     description TEXT NULL,
     cover_image_url VARCHAR(500) NULL,
     total_copies INT DEFAULT 1 COMMENT 'Total number of copies available',
+    available_copies INT NOT NULL DEFAULT 1 COMMENT 'Currently available copies',
     is_available BOOLEAN DEFAULT TRUE COMMENT 'FALSE if book is checked out',
+    shelf_id INT NULL COMMENT 'Current shelf location ID',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
@@ -142,6 +144,7 @@ CREATE TABLE books (
     INDEX idx_title (title(255)),
     INDEX idx_author (author),
     INDEX idx_category (category),
+    INDEX idx_shelf_id (shelf_id),
     FULLTEXT idx_search (title, author, description)
 ) ENGINE=InnoDB COMMENT='Library book catalog';
 
@@ -400,11 +403,12 @@ CREATE TABLE book_transactions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
     book_id INT NOT NULL,
-    transaction_type ENUM('checkout', 'return', 'renew') NOT NULL,
+    transaction_type ENUM('checkout', 'return', 'renew') NOT NULL DEFAULT 'checkout',
     checkout_date DATE NOT NULL,
     due_date DATE NOT NULL,
     return_date DATE NULL,
     renewed_count INT DEFAULT 0 COMMENT 'Number of times renewed',
+    renewal_count INT NOT NULL DEFAULT 0,
     status ENUM('active', 'returned', 'overdue', 'lost') DEFAULT 'active',
     issued_by INT NULL COMMENT 'Librarian who issued the book',
     returned_to INT NULL COMMENT 'Librarian who processed return',
@@ -606,7 +610,7 @@ CREATE PROCEDURE checkout_book(
     IN p_user_id INT,
     IN p_book_id INT,
     IN p_issued_by INT,
-    IN p_loan_days INT DEFAULT 14,
+    IN p_loan_days INT,
     OUT p_success BOOLEAN,
     OUT p_message VARCHAR(255)
 )
@@ -622,6 +626,10 @@ BEGIN
         SET p_success = FALSE;
         SET p_message = 'Database error occurred';
     END;
+    
+    IF p_loan_days IS NULL THEN
+        SET p_loan_days = 14;
+    END IF;
     
     START TRANSACTION;
     

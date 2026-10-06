@@ -14,8 +14,8 @@ router.post('/', authenticate, SuggestionController.createSuggestion);
 // Get suggestions (students get own, admin/librarian get all)
 router.get('/', authenticate, SuggestionController.getSuggestions);
 
-// Update suggestion status (admin & librarian only)
-router.patch('/:id/status', authenticate, authorize(['admin', 'librarian']), SuggestionController.updateSuggestionStatus);
-router.put('/:id/status', authenticate, authorize(['admin', 'librarian']), SuggestionController.updateSuggestionStatus);
+// Update suggestion status (strictly admin only)
+router.patch('/:id/status', authenticate, authorize(['admin']), SuggestionController.updateSuggestionStatus);
+router.put('/:id/status', authenticate, authorize(['admin']), SuggestionController.updateSuggestionStatus);
 
 module.exports = router;

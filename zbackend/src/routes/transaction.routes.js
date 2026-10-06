@@ -36,6 +36,7 @@ const blockStudentCheckout = (req, res, next) => {
  * Body: { user_id, book_id, due_date? }
  */
 router.post('/checkout', blockStudentCheckout, authorize(['admin', 'librarian', 'clerk']), TransactionController.checkoutBook);
+router.post('/issue', blockStudentCheckout, authorize(['admin', 'librarian', 'clerk']), TransactionController.checkoutBook);
 
 /**
  * POST /api/transactions/checkout-batch
@@ -77,7 +78,7 @@ router.get('/', TransactionController.getAllTransactions);
  * Get transaction statistics for dashboard
  * Query params: period (days)
  */
-router.get('/statistics', authorize(['admin', 'librarian']), TransactionController.getTransactionStatistics);
+router.get('/statistics', authorize(['admin', 'librarian', 'clerk']), TransactionController.getTransactionStatistics);
 
 /**
  * GET /api/transactions/overdue

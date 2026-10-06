@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { fineService } from '../services';
 import { IndianRupee, CheckCircle, XCircle, Clock, AlertCircle, Receipt, Download } from 'lucide-react';
 import { useAuth } from '../contexts';
-import PaymentModal from '../components/PaymentModal';
+import FinePaymentModal from '../components/FinePaymentModal';
 
 const Fines = () => {
   const { user } = useAuth();
   const userRole = String(user?.role || user?.role_name || user?.role?.role_name || '').toLowerCase();
-  const isAdminOrLibrarian = userRole === 'admin' || userRole === 'librarian';
+  const isStudent = ['student', 'ug_student', 'me_student', 'research_scholar'].includes(userRole);
+  const isAdminOrLibrarian = ['admin', 'librarian', 'clerk', 'staff'].includes(userRole);
 
   const [fines, setFines] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -33,7 +34,7 @@ const Fines = () => {
     setLoading(true);
     try {
       const params = filter !== 'all' ? { status: filter } : {};
-      if (userRole === 'student' && user?.id) {
+      if (isStudent && user?.id) {
         params.userId = user.id;
       }
       const response = await fineService.getPendingFines(params);
@@ -47,7 +48,7 @@ const Fines = () => {
 
   const loadStats = async () => {
     try {
-      if (userRole === 'student' && user?.id) {
+      if (isStudent && user?.id) {
         const response = await fineService.getUserFineSummary(user.id);
         const summary = response.summary || {};
         setStats({
@@ -409,10 +410,11 @@ Thank you for your payment!
         )}
       </div>
 
-      {/* Payment Modal */}
+      {/* Multi-Method Fine Payment Modal */}
       {showPaymentModal && selectedFine && (
-        <PaymentModal
+        <FinePaymentModal
           fine={selectedFine}
+          userRole={userRole}
           onClose={() => {
             setShowPaymentModal(false);
             setSelectedFine(null);

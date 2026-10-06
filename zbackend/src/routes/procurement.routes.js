@@ -8,8 +8,8 @@ const router = express.Router();
 const ProcurementController = require('../controllers/procurement.controller');
 const { authenticate, authorize } = require('../middleware/auth.middleware');
 
-// Strictly Admin-only RBAC
-router.use(authenticate, authorize(['admin']));
+// Admin & Librarian RBAC
+router.use(authenticate, authorize(['admin', 'librarian']));
 
 /**
  * POST /api/procurement/purchases

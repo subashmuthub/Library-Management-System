@@ -13,7 +13,8 @@ class SuggestionController {
     static async createSuggestion(req, res) {
         try {
             const { title, author, isbn, reason } = req.body;
-            const userId = req.user?.id;
+            const sessionUser = req.user || req.session?.user;
+            const userId = sessionUser?.id;
 
             if (!userId) {
                 return res.status(401).json({
@@ -108,7 +109,7 @@ class SuggestionController {
             }
 
             if (status && ['PENDING', 'APPROVED', 'REJECTED'].includes(status.toUpperCase())) {
-                whereConditions.push('s.status = ?');
+                whereConditions.push('UPPER(s.status) = ?');
                 queryParams.push(status.toUpperCase());
             }
 
@@ -126,14 +127,17 @@ class SuggestionController {
                     s.author,
                     s.isbn,
                     s.reason,
-                    s.status,
+                    UPPER(s.status) AS status,
+                    s.reviewed_by,
                     s.created_at,
                     s.updated_at,
                     CONCAT(u.first_name, ' ', u.last_name) AS requester_name,
                     u.email AS requester_email,
-                    u.student_id
+                    u.student_id,
+                    CONCAT(reviewer.first_name, ' ', reviewer.last_name) AS reviewer_name
                 FROM book_suggestions s
                 JOIN users u ON s.user_id = u.id
+                LEFT JOIN users reviewer ON s.reviewed_by = reviewer.id
                 ${whereClause}
                 ORDER BY s.created_at DESC
                 LIMIT ${limitNum} OFFSET ${offset}
@@ -173,10 +177,22 @@ class SuggestionController {
 
     /**
      * Update suggestion status (APPROVED | REJECTED)
-     * Admin and Librarian only
+     * Strictly Admin only
      */
     static async updateSuggestionStatus(req, res) {
         try {
+            const sessionUser = req.user || req.session?.user;
+            const userRole = String(
+                sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || ''
+            ).toLowerCase();
+
+            if (userRole !== 'admin') {
+                return res.status(403).json({
+                    success: false,
+                    message: "Access Denied: Only Admin can approve or reject book suggestions."
+                });
+            }
+
             const { id } = req.params;
             const { status } = req.body;
 
@@ -189,6 +205,7 @@ class SuggestionController {
             }
 
             const normalizedStatus = status.toUpperCase();
+            const reviewerId = sessionUser?.id || null;
             const connection = await pool.getConnection();
 
             const [existing] = await connection.execute(
@@ -205,14 +222,28 @@ class SuggestionController {
             }
 
             await connection.execute(
-                'UPDATE book_suggestions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-                [normalizedStatus, id]
+                'UPDATE book_suggestions SET status = ?, reviewed_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                [normalizedStatus, reviewerId, id]
             );
 
             const [updated] = await connection.execute(`
-                SELECT s.*, CONCAT(u.first_name, ' ', u.last_name) AS requester_name, u.email AS requester_email, u.student_id
+                SELECT s.id,
+                       s.user_id,
+                       s.title,
+                       s.author,
+                       s.isbn,
+                       s.reason,
+                       UPPER(s.status) AS status,
+                       s.reviewed_by,
+                       s.created_at,
+                       s.updated_at,
+                       CONCAT(u.first_name, ' ', u.last_name) AS requester_name, 
+                       u.email AS requester_email, 
+                       u.student_id,
+                       CONCAT(reviewer.first_name, ' ', reviewer.last_name) AS reviewer_name
                 FROM book_suggestions s
                 JOIN users u ON s.user_id = u.id
+                LEFT JOIN users reviewer ON s.reviewed_by = reviewer.id
                 WHERE s.id = ?
             `, [id]);
 

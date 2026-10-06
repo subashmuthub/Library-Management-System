@@ -66,9 +66,12 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const roleName =
     typeof user?.role === "string" ? user.role : user?.role?.role_name;
-  const isStudent = (roleName || "").toLowerCase() === "student";
-  const canManageCirculation = ["admin", "librarian"].includes(
-    (roleName || "").toLowerCase(),
+  const normalizedRole = (roleName || "").toLowerCase();
+  const isStudent = ["student", "ug_student", "me_student", "research_scholar"].includes(
+    normalizedRole,
+  );
+  const canManageCirculation = ["admin", "librarian", "clerk", "staff"].includes(
+    normalizedRole,
   );
 
   const [period, setPeriod] = useState(30);

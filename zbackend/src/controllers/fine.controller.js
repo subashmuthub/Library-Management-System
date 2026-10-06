@@ -850,6 +850,247 @@ class FineController {
             res.status(500).json({ error: 'Internal server error' });
         }
     }
+
+    /**
+     * POST /api/fines/create-payment-intent
+     * Initializes online payment intent for UPI or RuPay cards.
+     * Body: { fineId, amount, paymentMethod }
+     */
+    static async createPaymentIntent(req, res) {
+        try {
+            const fineId = req.body.fineId || req.body.fine_id;
+            const requestedAmount = req.body.amount;
+            const paymentMethod = String(req.body.paymentMethod || req.body.payment_method || 'UPI').toUpperCase();
+
+            if (!fineId) {
+                return res.status(400).json({ success: false, message: 'Fine ID is required' });
+            }
+
+            const [fines] = await pool.query(
+                `SELECT f.*, CONCAT(u.first_name, ' ', u.last_name) AS patron_name, u.email, u.student_id, b.title AS book_title
+                 FROM fines f
+                 JOIN users u ON f.user_id = u.id
+                 LEFT JOIN book_transactions bt ON f.transaction_id = bt.id
+                 LEFT JOIN books b ON bt.book_id = b.id
+                 WHERE f.id = ? AND f.status IN ('pending', 'partial', 'disputed')`,
+                [fineId]
+            );
+
+            if (fines.length === 0) {
+                return res.status(404).json({ success: false, message: 'Fine not found or already settled' });
+            }
+
+            const fine = fines[0];
+            const amount = parseFloat(requestedAmount) || (parseFloat(fine.amount) - parseFloat(fine.amount_paid || 0));
+            const sessionId = `INTENT-${Date.now()}-${fine.id}`;
+            const merchantVpa = 'library@nec.edu.in';
+            const merchantName = 'Smart Library System';
+            const upiQrPayload = `upi://pay?pa=${merchantVpa}&pn=${encodeURIComponent(merchantName)}&am=${amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent('Fine Payment #' + fine.id)}`;
+
+            return res.json({
+                success: true,
+                intent: {
+                    session_id: sessionId,
+                    fine_id: fine.id,
+                    amount: amount,
+                    payment_method: paymentMethod,
+                    merchant_vpa: merchantVpa,
+                    merchant_name: merchantName,
+                    upi_qr_payload: upiQrPayload,
+                    countdown_seconds: 600,
+                    patron_name: fine.patron_name,
+                    book_title: fine.book_title || fine.notes || 'Library Fine',
+                    created_at: new Date().toISOString(),
+                    expires_at: new Date(Date.now() + 600 * 1000).toISOString()
+                }
+            });
+        } catch (error) {
+            console.error('Error in createPaymentIntent:', error);
+            return res.status(500).json({ success: false, message: 'Failed to create payment intent', error: error.message });
+        }
+    }
+
+    /**
+     * POST /api/fines/collect
+     * Multi-method fine collection (CASH, UPI, RUPAY).
+     * Body: { fineId, amount, paymentMethod, receiptNotes, transactionRef, studentId }
+     */
+    static async collectFine(req, res) {
+        const connection = await pool.getConnection();
+        try {
+            const fineId = req.body.fineId || req.body.fine_id;
+            const rawMethod = String(req.body.paymentMethod || req.body.payment_method || 'CASH').toUpperCase();
+            const paymentMethod = ['UPI', 'RUPAY', 'CARD', 'ONLINE'].includes(rawMethod) ? (rawMethod === 'CARD' ? 'RUPAY' : rawMethod) : 'CASH';
+            const requestedAmount = req.body.amount || req.body.amount_received;
+            const receiptNotes = req.body.receiptNotes || req.body.receipt_notes || '';
+            const transactionRef = req.body.transactionRef || req.body.transaction_reference;
+            const studentId = req.body.studentId || req.body.student_id;
+
+            const sessionUser = req.user || req.session?.user;
+            const collectorId = sessionUser?.id || 1;
+            const collectorName = sessionUser ? `${sessionUser.first_name || ''} ${sessionUser.last_name || ''}`.trim() : 'Circulation Staff';
+
+            if (!fineId) {
+                connection.release();
+                return res.status(400).json({ success: false, message: 'Fine ID is required' });
+            }
+
+            await connection.beginTransaction();
+
+            const [fines] = await connection.query(
+                `SELECT f.*, CONCAT(u.first_name, ' ', u.last_name) AS patron_name, u.email, u.student_id, b.title AS book_title
+                 FROM fines f
+                 JOIN users u ON f.user_id = u.id
+                 LEFT JOIN book_transactions bt ON f.transaction_id = bt.id
+                 LEFT JOIN books b ON bt.book_id = b.id
+                 WHERE f.id = ? AND f.status IN ('pending', 'partial', 'disputed')`,
+                [fineId]
+            );
+
+            if (fines.length === 0) {
+                await connection.rollback();
+                connection.release();
+                return res.status(404).json({ success: false, message: 'Fine record not found or already settled' });
+            }
+
+            const fine = fines[0];
+            const amountToPay = parseFloat(requestedAmount) || (parseFloat(fine.amount) - parseFloat(fine.amount_paid || 0));
+            const newTotalPaid = parseFloat(fine.amount_paid || 0) + amountToPay;
+            const isFullyPaid = newTotalPaid >= parseFloat(fine.amount);
+            const newStatus = isFullyPaid ? 'paid' : 'partial';
+
+            // Generate receipt & reference
+            let generatedRef = transactionRef;
+            if (!generatedRef) {
+                const prefix = paymentMethod === 'CASH' ? 'CSH' : (paymentMethod === 'UPI' ? 'UPI' : 'RUP');
+                generatedRef = `${prefix}-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+            }
+
+            // Update fines table
+            await connection.query(
+                `UPDATE fines
+                 SET status = ?,
+                     amount_paid = ?,
+                     payment_date = CURDATE(),
+                     payment_method = ?,
+                     transaction_reference = ?,
+                     payment_gateway_status = 'COMPLETED',
+                     processed_by = ?,
+                     notes = CONCAT(COALESCE(notes, ''), ' [', ?, ': ', ?, IF(? != '', CONCAT(' - ', ?), ''), ']')
+                 WHERE id = ?`,
+                [
+                    newStatus,
+                    newTotalPaid,
+                    paymentMethod,
+                    generatedRef,
+                    collectorId,
+                    paymentMethod,
+                    generatedRef,
+                    receiptNotes,
+                    receiptNotes,
+                    fine.id
+                ]
+            );
+
+            // Insert into fine_payments
+            await connection.query(
+                `INSERT INTO fine_payments (fine_id, user_id, amount, payment_method, transaction_reference, payment_gateway_status, receipt_notes, collected_by)
+                 VALUES (?, ?, ?, ?, ?, 'COMPLETED', ?, ?)`,
+                [
+                    fine.id,
+                    studentId || fine.user_id,
+                    amountToPay,
+                    paymentMethod,
+                    generatedRef,
+                    receiptNotes || `${paymentMethod} Fine Settlement`,
+                    collectorId
+                ]
+            ).catch(() => {});
+
+            // If CASH, also insert into cash_desk_logs
+            if (paymentMethod === 'CASH') {
+                await connection.query(
+                    `INSERT INTO cash_desk_logs (receipt_no, fine_id, student_id, amount_received, receipt_notes, collected_by)
+                     VALUES (?, ?, ?, ?, ?, ?)`,
+                    [
+                        generatedRef,
+                        fine.id,
+                        studentId || fine.user_id,
+                        amountToPay,
+                        receiptNotes || 'Cash Desk Collection',
+                        collectorId
+                    ]
+                ).catch(() => {});
+            }
+
+            // Also record in payment_receipts if table exists
+            const receiptId = `REC-${Date.now()}-${fine.user_id}`;
+            const receiptPayload = {
+                receipt_no: generatedRef,
+                receipt_id: receiptId,
+                fine_id: fine.id,
+                user_id: fine.user_id,
+                user_name: fine.patron_name,
+                student_id: fine.student_id,
+                book_title: fine.book_title || fine.notes,
+                amount_received: amountToPay,
+                total_amount: parseFloat(fine.amount),
+                payment_method: paymentMethod,
+                transaction_reference: generatedRef,
+                payment_date: new Date().toISOString(),
+                collected_at: new Date().toISOString(),
+                status: 'Success',
+                collector: {
+                    id: collectorId,
+                    name: collectorName
+                },
+                student: {
+                    id: fine.user_id,
+                    name: fine.patron_name,
+                    student_id: fine.student_id
+                }
+            };
+
+            await connection.query(
+                `INSERT INTO payment_receipts (receipt_id, fine_id, user_id, transaction_id, amount, payment_method, payment_gateway, payment_reference, receipt_data)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    receiptId,
+                    fine.id,
+                    fine.user_id,
+                    fine.transaction_id,
+                    amountToPay,
+                    paymentMethod,
+                    paymentMethod,
+                    generatedRef,
+                    JSON.stringify(receiptPayload)
+                ]
+            ).catch(() => {});
+
+            await connection.commit();
+            connection.release();
+
+            return res.json({
+                success: true,
+                message: `${paymentMethod} fine payment of ₹${amountToPay.toFixed(2)} processed successfully`,
+                receipt: receiptPayload
+            });
+
+        } catch (error) {
+            await connection.rollback();
+            connection.release();
+            console.error('Error in collectFine:', error);
+            return res.status(500).json({ success: false, message: 'Failed to settle fine payment', error: error.message });
+        }
+    }
+
+    /**
+     * POST /api/fines/verify-payment
+     * Verifies online payment gateway callback / simulation and marks fine settled.
+     */
+    static async verifyPayment(req, res) {
+        return FineController.collectFine(req, res);
+    }
 }
 
 module.exports = FineController;

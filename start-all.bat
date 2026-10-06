@@ -6,7 +6,7 @@ echo ===================================================
 echo Starting Backend on http://localhost:3001 ...
 start "Smart Library Backend" cmd /k "cd /d "%~dp0zbackend" && node database/ensure-ready.js && node src/app.js"
 
-timeout /t 3 /nobreak >nul
+ping 127.0.0.1 -n 4 >nul
 
 echo Starting Frontend on http://localhost:5176 ...
 start "Smart Library Frontend" cmd /k "cd /d "%~dp0frontend" && npm.cmd run dev"

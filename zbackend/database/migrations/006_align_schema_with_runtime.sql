@@ -7,33 +7,48 @@
 USE smart_library;
 
 ALTER TABLE books
-ADD COLUMN status ENUM('active', 'inactive') NOT NULL DEFAULT 'active' AFTER is_available;
+ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'AVAILABLE' AFTER is_available;
 
 ALTER TABLE readers
-ADD COLUMN last_scan_count INT NOT NULL DEFAULT 0 AFTER last_seen,
-ADD COLUMN last_scan_timestamp TIMESTAMP NULL AFTER last_scan_count;
+ADD COLUMN IF NOT EXISTS last_scan_count INT NOT NULL DEFAULT 0 AFTER last_seen,
+ADD COLUMN IF NOT EXISTS last_scan_timestamp TIMESTAMP NULL AFTER last_scan_count;
 
 ALTER TABLE book_transactions
-ADD COLUMN checked_out_by INT NULL AFTER book_id,
-ADD COLUMN returned_by INT NULL AFTER issued_by,
-ADD COLUMN renewal_count INT NOT NULL DEFAULT 0 AFTER renewed_count;
+ADD COLUMN IF NOT EXISTS checked_out_by INT NULL AFTER book_id,
+ADD COLUMN IF NOT EXISTS returned_by INT NULL AFTER issued_by,
+ADD COLUMN IF NOT EXISTS renewal_count INT NOT NULL DEFAULT 0 AFTER renewed_count;
 
-ALTER TABLE book_transactions
-ADD CONSTRAINT fk_book_transactions_checked_out_by
-FOREIGN KEY (checked_out_by) REFERENCES users(id) ON DELETE SET NULL;
+SET @sql_fk1 := (SELECT IF(
+    NOT EXISTS(SELECT 1 FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'fk_book_transactions_checked_out_by'),
+    'ALTER TABLE book_transactions ADD CONSTRAINT fk_book_transactions_checked_out_by FOREIGN KEY (checked_out_by) REFERENCES users(id) ON DELETE SET NULL',
+    'SELECT 1'
+));
+PREPARE stmt_fk1 FROM @sql_fk1;
+EXECUTE stmt_fk1;
+DEALLOCATE PREPARE stmt_fk1;
 
-ALTER TABLE book_transactions
-ADD CONSTRAINT fk_book_transactions_returned_by
-FOREIGN KEY (returned_by) REFERENCES users(id) ON DELETE SET NULL;
+SET @sql_fk2 := (SELECT IF(
+    NOT EXISTS(SELECT 1 FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'fk_book_transactions_returned_by'),
+    'ALTER TABLE book_transactions ADD CONSTRAINT fk_book_transactions_returned_by FOREIGN KEY (returned_by) REFERENCES users(id) ON DELETE SET NULL',
+    'SELECT 1'
+));
+PREPARE stmt_fk2 FROM @sql_fk2;
+EXECUTE stmt_fk2;
+DEALLOCATE PREPARE stmt_fk2;
 
 ALTER TABLE reservations
-ADD COLUMN scheduled_date DATETIME NULL AFTER reservation_date,
-ADD COLUMN pickup_date DATETIME NULL AFTER fulfilled_date,
-ADD COLUMN fulfilled_by INT NULL AFTER cancelled_by;
+ADD COLUMN IF NOT EXISTS scheduled_date DATETIME NULL AFTER reservation_date,
+ADD COLUMN IF NOT EXISTS pickup_date DATETIME NULL AFTER fulfilled_date,
+ADD COLUMN IF NOT EXISTS fulfilled_by INT NULL AFTER cancelled_by;
 
-ALTER TABLE reservations
-ADD CONSTRAINT fk_reservations_fulfilled_by
-FOREIGN KEY (fulfilled_by) REFERENCES users(id) ON DELETE SET NULL;
+SET @sql_fk3 := (SELECT IF(
+    NOT EXISTS(SELECT 1 FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'fk_reservations_fulfilled_by'),
+    'ALTER TABLE reservations ADD CONSTRAINT fk_reservations_fulfilled_by FOREIGN KEY (fulfilled_by) REFERENCES users(id) ON DELETE SET NULL',
+    'SELECT 1'
+));
+PREPARE stmt_fk3 FROM @sql_fk3;
+EXECUTE stmt_fk3;
+DEALLOCATE PREPARE stmt_fk3;
 
 CREATE TABLE IF NOT EXISTS payment_receipts (
     id INT AUTO_INCREMENT PRIMARY KEY,

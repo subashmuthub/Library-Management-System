@@ -12,14 +12,19 @@ const getParsedInt = (value, fallback) => {
 };
 
 const getStatusCondition = (status) => {
-  const conditions = {
-    active: "bt.return_date IS NULL",
-    inuse: "bt.return_date IS NULL",
-    in_use: "bt.return_date IS NULL",
-    returned: "bt.return_date IS NOT NULL",
-    overdue: "bt.return_date IS NULL AND bt.due_date < CURDATE()",
-  };
-  return conditions[status] || null;
+  if (!status) return null;
+  const s = String(status).trim().toLowerCase();
+  if (s === "all" || s === "") return null;
+  if (s === "issued" || s === "active" || s === "inuse" || s === "in_use") {
+    return "bt.return_date IS NULL";
+  }
+  if (s === "returned") {
+    return "bt.return_date IS NOT NULL";
+  }
+  if (s === "overdue") {
+    return "bt.return_date IS NULL AND bt.due_date < CURDATE()";
+  }
+  return null;
 };
 
 const appendTransactionFilters = (baseQuery, filterInput, params) => {
@@ -268,17 +273,19 @@ class TransactionController {
                 user_id, 
                 book_id, 
                 checked_out_by,
+                issued_by,
                 checkout_date,
                 due_date,
-                status
-            ) VALUES (?, ?, ?, ?, ?, 'active')
+                status,
+                transaction_type
+            ) VALUES (?, ?, ?, ?, ?, ?, 'active', 'checkout')
           `,
-          [userId, bookId, librarianId, checkoutDate, dueDate],
+          [userId, bookId, librarianId, librarianId, checkoutDate, dueDate],
         );
 
         // Update book availability status
         await connection.execute(
-          "UPDATE books SET is_available = FALSE WHERE id = ?",
+          "UPDATE books SET is_available = FALSE, status = 'CHECKED_OUT', available_copies = GREATEST(0, available_copies - 1) WHERE id = ?",
           [bookId],
         );
 
@@ -662,7 +669,7 @@ class TransactionController {
 
         // Update book availability status
         await connection.execute(
-          "UPDATE books SET is_available = TRUE WHERE id = ?",
+          "UPDATE books SET is_available = TRUE, status = 'AVAILABLE', available_copies = LEAST(total_copies, available_copies + 1) WHERE id = ?",
           [transaction.book_id],
         );
 
@@ -806,7 +813,7 @@ class TransactionController {
       );
 
       // Mark book available
-      await connection.execute(`UPDATE books SET is_available = TRUE WHERE id = ?`, [tx.book_id]);
+      await connection.execute(`UPDATE books SET is_available = TRUE, status = 'AVAILABLE', available_copies = LEAST(total_copies, available_copies + 1) WHERE id = ?`, [tx.book_id]);
 
       // Create fine record if overdue and not exempt
       if (daysOverdue > 0 && !isFineExempt) {
@@ -1028,7 +1035,7 @@ class TransactionController {
       const role = String(
         sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || "",
       ).toLowerCase();
-      const isAdminOrLibrarian = ["admin", "librarian"].includes(role);
+      const isStaffOrAdmin = ["admin", "librarian", "clerk", "staff"].includes(role);
 
       const connection = await pool.getConnection();
 
@@ -1036,11 +1043,15 @@ class TransactionController {
                 SELECT 
                     bt.*,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
+                    CONCAT(u.first_name, ' ', u.last_name) as name,
                     u.email,
                     u.student_id,
+                    u.student_id as roll_no,
+                    u.department,
                     b.title,
                     b.author,
                     b.isbn,
+                    COALESCE(b.accession_no, CONCAT('ACC-', LPAD(b.id, 5, '0'))) as accession_no,
                     DATEDIFF(CURDATE(), bt.due_date) as days_overdue,
                     GREATEST(DATEDIFF(CURDATE(), bt.due_date) * 1.00, 0) as calculated_fine,
                     f.amount as existing_fine,
@@ -1052,7 +1063,7 @@ class TransactionController {
                 WHERE bt.return_date IS NULL AND bt.due_date < CURDATE()
       `;
       let params = [];
-      if (!isAdminOrLibrarian) {
+      if (!isStaffOrAdmin) {
         if (!sessionUser?.id) {
           connection.release();
           return res.status(401).json({ error: "Authentication required" });
@@ -1324,10 +1335,16 @@ class TransactionController {
       const role = String(
         sessionUser?.role || sessionUser?.role_name || sessionUser?.role?.role_name || "",
       ).toLowerCase();
-      const isAdminOrLibrarian = ["admin", "librarian"].includes(role);
+      const isCirculationStaff = ["admin", "librarian", "clerk", "staff"].includes(role);
 
-      let effectiveUserId = user_id;
-      if (!isAdminOrLibrarian) {
+      let effectiveUserId = null;
+      if (isCirculationStaff) {
+        // Circulation staff can view the entire library transaction history or filter by user_id if passed
+        if (user_id) {
+          effectiveUserId = user_id;
+        }
+      } else {
+        // Students are strictly restricted to their own transactions
         if (!sessionUser?.id) {
           return res.status(401).json({ error: "Authentication required" });
         }
@@ -1339,26 +1356,43 @@ class TransactionController {
       let query = `
                 SELECT 
                     bt.*,
+                    COALESCE(bt.checkout_date, bt.created_at) as issued_date,
+                    bt.checkout_date,
+                    bt.due_date,
+                    bt.return_date,
                     b.title,
                     b.author,
                     b.isbn,
+                    COALESCE(b.accession_no, CONCAT('ACC-', LPAD(b.id, 5, '0'))) as accession_no,
+                    COALESCE(b.barcode, CONCAT('BC-', LPAD(b.id, 6, '0'))) as barcode,
+                    b.cover_image_url,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
+                    CONCAT(u.first_name, ' ', u.last_name) as name,
                     u.email,
                     u.student_id,
+                    u.student_id as roll_no,
+                    u.department,
+                    u.degree_type,
                     CONCAT(checkout_lib.first_name, ' ', checkout_lib.last_name) as issued_by_name,
                     CONCAT(return_lib.first_name, ' ', return_lib.last_name) as returned_by_name,
                     CASE 
-                        WHEN bt.return_date IS NULL AND bt.due_date < CURDATE() THEN 'overdue'
-                        WHEN bt.return_date IS NULL THEN 'active'
-                        ELSE 'returned'
+                        WHEN bt.return_date IS NOT NULL THEN 'RETURNED'
+                        WHEN bt.due_date < CURDATE() THEN 'OVERDUE'
+                        ELSE 'ISSUED'
                     END as transaction_status,
+                    CASE 
+                        WHEN bt.return_date IS NOT NULL THEN 'returned'
+                        WHEN bt.due_date < CURDATE() THEN 'overdue'
+                        ELSE 'issued'
+                    END as status,
+                    DATEDIFF(CURDATE(), bt.due_date) as days_overdue,
                     COALESCE(fine_info.pending_fine, 0) as pending_fine,
                     COALESCE(fine_info.paid_fine, 0) as paid_fine
                 FROM book_transactions bt
                 JOIN books b ON bt.book_id = b.id
                 JOIN users u ON bt.user_id = u.id
-                LEFT JOIN users checkout_lib ON bt.checked_out_by = checkout_lib.id
-                LEFT JOIN users return_lib ON bt.returned_by = return_lib.id
+                LEFT JOIN users checkout_lib ON (bt.checked_out_by = checkout_lib.id OR bt.issued_by = checkout_lib.id)
+                LEFT JOIN users return_lib ON (bt.returned_by = return_lib.id OR bt.returned_to = return_lib.id)
                 LEFT JOIN (
                     SELECT 
                         transaction_id,
@@ -1420,13 +1454,17 @@ class TransactionController {
       const formattedTransactions = transactions.map((t) => ({
         ...t,
         status:
-          t.transaction_status ||
           t.status ||
-          (t.return_date ? "returned" : "active"),
+          (t.return_date ? "returned" : (new Date(t.due_date) < new Date() ? "overdue" : "issued")),
+        transaction_status:
+          t.transaction_status ||
+          (t.return_date ? "RETURNED" : (new Date(t.due_date) < new Date() ? "OVERDUE" : "ISSUED")),
       }));
 
       res.json({
+        success: true,
         transactions: formattedTransactions,
+        data: formattedTransactions,
         pagination: {
           page: parsedPage,
           limit: parsedLimit,

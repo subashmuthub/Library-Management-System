@@ -312,6 +312,21 @@ export const fineService = {
     const response = await api.get(`/fines/user/${userId}/summary`);
     return response.data;
   },
+
+  collectFine: async (payload) => {
+    const response = await api.post("/fines/collect", payload);
+    return response.data;
+  },
+
+  createPaymentIntent: async (payload) => {
+    const response = await api.post("/fines/create-payment-intent", payload);
+    return response.data;
+  },
+
+  verifyPayment: async (payload) => {
+    const response = await api.post("/fines/verify-payment", payload);
+    return response.data;
+  },
 };
 
 // Reservation endpoints
@@ -577,6 +592,16 @@ export const suggestionService = {
 
 // Circulation Desk Services (Counter issue, student lookup, reservation fulfillment, hold shelf, cash desk, guest passes, shift handover)
 export const circulationService = {
+  getTransactions: async (params) => {
+    const response = await api.get('/circulation/transactions', { params });
+    return response.data;
+  },
+
+  issueBook: async (data) => {
+    const response = await api.post('/circulation/issue', data);
+    return response.data;
+  },
+
   studentLookup: async (query) => {
     const response = await api.get(`/circulation/student-lookup/${encodeURIComponent(query)}`);
     return response.data;

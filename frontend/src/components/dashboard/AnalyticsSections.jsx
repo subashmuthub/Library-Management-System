@@ -316,14 +316,14 @@ const AnalyticsSections = ({
           </div>
           {topShelfUtilization.length ? (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {topShelfUtilization.map((shelf) => (
+              {topShelfUtilization.map((shelf, index) => (
                 <div
-                  key={`${shelf.shelf_number}-${shelf.location}`}
+                  key={shelf.id || `${shelf.shelf_number || shelf.shelf_id || 'shelf'}-${shelf.location || ''}-${index}`}
                   className="rounded-xl border border-slate-200 bg-slate-50 p-3"
                 >
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-slate-900 truncate pr-2">
-                      Shelf {shelf.shelf_number}
+                      Shelf {shelf.shelf_number || shelf.shelf_id || shelf.id || index + 1}
                     </p>
                     <span className="text-xs rounded-full bg-sky-100 text-sky-700 px-2 py-1">
                       {shelf.utilization_percent.toFixed(1)}%

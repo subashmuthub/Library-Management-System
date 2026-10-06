@@ -34,9 +34,13 @@ import {
   Unlock,
   Send,
   Archive,
-  Compass
+  Compass,
+  ChevronDown,
+  ChevronUp,
+  IndianRupee
 } from 'lucide-react';
 import { format, addDays } from 'date-fns';
+import FinePaymentModal from '../components/FinePaymentModal';
 
 const ClerkIssueDesk = () => {
   const [searchParams] = useSearchParams();
@@ -112,6 +116,8 @@ const ClerkIssueDesk = () => {
   const [cashDeskSubTab, setCashDeskSubTab] = useState('collect'); // 'collect' | 'disputes'
   const [fineLookupQuery, setFineLookupQuery] = useState('');
   const [fineLookupResult, setFineLookupResult] = useState(null);
+  const [selectedFineForPayment, setSelectedFineForPayment] = useState(null);
+  const [borrowedBooksExpanded, setBorrowedBooksExpanded] = useState(true);
   const [selectedFineForCash, setSelectedFineForCash] = useState(null);
   const [cashAmountInput, setCashAmountInput] = useState('');
   const [cashNotesInput, setCashNotesInput] = useState('');
@@ -302,6 +308,7 @@ const ClerkIssueDesk = () => {
     try {
       const response = await circulationService.directIssue({
         user_id: studentData.student.id,
+        book_id: selectedBook?.id,
         identifier: targetIdentifier,
         loan_days: loanDays
       });
@@ -435,9 +442,7 @@ const ClerkIssueDesk = () => {
   };
 
   const handleOpenCashModal = (fine) => {
-    setSelectedFineForCash(fine);
-    setCashAmountInput(fine.amount);
-    setCashNotesInput(`Settlement for fine #${fine.id} (${fine.fine_type || 'overdue'})`);
+    setSelectedFineForPayment(fine);
   };
 
   const handleConfirmCashCollection = async () => {
@@ -877,7 +882,9 @@ const ClerkIssueDesk = () => {
                   <div className="grid grid-cols-3 gap-2 text-center text-xs">
                     <div className="p-2 bg-indigo-50/70 border border-indigo-100 rounded-lg">
                       <span className="text-slate-500 block text-[10px]">Active Loans</span>
-                      <span className="font-bold text-indigo-700 text-sm">{studentData.stats?.active_loans_count || 0} / {studentData.stats?.max_limit || 6}</span>
+                      <span className="font-bold text-indigo-700 text-sm">
+                        {studentData.stats?.active_loans_count ?? studentData.active_loans_count ?? 0} / {studentData.borrowing_limit ?? studentData.stats?.borrowing_limit ?? studentData.stats?.max_limit ?? 6}
+                      </span>
                     </div>
                     <div className={`p-2 rounded-lg border ${studentData.stats?.overdue_count > 0 ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
                       <span className="text-slate-500 block text-[10px]">Overdue</span>
@@ -888,6 +895,73 @@ const ClerkIssueDesk = () => {
                       <span className={`font-bold text-sm ${studentData.stats?.unpaid_fines > 0 ? 'text-amber-700' : 'text-slate-700'}`}>₹{studentData.stats?.unpaid_fines || 0}</span>
                     </div>
                   </div>
+
+                  {/* Borrowing Limit & Quota Badge */}
+                  <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                    <span className="text-slate-500 font-medium">Borrowing Quota</span>
+                    {(studentData.available_quota ?? studentData.stats?.available_quota ?? studentData.stats?.remaining_quota ?? 0) > 0 ? (
+                      <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-lg font-bold text-[11px] border border-emerald-200 flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                        {(studentData.available_quota ?? studentData.stats?.available_quota ?? studentData.stats?.remaining_quota ?? 0)} more can be borrowed
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-1 bg-rose-100 text-rose-800 rounded-lg font-bold text-[11px] border border-rose-200 flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3 text-rose-600" />
+                        Quota reached (0 can be borrowed)
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Currently Borrowed Books Section/Accordion */}
+                  {((studentData.active_borrowed_books?.length > 0) || (studentData.active_loans?.length > 0)) && (
+                    <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
+                      <button
+                        type="button"
+                        onClick={() => setBorrowedBooksExpanded(!borrowedBooksExpanded)}
+                        className="w-full px-3.5 py-2.5 bg-slate-50 hover:bg-slate-100 transition flex items-center justify-between text-xs font-bold text-slate-800 border-b border-slate-100"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <BookOpen className="h-4 w-4 text-indigo-600" />
+                          Currently Borrowed Books ({studentData.active_borrowed_books?.length || studentData.active_loans?.length || 0})
+                        </span>
+                        {borrowedBooksExpanded ? <ChevronUp className="h-4 w-4 text-slate-500" /> : <ChevronDown className="h-4 w-4 text-slate-500" />}
+                      </button>
+
+                      {borrowedBooksExpanded && (
+                        <div className="divide-y divide-slate-100 p-2 space-y-2 max-h-56 overflow-y-auto">
+                          {(studentData.active_borrowed_books || studentData.active_loans || []).map((b) => {
+                            const isOverdue = b.is_overdue || (b.days_overdue > 0);
+                            const overdueDays = b.overdue_days || b.days_overdue || 0;
+                            const daysRemaining = b.days_remaining || 0;
+
+                            return (
+                              <div key={b.transaction_id || b.id} className="p-2.5 rounded-xl bg-slate-50/50 hover:bg-slate-50 text-xs space-y-1">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="font-bold text-slate-900 truncate">{b.title}</p>
+                                    <p className="text-[11px] text-slate-500 truncate">{b.author}</p>
+                                  </div>
+                                  {isOverdue ? (
+                                    <span className="px-2 py-0.5 bg-rose-100 text-rose-800 border border-rose-200 rounded-md font-bold text-[10px] shrink-0 animate-pulse">
+                                      Overdue by {overdueDays} days
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-md font-bold text-[10px] shrink-0">
+                                      {b.days_status || (daysRemaining === 0 ? 'Due today' : `Due in ${daysRemaining} days`)}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                                  <span>Acc: {b.accession_no || b.barcode || 'N/A'}</span>
+                                  <span>Due: {b.due_date ? format(new Date(b.due_date), 'MMM dd, yyyy') : 'N/A'}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Desk Hold Action Button */}
                   {!studentData.student.has_desk_hold && (
@@ -922,22 +996,23 @@ const ClerkIssueDesk = () => {
                     Cash Desk
                   </button>
                 </div>
-                <div className="space-y-2 max-h-40 overflow-y-auto">
+                <div className="space-y-2 max-h-48 overflow-y-auto">
                   {studentData.pending_fines.map((f) => (
-                    <div key={f.id} className="p-2.5 bg-white border border-amber-100 rounded-xl text-xs flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold text-slate-800">₹{f.amount} - {f.fine_type}</p>
-                        <p className="text-[11px] text-slate-500">{f.book_title || f.reason}</p>
+                    <div key={f.id} className="p-2.5 bg-white border border-amber-100 rounded-xl text-xs flex items-center justify-between gap-2 shadow-xs">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-slate-800">
+                          ₹{f.amount} • <span className="text-amber-700 font-semibold">Overdue by {f.days_overdue || 1} days</span>
+                        </p>
+                        <p className="text-[11px] text-slate-500 truncate">{f.book_title || f.reason}</p>
                       </div>
                       <button
                         onClick={() => {
-                          setFineLookupResult(studentData);
-                          handleOpenCashModal(f);
-                          setSuiteTab('cash');
+                          setSelectedFineForPayment(f);
                         }}
-                        className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-bold"
+                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shrink-0 transition shadow-xs flex items-center gap-1"
                       >
-                        Collect
+                        <IndianRupee className="h-3 w-3" />
+                        <span>Settle</span>
                       </button>
                     </div>
                   ))}
@@ -1962,69 +2037,24 @@ const ClerkIssueDesk = () => {
       )}
 
       {/* ===================================================================== */}
-      {/* MODAL 2: CASH COLLECTION MODAL & PRINTABLE RECEIPT */}
+      {/* MODAL 2: UNIFIED MULTI-METHOD FINE PAYMENT (Cash, UPI, RuPay) */}
       {/* ===================================================================== */}
-      {selectedFineForCash && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <DollarSign className="h-4 w-4 text-emerald-600" />
-                Collect Cash Fine Payment
-              </h3>
-              <button onClick={() => setSelectedFineForCash(null)} className="text-slate-400 hover:text-slate-600">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl flex items-center justify-between">
-                <div>
-                  <span className="text-slate-500 block">Fine Assessment</span>
-                  <span className="font-bold text-slate-900">{selectedFineForCash.book_title || selectedFineForCash.reason}</span>
-                </div>
-                <span className="text-base font-bold text-emerald-700">₹{selectedFineForCash.amount}</span>
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-700">Cash Amount Received (₹)</label>
-                <input
-                  type="number"
-                  value={cashAmountInput}
-                  onChange={(e) => setCashAmountInput(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-sm"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-700">Receipt Notes</label>
-                <input
-                  type="text"
-                  value={cashNotesInput}
-                  onChange={(e) => setCashNotesInput(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
-              <button
-                onClick={handleConfirmCashCollection}
-                disabled={collectingCash}
-                className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
-              >
-                <CheckCircle2 className="h-4 w-4" />
-                <span>{collectingCash ? 'Recording...' : 'Confirm Cash Received & Print Slip'}</span>
-              </button>
-              <button
-                onClick={() => setSelectedFineForCash(null)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+      {selectedFineForPayment && (
+        <FinePaymentModal
+          fine={selectedFineForPayment}
+          student={studentData?.student || fineLookupResult?.student}
+          userRole="clerk"
+          onClose={() => setSelectedFineForPayment(null)}
+          onPaymentSuccess={() => {
+            fetchShiftSummary();
+            if (studentData?.student?.student_id || studentData?.student?.id) {
+              handleLookup(studentData.student.student_id || studentData.student.id);
+            }
+            if (fineLookupResult?.student?.id) {
+              handleFindFinesForStudent();
+            }
+          }}
+        />
       )}
 
       {/* Cash Receipt Printable Modal */}

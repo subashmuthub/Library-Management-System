@@ -10,6 +10,7 @@ import Books from './pages/Books';
 import BookDetails from './pages/BookDetails';
 import BookSearch from './pages/BookSearch';
 import Transactions from './pages/Transactions';
+import CirculationReturns from './pages/CirculationReturns';
 import Fines from './pages/Fines';
 import Reservations from './pages/Reservations';
 import UserManagement from './pages/UserManagement';
@@ -56,6 +57,7 @@ function App() {
               <Route path="books/:id" element={<BookDetails />} />
               <Route path="book-search" element={<BookSearch />} />
               <Route path="transactions" element={<Transactions />} />
+              <Route path="circulation" element={<CirculationReturns />} />
               <Route path="issue-desk" element={<PrivateRoute roles={["admin", "librarian", "clerk"]}><ClerkIssueDesk /></PrivateRoute>} />
               <Route path="fines" element={<Fines />} />
               <Route path="reservations" element={<Reservations />} />
