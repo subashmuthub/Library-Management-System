@@ -767,6 +767,48 @@ async function ensureDefaultRoles(connection) {
   `);
 }
 
+
+async function ensureLibrarySettingsDefaults(connection) {
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS library_settings (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      setting_key VARCHAR(100) UNIQUE NOT NULL,
+      setting_value TEXT NOT NULL,
+      description TEXT NULL,
+      category ENUM('general', 'fines', 'circulation', 'notifications') DEFAULT 'general',
+      data_type ENUM('string', 'number', 'boolean', 'json') DEFAULT 'string',
+      updated_by INT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_category (category)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  const defaultSettings = [
+    { key: 'max_borrow_limit_student', val: '5', cat: 'circulation', type: 'number', desc: 'Maximum count of books a student can borrow at a time (Staff has unlimited borrowing)' },
+    { key: 'default_loan_period', val: '14', cat: 'circulation', type: 'number', desc: 'Default return duration in days (Return book limit)' },
+    { key: 'renew_days_ug', val: '14', cat: 'circulation', type: 'number', desc: 'Renewal days count for Undergraduate (UG) students' },
+    { key: 'renew_days_pg', val: '21', cat: 'circulation', type: 'number', desc: 'Renewal days count for Postgraduate (PG) students' },
+    { key: 'max_renewal_count', val: '2', cat: 'circulation', type: 'number', desc: 'Maximum number of times a book can be renewed' },
+    { key: 'daily_fine_rate', val: '2.00', cat: 'fines', type: 'number', desc: 'Overdue fine amount per day for students (Applied uniformly, not based on department)' },
+    { key: 'max_fine_amount', val: '100.00', cat: 'fines', type: 'number', desc: 'Maximum fine cap per overdue book for students' },
+    { key: 'fine_grace_period_days', val: '0', cat: 'fines', type: 'number', desc: 'Grace period in days before overdue fines begin accumulating' },
+    { key: 'library_name', val: 'Central Library, National Engineering College', cat: 'general', type: 'string', desc: 'Official Library Name' },
+    { key: 'allow_student_self_renew', val: 'true', cat: 'general', type: 'boolean', desc: 'Allow students to self-renew books online' },
+    { key: 'overdue_reminder_days', val: '2', cat: 'notifications', type: 'number', desc: 'Days before due date to send overdue reminder alert' }
+  ];
+
+  for (const s of defaultSettings) {
+    await connection.query(`
+      INSERT INTO library_settings (setting_key, setting_value, category, data_type, description)
+      VALUES (?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE 
+        category = VALUES(category),
+        data_type = VALUES(data_type),
+        description = VALUES(description)
+    `, [s.key, s.val, s.cat, s.type, s.desc]).catch(() => {});
+  }
+}
+
 async function ensureDefaultUsers(connection) {
   const hash = '$2a$10$FV/63tlTpuYiWI1Wf0PyF.wWiBeC8i2NmGBEyQivREFuJS1zQveRu';
   await connection.query(`
@@ -836,6 +878,7 @@ async function ensureDatabaseReady() {
     await ensureBookSuggestionsSchema(connection, dbName);
     await ensureDefaultRoles(connection);
     await ensureDefaultUsers(connection);
+    await ensureLibrarySettingsDefaults(connection);
 
     const existingRuntimeTables = await getExistingTables(
       connection,

@@ -22,10 +22,33 @@ class OverdueService {
   }
 
   /** Main scan — finds all newly overdue transactions and processes them */
+  /** Helper to load uniform fine configuration from library_settings */
+  static async getFineConfig(connection) {
+    let dailyFineRate = parseFloat(process.env.FINE_RATE_PER_DAY || '2.00');
+    let maxFineCap = 100.0;
+    let gracePeriod = 0;
+    try {
+      const [rows] = await connection.execute(
+        `SELECT setting_key, setting_value FROM library_settings WHERE setting_key IN ('daily_fine_rate', 'max_fine_amount', 'fine_grace_period_days')`
+      );
+      rows.forEach(s => {
+        if (s.setting_key === 'daily_fine_rate') dailyFineRate = parseFloat(s.setting_value) || 2.0;
+        if (s.setting_key === 'max_fine_amount') maxFineCap = parseFloat(s.setting_value) || 100.0;
+        if (s.setting_key === 'fine_grace_period_days') gracePeriod = parseInt(s.setting_value, 10) || 0;
+      });
+    } catch (e) {
+      // Fallback if settings table is not ready
+    }
+    return { dailyFineRate, maxFineCap, gracePeriod };
+  }
+
+  /** Main scan — finds all newly overdue transactions and processes them */
   static async runCheck() {
     const connection = await pool.getConnection();
     try {
-      // 1. Find active transactions that are overdue and don't yet have an overdue_alert for today
+      const { dailyFineRate, maxFineCap, gracePeriod } = await this.getFineConfig(connection);
+
+      // 1. Find active transactions that are overdue
       const [overdueRows] = await connection.execute(`
         SELECT 
           bt.id          AS transaction_id,
@@ -33,11 +56,11 @@ class OverdueService {
           bt.book_id,
           bt.due_date,
           DATEDIFF(CURDATE(), bt.due_date) AS days_overdue,
-          DATEDIFF(CURDATE(), bt.due_date) * ? AS calculated_fine,
           b.title        AS book_title,
           CONCAT(u.first_name, ' ', u.last_name) AS user_name,
           u.email,
-          ur.role_name
+          ur.role_name,
+          u.role
         FROM book_transactions bt
         JOIN books b ON bt.book_id = b.id
         JOIN users u ON bt.user_id = u.id
@@ -45,7 +68,7 @@ class OverdueService {
         WHERE bt.return_date IS NULL
           AND bt.due_date < CURDATE()
           AND bt.status IN ('active', 'overdue')
-      `, [FINE_RATE_PER_DAY]);
+      `);
 
       if (!overdueRows.length) {
         console.log('[OverdueService] No overdue books found at', new Date().toISOString());
@@ -56,8 +79,19 @@ class OverdueService {
 
       for (const row of overdueRows) {
         try {
-          const isStaff = ['teacher', 'faculty', 'staff'].includes(String(row.role_name).toLowerCase());
-          const fineAmount = isStaff ? 0 : row.calculated_fine;
+          const userRole = String(row.role_name || row.role || '').toLowerCase();
+          const isStaff = ['teacher', 'faculty', 'staff', 'librarian', 'admin', 'clerk'].includes(userRole);
+          
+          // Fines are calculated uniformly for students (not by department); Staff are exempt
+          let fineAmount = 0;
+          if (!isStaff) {
+            const daysOverdue = Math.max(0, Number(row.days_overdue) || 0);
+            const chargeableDays = Math.max(0, daysOverdue - gracePeriod);
+            fineAmount = chargeableDays * dailyFineRate;
+            if (maxFineCap > 0) {
+              fineAmount = Math.min(maxFineCap, fineAmount);
+            }
+          }
 
           // 2. Update transaction status to overdue
           await connection.execute(
@@ -72,8 +106,9 @@ class OverdueService {
               VALUES (?, ?, 'overdue', ?, ?, ?, 'pending')
               ON DUPLICATE KEY UPDATE
                 amount       = VALUES(amount),
-                days_overdue = VALUES(days_overdue)
-            `, [row.user_id, row.transaction_id, fineAmount, row.days_overdue, FINE_RATE_PER_DAY]);
+                days_overdue = VALUES(days_overdue),
+                fine_rate    = VALUES(fine_rate)
+            `, [row.user_id, row.transaction_id, fineAmount, row.days_overdue, dailyFineRate]);
           }
 
           // 4. Insert notification (deduplicated by checking today's record)
@@ -128,6 +163,7 @@ class OverdueService {
   static async getSummary() {
     const connection = await pool.getConnection();
     try {
+      const { dailyFineRate } = await this.getFineConfig(connection);
       const [[summary]] = await connection.execute(`
         SELECT
           COUNT(*) AS total_overdue,
@@ -139,7 +175,7 @@ class OverdueService {
         FROM book_transactions bt
         WHERE bt.return_date IS NULL
           AND bt.due_date < CURDATE()
-      `, [FINE_RATE_PER_DAY, FINE_RATE_PER_DAY]);
+      `, [dailyFineRate, dailyFineRate]);
 
       return summary;
     } finally {
@@ -154,7 +190,8 @@ class OverdueService {
     const safeOffset = parseInt(offset, 10) || 0;
     const connection = await pool.getConnection();
     try {
-      const params = [FINE_RATE_PER_DAY];
+      const { dailyFineRate } = await this.getFineConfig(connection);
+      const params = [dailyFineRate];
       let userFilter = '';
       if (userId) {
         userFilter = ' AND bt.user_id = ?';

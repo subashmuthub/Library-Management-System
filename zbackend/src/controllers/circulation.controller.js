@@ -13,18 +13,43 @@ class CirculationController {
    * Matches department_policies by student's department and degree type (UG vs PG).
    */
   static async resolveDepartmentPolicy(connectionOrPool, student) {
-    const isStaff = ['teacher', 'faculty', 'staff', 'librarian'].includes(
+    const isStaff = ['teacher', 'faculty', 'staff', 'librarian', 'admin', 'clerk'].includes(
       String(student.role_name || student.role || '').toLowerCase()
     );
+
+    // Fetch unified institutional settings
+    let settingsMap = {};
+    try {
+      const [settingsRows] = await connectionOrPool.execute(
+        `SELECT setting_key, setting_value FROM library_settings`
+      );
+      settingsRows.forEach(r => {
+        settingsMap[r.setting_key] = r.setting_value;
+      });
+    } catch (e) {
+      // Fallback if settings query fails
+    }
+
+    const studentBorrowLimit = Number(settingsMap['max_borrow_limit_student']) || 5;
+    const defaultLoanPeriod = Number(settingsMap['default_loan_period']) || 14;
+    const renewDaysUG = Number(settingsMap['renew_days_ug']) || 14;
+    const renewDaysPG = Number(settingsMap['renew_days_pg']) || 21;
+    const maxRenewalCount = Number(settingsMap['max_renewal_count']) || 2;
+    const dailyFineRate = settingsMap['daily_fine_rate'] !== undefined ? Number(settingsMap['daily_fine_rate']) : 2.0;
+
     if (isStaff) {
       return {
         department_code: 'STAFF',
         department_name: 'Faculty & Library Staff',
-        max_borrow_limit: 10,
+        max_borrow_limit: 999999, // Unlimited borrowing for staff
         loan_duration_days: 60,
         allow_direct_thesis_checkout: true,
-        daily_fine_rate: 2.0,
+        daily_fine_rate: 0.0, // Exempt from fines
         is_pg: true,
+        is_staff: true,
+        is_unlimited: true,
+        renew_days: 30,
+        max_renewal_count: 5
       };
     }
 
@@ -57,20 +82,22 @@ class CirculationController {
         policy = {
           department_code: 'DEFAULT',
           department_name: 'Standard Institution Default',
-          max_borrow_limit_ug: 6,
-          loan_duration_days_ug: 14,
-          max_borrow_limit_pg: 10,
-          loan_duration_days_pg: 60,
+          max_borrow_limit_ug: studentBorrowLimit,
+          loan_duration_days_ug: defaultLoanPeriod,
+          max_borrow_limit_pg: studentBorrowLimit,
+          loan_duration_days_pg: isPG ? renewDaysPG : defaultLoanPeriod,
           allow_direct_thesis_checkout: 0,
-          daily_fine_rate: 2.0,
+          daily_fine_rate: dailyFineRate,
         };
       }
     }
 
-    const maxLimit = isPG ? Number(policy.max_borrow_limit_pg) : Number(policy.max_borrow_limit_ug);
-    const loanDays = isPG ? Number(policy.loan_duration_days_pg) : Number(policy.loan_duration_days_ug);
+    // Student max borrowing limit is strictly governed by institutional library_settings
+    const maxLimit = studentBorrowLimit;
+    const loanDays = isPG ? (Number(policy.loan_duration_days_pg) || renewDaysPG) : (Number(policy.loan_duration_days_ug) || defaultLoanPeriod);
     const allowThesis = Boolean(policy.allow_direct_thesis_checkout) || isPG;
-    const fineRate = Number(policy.daily_fine_rate) || 2.0;
+    // Fines are UNIFORM for all students, NOT based on department
+    const fineRate = dailyFineRate;
 
     return {
       department_code: policy.department_code,
@@ -79,7 +106,13 @@ class CirculationController {
       loan_duration_days: loanDays,
       allow_direct_thesis_checkout: allowThesis,
       daily_fine_rate: fineRate,
+      renew_days: isPG ? renewDaysPG : renewDaysUG,
+      renew_days_ug: renewDaysUG,
+      renew_days_pg: renewDaysPG,
+      max_renewal_count: maxRenewalCount,
       is_pg: isPG,
+      is_staff: false,
+      is_unlimited: false,
     };
   }
 
@@ -277,13 +310,24 @@ class CirculationController {
           };
         });
 
+        // Single month borrow count for students
+        const [monthTx] = await connection.execute(
+          `SELECT COUNT(*) as count FROM book_transactions 
+           WHERE user_id = ? 
+             AND MONTH(checkout_date) = MONTH(CURDATE()) 
+             AND YEAR(checkout_date) = YEAR(CURDATE())`,
+          [studentId]
+        );
+        const monthlyLoansCount = monthTx[0].count;
+
         const hasDeskHold = Boolean(student.has_desk_hold);
+        const isStaffPatron = Boolean(policy.is_staff);
         const canBorrow = student.status === 'active' &&
           !hasDeskHold &&
-          activeLoans.length < maxLimit &&
-          overdueCount === 0;
+          (isStaffPatron || (monthlyLoansCount < maxLimit && overdueCount === 0));
 
-        const availableQuota = Math.max(0, maxLimit - activeLoans.length);
+        const availableQuota = isStaffPatron ? 'Unlimited' : Math.max(0, maxLimit - monthlyLoansCount);
+        const displayLimit = isStaffPatron ? 'Unlimited' : maxLimit;
 
         return res.json({
           success: true,
@@ -301,24 +345,27 @@ class CirculationController {
             role: normalizedRoleName,
             status: student.status,
             has_desk_hold: hasDeskHold,
-            desk_hold_reason: student.desk_hold_reason || null
+            desk_hold_reason: student.desk_hold_reason || null,
+            is_staff: isStaffPatron
           },
-          borrowing_limit: maxLimit,
+          borrowing_limit: displayLimit,
           active_loans_count: activeLoans.length,
           available_quota: availableQuota,
           active_borrowed_books: activeBorrowedBooks,
           unpaid_fines: formattedFines,
           stats: {
             active_loans_count: activeLoans.length,
-            borrowing_limit: maxLimit,
-            max_limit: maxLimit,
+            monthly_loans_count: monthlyLoansCount,
+            borrowing_limit: displayLimit,
+            max_limit: displayLimit,
             available_quota: availableQuota,
             remaining_quota: availableQuota,
             overdue_count: overdueCount,
             unpaid_fines: unpaidFines,
             can_borrow: canBorrow,
             default_loan_days: policy.loan_duration_days,
-            department_policy: policy
+            department_policy: policy,
+            is_staff: isStaffPatron
           },
           active_loans: activeBorrowedBooks,
           reservations: allReservations,
@@ -643,36 +690,45 @@ class CirculationController {
       }
 
       const policy = await CirculationController.resolveDepartmentPolicy(connection, student);
-      const isStaff = ['teacher', 'faculty', 'staff'].includes(student.role_name);
+      const isStaff = ['teacher', 'faculty', 'staff', 'librarian', 'admin', 'clerk'].includes(
+        String(student.role_name || student.role || '').toLowerCase()
+      ) || Boolean(policy.is_staff);
       const isDirectResearch = hasDirectResearchAccess(student) || policy.allow_direct_thesis_checkout;
       const maxLimit = policy.max_borrow_limit;
 
-      // Check current active checkouts
-      const [activeTx] = await connection.execute(
-        `SELECT COUNT(*) as count FROM book_transactions WHERE user_id = ? AND status = 'active'`,
-        [student.id]
-      );
-      if (activeTx[0].count >= maxLimit) {
-        await connection.rollback();
-        connection.release();
-        return res.status(400).json({
-          success: false,
-          message: `Cannot issue book: Patron has reached their maximum limit of ${maxLimit} borrowed items.`
-        });
+      // Check maximum count of books borrowed in a single month ONLY for students (Staff can borrow unlimited books)
+      if (!isStaff) {
+        const [monthTx] = await connection.execute(
+          `SELECT COUNT(*) as count FROM book_transactions 
+           WHERE user_id = ? 
+             AND MONTH(checkout_date) = MONTH(CURDATE()) 
+             AND YEAR(checkout_date) = YEAR(CURDATE())`,
+          [student.id]
+        );
+        if (monthTx[0].count >= maxLimit) {
+          await connection.rollback();
+          connection.release();
+          return res.status(400).json({
+            success: false,
+            message: `Cannot issue book: Student has reached their maximum limit of ${maxLimit} borrowed books for this month.`
+          });
+        }
       }
 
-      // Check overdue books
-      const [overdueRows] = await connection.execute(
-        `SELECT COUNT(*) as count FROM book_transactions WHERE user_id = ? AND status = 'active' AND due_date < CURDATE()`,
-        [student.id]
-      );
-      if (overdueRows[0].count > 0) {
-        await connection.rollback();
-        connection.release();
-        return res.status(400).json({
-          success: false,
-          message: `Cannot issue book: Patron has ${overdueRows[0].count} overdue book(s). Please return them first.`
-        });
+      // Check overdue books (staff is not blocked)
+      if (!isStaff) {
+        const [overdueRows] = await connection.execute(
+          `SELECT COUNT(*) as count FROM book_transactions WHERE user_id = ? AND status = 'active' AND due_date < CURDATE()`,
+          [student.id]
+        );
+        if (overdueRows[0].count > 0) {
+          await connection.rollback();
+          connection.release();
+          return res.status(400).json({
+            success: false,
+            message: `Cannot issue book: Student has ${overdueRows[0].count} overdue book(s). Please return them first.`
+          });
+        }
       }
 
       // Find book by book_id, accession_no, barcode, isbn, id, title, or rfid tag

@@ -15,7 +15,8 @@ import {
   Calendar,
   DollarSign,
   FileText,
-  HelpCircle
+  HelpCircle,
+  Info
 } from 'lucide-react';
 
 const AdminDepartmentSettings = () => {
@@ -212,6 +213,19 @@ const AdminDepartmentSettings = () => {
               rules from this matrix matching the student's department code and degree level (Undergraduate vs
               Postgraduate/Doctoral). The <code className="px-1 py-0.5 bg-indigo-100 rounded text-indigo-800 font-bold">DEFAULT</code> rule
               applies automatically to students whose department is not individually customized.
+            </p>
+          </div>
+        </div>
+
+        {/* Uniform Institutional Fine Notice */}
+        <div className="mt-3 p-4 rounded-xl bg-amber-50/70 border border-amber-200 flex items-start gap-3 text-xs text-amber-900">
+          <Info size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-bold text-amber-950">
+              Institution Fine Policy: Centralized & Department-Independent
+            </p>
+            <p className="text-amber-800 leading-relaxed">
+              Overdue fines are now computed uniformly across all students and are <strong>not based on department</strong>. Daily fine rates, maximum caps, and grace periods are configured centrally in <strong>Admin Workspace &rarr; Settings &rarr; Fine Rules</strong>. Staff and faculty members are 100% fine-exempt.
             </p>
           </div>
         </div>

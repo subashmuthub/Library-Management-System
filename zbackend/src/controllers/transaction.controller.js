@@ -866,23 +866,25 @@ class TransactionController {
     let connection;
     try {
       const transactionId = req.params.id;
-      // Accept both renewDays and renew_days for flexibility
-      const renewDays =
-        req.body.renewDays || req.body.renew_days || req.body.extend_days || 14;
       connection = await pool.getConnection();
 
-      // Check if renewal is allowed
+      // Check if renewal is allowed and fetch patron role & degree
       const [transaction] = await connection.execute(
         `
-                SELECT 
-                    bt.*,
-                    b.title,
-                    CONCAT(u.first_name, ' ', u.last_name) as user_name
-                FROM book_transactions bt
-                JOIN books b ON bt.book_id = b.id
-                JOIN users u ON bt.user_id = u.id
-                WHERE bt.id = ? AND bt.return_date IS NULL
-            `,
+          SELECT 
+            bt.*,
+            b.title,
+            CONCAT(u.first_name, ' ', u.last_name) as user_name,
+            u.degree_type,
+            u.role,
+            u.role_id,
+            COALESCE(ur.role_name, u.role) as role_name
+          FROM book_transactions bt
+          JOIN books b ON bt.book_id = b.id
+          JOIN users u ON bt.user_id = u.id
+          LEFT JOIN user_roles ur ON u.role_id = ur.id
+          WHERE bt.id = ? AND bt.return_date IS NULL
+        `,
         [transactionId],
       );
 
@@ -896,13 +898,38 @@ class TransactionController {
 
       const currentTransaction = transaction[0];
 
-      // Check renewal limits (handle both renewed_count and renewal_count)
-      const maxRenewals = 2; // From library settings
+      // Determine patron category
+      const isStaff = ['teacher', 'faculty', 'staff', 'librarian', 'admin', 'clerk'].includes(
+        String(currentTransaction.role_name || currentTransaction.role || '').toLowerCase()
+      );
+      const degreeRaw = String(currentTransaction.degree_type || '').toUpperCase();
+      const isPG = ['ME', 'M.E.', 'MTECH', 'M.TECH', 'PHD', 'PH.D', 'RESEARCH', 'RESEARCH_SCHOLAR', 'PG', 'MS'].some(
+        d => degreeRaw.includes(d)
+      ) || ['me_student', 'research_scholar'].includes(String(currentTransaction.role_name || currentTransaction.role || '').toLowerCase());
+
+      // Fetch dynamic settings from library_settings
+      let renewDaysUG = 14;
+      let renewDaysPG = 21;
+      let maxRenewals = 2;
+      try {
+        const [settingsRows] = await connection.execute(
+          `SELECT setting_key, setting_value FROM library_settings WHERE setting_key IN ('renew_days_ug', 'renew_days_pg', 'max_renewal_count')`
+        );
+        settingsRows.forEach(s => {
+          if (s.setting_key === 'renew_days_ug') renewDaysUG = Number(s.setting_value) || 14;
+          if (s.setting_key === 'renew_days_pg') renewDaysPG = Number(s.setting_value) || 21;
+          if (s.setting_key === 'max_renewal_count') maxRenewals = Number(s.setting_value) || 2;
+        });
+      } catch (sErr) {
+        // Fallback to defaults
+      }
+
+      // Check renewal limits for students (staff has unlimited renewals)
       const renewedCount =
         currentTransaction.renewed_count ||
         currentTransaction.renewal_count ||
         0;
-      if (renewedCount >= maxRenewals) {
+      if (!isStaff && renewedCount >= maxRenewals) {
         connection.release();
         return res.status(400).json({
           success: false,
@@ -913,10 +940,10 @@ class TransactionController {
       // Check if book is reserved by someone else
       const [reservations] = await connection.execute(
         `
-                SELECT COUNT(*) as count
-                FROM reservations
-                WHERE book_id = ? AND status = 'active' AND user_id != ?
-            `,
+          SELECT COUNT(*) as count
+          FROM reservations
+          WHERE book_id = ? AND status = 'active' AND user_id != ?
+        `,
         [currentTransaction.book_id, currentTransaction.user_id],
       );
 
@@ -928,9 +955,27 @@ class TransactionController {
         });
       }
 
-      // Perform renewal
-      const newDueDate = new Date();
-      newDueDate.setDate(newDueDate.getDate() + getParsedInt(renewDays, 14));
+      // Determine applied renew days (Explicit body parameter or UG/PG settings)
+      let effectiveRenewDays = req.body.renewDays || req.body.renew_days || req.body.extend_days;
+      if (!effectiveRenewDays) {
+        if (isStaff) {
+          effectiveRenewDays = 30;
+        } else if (isPG) {
+          effectiveRenewDays = renewDaysPG;
+        } else {
+          effectiveRenewDays = renewDaysUG;
+        }
+      }
+      effectiveRenewDays = getParsedInt(effectiveRenewDays, isPG ? 21 : 14);
+
+      // Perform renewal starting from today (or existing due date if in the future)
+      const baseDate = new Date();
+      if (currentTransaction.due_date && new Date(currentTransaction.due_date) > baseDate) {
+        baseDate.setTime(new Date(currentTransaction.due_date).getTime());
+      }
+      const newDueDate = new Date(baseDate);
+      newDueDate.setDate(newDueDate.getDate() + effectiveRenewDays);
+
       await updateRenewalWithCompatibility(
         connection,
         newDueDate.toISOString().split("T")[0],
@@ -940,16 +985,16 @@ class TransactionController {
       // Get updated transaction
       const [updatedTransaction] = await connection.execute(
         `
-                SELECT 
-                    bt.*,
-                    CONCAT(u.first_name, ' ', u.last_name) as user_name,
-                    b.title,
-                    b.author
-                FROM book_transactions bt
-                JOIN users u ON bt.user_id = u.id
-                JOIN books b ON bt.book_id = b.id
-                WHERE bt.id = ?
-            `,
+          SELECT 
+            bt.*,
+            CONCAT(u.first_name, ' ', u.last_name) as user_name,
+            b.title,
+            b.author
+          FROM book_transactions bt
+          JOIN users u ON bt.user_id = u.id
+          JOIN books b ON bt.book_id = b.id
+          WHERE bt.id = ?
+        `,
         [transactionId],
       );
 
@@ -957,9 +1002,12 @@ class TransactionController {
 
       res.json({
         success: true,
-        message: "Book renewed successfully",
+        message: `Book renewed successfully (+${effectiveRenewDays} days for ${isStaff ? 'Staff' : (isPG ? 'PG Student' : 'UG Student')})`,
         transaction: updatedTransaction[0],
         new_due_date: newDueDate.toISOString().split("T")[0],
+        applied_days: effectiveRenewDays,
+        is_pg: isPG,
+        is_staff: isStaff
       });
     } catch (error) {
       if (connection) {

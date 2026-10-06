@@ -445,24 +445,45 @@ class FineController {
         }
     }
 
-    // Calculate fine for overdue book manually
+    // Calculate fine for overdue book manually (Uniform institutional policy, not based on department)
     static async calculateFine(req, res) {
         try {
             const { transactionId } = req.params;
             const { fine_rate } = req.body;
             const connection = await pool.getConnection();
 
-            // Get transaction details
+            // Load institutional fine settings
+            let defaultDailyRate = 2.00;
+            let maxFineCap = 100.00;
+            let gracePeriod = 0;
+            try {
+                const [settings] = await connection.query(
+                    `SELECT setting_key, setting_value FROM library_settings WHERE setting_key IN ('daily_fine_rate', 'max_fine_amount', 'fine_grace_period_days')`
+                );
+                settings.forEach(s => {
+                    if (s.setting_key === 'daily_fine_rate') defaultDailyRate = parseFloat(s.setting_value) || 2.00;
+                    if (s.setting_key === 'max_fine_amount') maxFineCap = parseFloat(s.setting_value) || 100.00;
+                    if (s.setting_key === 'fine_grace_period_days') gracePeriod = parseInt(s.setting_value, 10) || 0;
+                });
+            } catch (sErr) {
+                // Fallback
+            }
+
+            // Get transaction details with user role
             const [transactions] = await connection.query(`
                 SELECT 
                     bt.*,
                     b.title,
                     b.author,
                     CONCAT(u.first_name, ' ', u.last_name) as user_name,
+                    u.role,
+                    u.role_id,
+                    COALESCE(ur.role_name, u.role) as role_name,
                     DATEDIFF(COALESCE(bt.return_date, CURDATE()), bt.due_date) as days_overdue
                 FROM book_transactions bt
                 JOIN books b ON bt.book_id = b.id
                 JOIN users u ON bt.user_id = u.id
+                LEFT JOIN user_roles ur ON u.role_id = ur.id
                 WHERE bt.id = ?
             `, [transactionId]);
 
@@ -472,9 +493,23 @@ class FineController {
             }
 
             const transaction = transactions[0];
+            const isStaff = ['teacher', 'faculty', 'staff', 'librarian', 'admin', 'clerk'].includes(
+                String(transaction.role_name || transaction.role || '').toLowerCase()
+            );
+
             const daysOverdue = Math.max(0, transaction.days_overdue);
-            const ratePerDay = fine_rate ? parseFloat(fine_rate) : 1.00;
-            const calculatedFine = daysOverdue * ratePerDay;
+            const ratePerDay = fine_rate ? parseFloat(fine_rate) : defaultDailyRate;
+
+            let calculatedFine = 0;
+            if (isStaff) {
+                calculatedFine = 0;
+            } else {
+                const billableDays = Math.max(0, daysOverdue - gracePeriod);
+                calculatedFine = billableDays * ratePerDay;
+                if (maxFineCap > 0) {
+                    calculatedFine = Math.min(maxFineCap, calculatedFine);
+                }
+            }
 
             if (daysOverdue <= 0) {
                 connection.release();
@@ -501,7 +536,11 @@ class FineController {
                 return_date: transaction.return_date,
                 days_overdue: daysOverdue,
                 fine_rate: ratePerDay,
+                grace_period: gracePeriod,
+                max_fine_cap: maxFineCap,
+                is_staff: isStaff,
                 calculated_fine: calculatedFine,
+                note: isStaff ? 'Faculty/Staff exempt from fines' : 'Uniform student fine rate applied',
                 existing_fine: existingFines.length > 0 ? existingFines[0] : null
             });
 

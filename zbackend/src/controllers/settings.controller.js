@@ -5,7 +5,7 @@ class SettingsController {
   static async getAllSettings(req, res) {
     try {
       const connection = await pool.getConnection();
-      const [settings] = await connection.execute('SELECT * FROM library_settings ORDER BY category, setting_key');
+      const [settings] = await connection.execute('SELECT * FROM library_settings ORDER BY category, id');
       connection.release();
 
       // Group by category
@@ -19,6 +19,19 @@ class SettingsController {
           type: curr.data_type,
           id: curr.id
         };
+
+        // Also aggregate circulation and fines under 'library' for the clean Library Rules tab
+        if (curr.category === 'circulation' || curr.category === 'fines') {
+          if (!acc['library']) {
+            acc['library'] = {};
+          }
+          acc['library'][curr.setting_key] = {
+            value: curr.setting_value,
+            description: curr.description,
+            type: curr.data_type,
+            id: curr.id
+          };
+        }
         return acc;
       }, {});
 
@@ -88,10 +101,28 @@ class SettingsController {
       await connection.beginTransaction();
 
       for (const item of settingsData) {
-        await connection.execute(
-          'UPDATE library_settings SET setting_value = ? WHERE setting_key = ?',
-          [item.value.toString(), item.key]
+        if (!item || !item.key) continue;
+        const valStr = item.value !== undefined && item.value !== null ? String(item.value).trim() : '';
+
+        // If setting exists, update it. If not, insert it
+        const [existing] = await connection.execute(
+          'SELECT id FROM library_settings WHERE setting_key = ? LIMIT 1',
+          [item.key]
         );
+
+        if (existing.length > 0) {
+          await connection.execute(
+            'UPDATE library_settings SET setting_value = ? WHERE setting_key = ?',
+            [valStr, item.key]
+          );
+        } else {
+          const category = item.category || 'general';
+          const dataType = item.type || (typeof item.value === 'number' ? 'number' : 'string');
+          await connection.execute(
+            'INSERT INTO library_settings (setting_key, setting_value, category, data_type) VALUES (?, ?, ?, ?)',
+            [item.key, valStr, category, dataType]
+          );
+        }
       }
 
       await connection.commit();
@@ -104,6 +135,23 @@ class SettingsController {
     } catch (error) {
       console.error('Error updating settings:', error);
       res.status(500).json({ success: false, error: 'Failed to update settings' });
+    }
+  }
+
+  // Static helper to get setting value
+  static async getSetting(key, defaultValue = null) {
+    try {
+      const [rows] = await pool.query(
+        'SELECT setting_value, data_type FROM library_settings WHERE setting_key = ? LIMIT 1',
+        [key]
+      );
+      if (rows.length === 0) return defaultValue;
+      const { setting_value, data_type } = rows[0];
+      if (data_type === 'number') return Number(setting_value);
+      if (data_type === 'boolean') return setting_value === 'true' || setting_value === '1';
+      return setting_value;
+    } catch (err) {
+      return defaultValue;
     }
   }
 }
